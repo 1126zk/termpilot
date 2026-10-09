@@ -99,6 +99,7 @@ export default function App() {
     ? editorTabs.filter((t) => t.sessionId === activeTab.sessionId)
     : []
   const currentFile = fileTabs.find((t) => t.key === remoteEditor) ?? null
+  const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
 
   return (
     <TooltipProvider>
@@ -118,6 +119,7 @@ export default function App() {
               )}
             </div>
           </SidebarInset>
+          {rightPanelOpen && <div className="w-64 shrink-0 border-l bg-sidebar" />}
         </div>
         <SessionForm />
         <SettingsDialog />

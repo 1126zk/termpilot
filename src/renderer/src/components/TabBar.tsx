@@ -1,7 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Apple, Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelLeft, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Apple, Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelLeft, PanelRight, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
@@ -31,7 +30,7 @@ const noDrag = { WebkitAppRegion: 'no-drag' } as CSSProperties
 /** 最大化状态下「还原」的图标：两个叠着的方块。lucide 没有现成的，画一个。 */
 function RestoreIcon() {
   return (
-    <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.75">
+    <svg viewBox="0 0 16 16" className="size-5" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1" />
       <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
     </svg>
@@ -42,7 +41,7 @@ function RestoreIcon() {
 function OsIcon(props: { os?: OsKind }) {
   if (props.os === 'windows') {
     return (
-      <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor">
+      <svg viewBox="0 0 16 16" className="size-4 shrink-0" fill="currentColor">
         <rect x="2" y="2" width="5.5" height="5.5" rx="0.5" />
         <rect x="8.5" y="2" width="5.5" height="5.5" rx="0.5" />
         <rect x="2" y="8.5" width="5.5" height="5.5" rx="0.5" />
@@ -50,24 +49,26 @@ function OsIcon(props: { os?: OsKind }) {
       </svg>
     )
   }
-  if (props.os === 'macos') return <Apple className="size-3.5 shrink-0" strokeWidth={1.75} />
+  if (props.os === 'macos') return <Apple className="size-4 shrink-0" strokeWidth={2} />
   if (props.os === 'linux') {
     return (
-      <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor" fillRule="evenodd">
+      <svg viewBox="0 0 16 16" className="size-4 shrink-0" fill="currentColor" fillRule="evenodd">
         <path d="M8 2.2c-2.5 0-4.2 2.4-4.2 5.6 0 2 .7 3.6 1.7 4.5-.4.2-.9.6-.9 1 0 .5.8.7 1.6.5.6-.1 1.1-.4 1.8-.4s1.2.3 1.8.4c.8.2 1.6 0 1.6-.5 0-.4-.5-.8-.9-1 1-.9 1.7-2.5 1.7-4.5C11.2 4.6 10.5 2.2 8 2.2Z M5.6 7.1a0.7 0.7 0 1 0 1.4 0 0.7 0.7 0 1 0-1.4 0Z M9 7.1a0.7 0.7 0 1 0 1.4 0 0.7 0.7 0 1 0-1.4 0Z M7.2 7.9h1.6L8 9.2Z" />
       </svg>
     )
   }
-  return <Server className="size-3.5 shrink-0" strokeWidth={1.75} />
+  return <Server className="size-4 shrink-0" strokeWidth={2} />
 }
 
 /** 顶栏所有图标按钮的统一规格：一样的高宽、颜色、hover。 */
 const topBtn =
-  'flex h-7 w-12 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
+  'flex h-9 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
-/** 自绘窗口控制按钮：最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。 */
+/** 自绘窗口控制按钮：右侧面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。 */
 function WindowControls() {
   const [maximized, setMaximized] = useState(false)
+  const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
+  const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
 
   useEffect(() => {
     void window.api.win.isMaximized().then(setMaximized)
@@ -76,8 +77,16 @@ function WindowControls() {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5 pl-1" style={noDrag}>
+      <button
+        type="button"
+        className={cn(topBtn, rightPanelOpen && 'bg-accent text-foreground')}
+        title="右侧面板"
+        onClick={toggleRightPanel}
+      >
+        <PanelRight className="size-5" strokeWidth={2} />
+      </button>
       <button type="button" className={topBtn} title="最小化" onClick={() => void window.api.win.minimize()}>
-        <Minus className="size-4" strokeWidth={1.75} />
+        <Minus className="size-5" strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -85,10 +94,10 @@ function WindowControls() {
         title={maximized ? '还原' : '最大化'}
         onClick={() => void window.api.win.toggleMaximize()}
       >
-        {maximized ? <RestoreIcon /> : <Square className="size-3.5" strokeWidth={1.75} />}
+        {maximized ? <RestoreIcon /> : <Square className="size-4" strokeWidth={2} />}
       </button>
       <button type="button" className={topBtn} title="关闭" onClick={() => void window.api.win.close()}>
-        <X className="size-4" strokeWidth={1.75} />
+        <X className="size-5" strokeWidth={2} />
       </button>
     </div>
   )
@@ -168,7 +177,7 @@ export function TabBar() {
   return (
     <>
     <div
-      className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2"
+      className="flex h-12 shrink-0 items-center gap-1 border-b bg-background px-2"
       style={drag}
       onDoubleClick={(e) => {
         // 标题栏空白处双击 = 最大化/还原（点到的必须是我们这个行本身，不是里面的控件）
@@ -176,11 +185,11 @@ export function TabBar() {
       }}
     >
       <button type="button" className={topBtn} style={noDrag} title="收纳侧边栏" onClick={toggleSidebar}>
-        <PanelLeft className="size-4" strokeWidth={1.75} />
+        <PanelLeft className="size-5" strokeWidth={2} />
       </button>
       {overflowing && (
         <button type="button" className={topBtn} style={noDrag} disabled={!canLeft} onClick={() => scrollStrip(-1)}>
-          <ChevronLeft className="size-4" strokeWidth={1.75} />
+          <ChevronLeft className="size-5" strokeWidth={2} />
         </button>
       )}
       <div
@@ -213,11 +222,13 @@ export function TabBar() {
               )}
             <ContextMenu>
               <ContextMenuTrigger asChild>
-                <Button
-                  variant={active ? 'secondary' : 'ghost'}
-                  size="sm"
+                <button
+                  type="button"
                   data-active={active || undefined}
-                  className="max-w-48 min-w-0 shrink-0 overflow-hidden"
+                  className={cn(
+                    'group/tab flex h-9 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent',
+                    active && 'bg-accent'
+                  )}
                   style={noDrag}
                   title={t.remark?.trim() || undefined}
                   onClick={() => setActiveTab(t.id)}
@@ -226,23 +237,28 @@ export function TabBar() {
                     setRenamingId(t.id)
                   }}
                 >
-                  {active ? (
+                  {/* 平时是系统图标；悬停标签或标签被选中时变成叉；悬停叉本身时叉变红并带小方框 */}
+                  <span className="flex size-5 shrink-0 items-center justify-center">
+                    <span className={cn('items-center justify-center', active ? 'hidden' : 'flex group-hover/tab:hidden')}>
+                      <OsIcon os={t.os} />
+                    </span>
                     <span
                       role="button"
                       title="关闭"
-                      className="shrink-0 rounded-sm opacity-70 hover:opacity-100"
+                      className={cn(
+                        'size-5 items-center justify-center rounded-[4px] hover:bg-muted-foreground/20 hover:text-destructive',
+                        active ? 'flex' : 'hidden group-hover/tab:flex'
+                      )}
                       onClick={(e) => {
                         e.stopPropagation()
                         closeTab(t.id)
                       }}
                     >
-                      <X strokeWidth={1.75} />
+                      <X strokeWidth={2} />
                     </span>
-                  ) : (
-                    <OsIcon os={t.os} />
-                  )}
+                  </span>
                   <span className="min-w-0 truncate">{windowLabel(t.title, session?.name)}</span>
-                </Button>
+                </button>
               </ContextMenuTrigger>
               <ContextMenuContent>
                 <ContextMenuItem
@@ -265,7 +281,7 @@ export function TabBar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className={cn(topBtn, 'shrink-0')} style={noDrag} title="新建终端">
-              <Plus className="size-4" strokeWidth={1.75} />
+              <Plus className="size-5" strokeWidth={2} />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -285,7 +301,7 @@ export function TabBar() {
       </div>
       {overflowing && (
         <button type="button" className={topBtn} style={noDrag} disabled={!canRight} onClick={() => scrollStrip(1)}>
-          <ChevronRight className="size-4" strokeWidth={1.75} />
+          <ChevronRight className="size-5" strokeWidth={2} />
         </button>
       )}
       <button
@@ -296,7 +312,7 @@ export function TabBar() {
         disabled={!activeTabId}
         onClick={() => shoot('viewport')}
       >
-        <Camera className="size-4" strokeWidth={1.75} />
+        <Camera className="size-5" strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -306,7 +322,7 @@ export function TabBar() {
         disabled={!activeTabId}
         onClick={() => shoot('scrollback')}
       >
-        <GalleryVertical className="size-4" strokeWidth={1.75} />
+        <GalleryVertical className="size-5" strokeWidth={2} />
       </button>
       {window.api.platform === 'win32' && <WindowControls />}
     </div>
