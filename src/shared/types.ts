@@ -1,9 +1,18 @@
 import type { SshConnectOptions } from './ssh-options'
 
-/** 认证方式（仅正向 SSH） */
-export type AuthType = 'password' | 'key'
+export type ForwardType = 'local' | 'remote'
 
-/** 会话配置：一条正向 SSH 连接（secret 不落盘在本结构里，单独加密存储） */
+/**
+ * 一条端口映射规则。local 对应 ssh -L，remote 对应 ssh -R。
+ * IP 不写死进配置：监听和另一头都固定 127.0.0.1，用户只填端口。
+ */
+export interface ForwardRule {
+  type: ForwardType
+  listenPort: number
+  targetPort: number
+}
+
+/** 会话配置：一条正向 SSH 连接（secret 不落盘在本结构里，单独加密存储）。认证只用密码。 */
 export interface SessionConfig {
   id: string
   /** 助手用来查找的编号，conn- 开头。改名不换。 */
@@ -14,11 +23,8 @@ export interface SessionConfig {
   host: string
   port: number
   username: string
-  authType: AuthType
-  /** 私钥路径（authType = key 时） */
-  keyPath?: string
   remark?: string
-  /** 是否已保存加密凭据（密码 / 私钥口令） */
+  /** 是否已保存加密凭据（密码） */
   hasSecret: boolean
   /** ssh -J 跳板。空表示直接连接。 */
   jumpHost?: string
@@ -27,6 +33,8 @@ export interface SessionConfig {
   hasJumpSecret: boolean
   /** 命令里带的超时、算法、多跳、ProxyCommand。 */
   sshOptions?: SshConnectOptions
+  /** 端口映射规则，连接建立后挂在共享 SSH 连接上 */
+  forwards?: ForwardRule[]
   createdAt: number
   updatedAt: number
 }
@@ -38,10 +46,8 @@ export interface SessionInput {
   host: string
   port: number
   username: string
-  authType: AuthType
-  keyPath?: string
   remark?: string
-  /** 明文密码或私钥口令；undefined 表示不修改 */
+  /** 明文密码；undefined 表示不修改 */
   secret?: string
   /** 跳板。空字符串表示不经过跳板。 */
   jumpHost?: string
@@ -51,6 +57,8 @@ export interface SessionInput {
   jumpSecret?: string
   /** 连接选项。undefined 表示不修改，null 表示清掉。 */
   sshOptions?: SshConnectOptions | null
+  /** 端口映射。undefined 表示不修改，否则整体替换（空数组表示清掉）。 */
+  forwards?: ForwardRule[]
 }
 
 export type SessionStatus = 'disconnected' | 'connecting' | 'connected'

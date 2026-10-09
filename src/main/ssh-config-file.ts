@@ -18,7 +18,6 @@ export interface SshHostFields {
   hostName: string
   port: number
   username: string
-  identityFiles: string[]
   jumps: SshHopFields[]
   proxyCommand?: string
 }
@@ -101,14 +100,6 @@ export function listConfigAliases(): Set<string> {
   return new Set(readConcreteHosts(readFileSync(sshConfigPath(), 'utf8')).map((host) => host.alias))
 }
 
-export function homeRelative(path: string): string {
-  const home = homedir().replace(/\\/g, '/')
-  const norm = path.replace(/\\/g, '/')
-  if (norm === home) return '~'
-  if (norm.startsWith(`${home}/`)) return `~${norm.slice(home.length)}`
-  return path
-}
-
 export function localUsername(): string {
   try {
     return userInfo().username
@@ -166,7 +157,6 @@ function fieldsOf(lines: string[]): SshHostFields {
   const values = keywords(lines)
   const hostLine = lines.map(directiveOf).find((item) => item?.key === 'host')
   const alias = hostLine?.value.split(/\s+/)[0] ?? ''
-  const identityFiles = values.filter((item) => item.key === 'identityfile').map((item) => item.value)
   const proxy = values.find((item) => item.key === 'proxyjump')?.value
   const command = values.find((item) => item.key === 'proxycommand')?.value
   const port = numberOr(values.find((item) => item.key === 'port')?.value, 22)
@@ -174,7 +164,6 @@ function fieldsOf(lines: string[]): SshHostFields {
     hostName: values.find((item) => item.key === 'hostname')?.value || alias,
     port,
     username: values.find((item) => item.key === 'user')?.value || localUsername(),
-    identityFiles,
     jumps: proxy && proxy.toLowerCase() !== 'none' ? parseJumps(proxy) : [],
     proxyCommand: command && command.toLowerCase() !== 'none' ? command : undefined
   }
@@ -190,8 +179,6 @@ function applyFields(lines: string[], alias: string, fields: SshHostFields): str
   setKeyword(next, 'hostname', fields.hostName)
   setKeyword(next, 'user', fields.username)
   setKeyword(next, 'port', fields.port === 22 ? null : String(fields.port))
-  setKeyword(next, 'identityfile', null)
-  for (const file of fields.identityFiles) insertKeyword(next, 'identityfile', file)
   setKeyword(next, 'proxyjump', fields.jumps.length > 0 ? fields.jumps.map(formatHop).join(',') : null)
   setKeyword(next, 'proxycommand', fields.proxyCommand ?? null)
   return next
@@ -305,7 +292,6 @@ function canonical(key: string): string {
     hostname: 'HostName',
     user: 'User',
     port: 'Port',
-    identityfile: 'IdentityFile',
     proxyjump: 'ProxyJump',
     proxycommand: 'ProxyCommand'
   }

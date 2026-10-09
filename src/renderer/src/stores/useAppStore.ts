@@ -342,8 +342,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       host: session.host,
       port: session.port,
       username: session.username,
-      authType: session.authType,
-      keyPath: session.keyPath,
       remark: text,
       jumpHost: session.jumpHost ?? '',
       jumpPort: session.jumpPort,

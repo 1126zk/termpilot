@@ -7,7 +7,7 @@ description: >-
 
 # TermPilot
 
-TermPilot 是本机 SSH 终端。用户与 Agent 使用同一套已保存连接。密码和私钥口令只保存在 TermPilot 中。不要向用户索取，也不要写入回复。
+TermPilot 是本机 SSH 终端。用户与 Agent 使用同一套已保存连接，认证只用密码。密码只保存在 TermPilot 中。不要向用户索取，也不要写入回复。
 
 ## 安装
 
@@ -52,7 +52,7 @@ termpilot call term_exec --json-file args.json --json
 
 查找只使用编号。`conn-` 是连接，`term-` 是终端。名称和备注只用于识别，不能作为参数。确认用途后写入备注：连接使用 `connection_update` 的 `remark`，终端使用 `term_update`。
 
-正向连接会和本机 `~/.ssh/config` 里的具体 `Host` 对齐。改主机、端口、用户、私钥或跳板时，配置文件里的对应字段一起变。密码和备注不写入该文件。带通配符的 `Host` 和 `Match` 不会导入。
+正向连接会和本机 `~/.ssh/config` 里的具体 `Host` 对齐。改主机、端口、用户或跳板时，配置文件里的对应字段一起变。密码和备注不写入该文件。带通配符的 `Host` 和 `Match` 不会导入。
 
 先调用 `connection_list` 或 `term_list`。列表包含编号、名称、备注和 `status`。`connection_open`、`connection_close`、`connection_update`、`connection_delete`、`term_exec` 以及 `sftp_*` 的 `connection` 填写 `conn-` 编号。`term_pty`、`term_write`、`term_read`、`term_reconnect`、`term_close`、`term_lines` 和截图的 `termId` 填写 `term-` 编号。
 

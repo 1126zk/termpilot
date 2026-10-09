@@ -7,7 +7,7 @@ import {
   MCP_DEFAULT_PORT,
   MCP_HOST,
   type Appearance,
-  type AuthType,
+  type ForwardRule,
   type McpAuditEntry,
   type McpSettings,
   type McpSettingsInput,
@@ -19,7 +19,6 @@ import { hostKeyOf } from '../../shared/host-key'
 import { newConnId } from '../../shared/ids'
 import { sanitizeSshOptions, type SshConnectOptions } from '../../shared/ssh-options'
 import {
-  homeRelative,
   listConfigAliases,
   localUsername,
   readConcreteHosts,
@@ -32,7 +31,7 @@ import {
 
 /**
  * 会话存储：userData/termpilot.db（Node 内置 SQLite，WAL）+ safeStorage。
- * 密码和私钥口令只以密文写入 secret_encrypted，明文只活在单次连接的内存里。
+ * 密码只以密文写入 secret_encrypted，明文只活在单次连接的内存里。
  * 旧的 sessions.json 在第一次打开数据库时导入，然后改名为 sessions.json.migrated。
  */
 export class StorageService {
@@ -90,6 +89,7 @@ export class StorageService {
     this.ensureColumn('sessions', 'ssh_options', 'TEXT')
     this.ensureColumn('sessions', 'public_id', 'TEXT')
     this.ensureColumn('sessions', 'config_host', 'TEXT')
+    this.ensureColumn('sessions', 'forwards', 'TEXT')
     this.dropRemovedKinds()
     this.backfillPublicIds()
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id)')
@@ -123,7 +123,13 @@ export class StorageService {
       'CREATE UNIQUE INDEX IF NOT EXISTS sessions_config_host ON sessions(config_host) WHERE config_host IS NOT NULL'
     )
     this.importLegacyJson(join(dir, 'sessions.json'))
+    this.dropKeyAuth()
     this.importSshConfig()
+  }
+
+  /** 私钥认证已移除。老库里的私钥会话转成密码登录；原来存的是私钥口令，不能当密码用，清掉让用户重填。 */
+  private dropKeyAuth(): void {
+    this.db.exec("UPDATE sessions SET auth_type = 'password', key_path = NULL, secret_encrypted = NULL WHERE auth_type = 'key'")
   }
 
   private backfillPublicIds(): void {
@@ -222,8 +228,8 @@ export class StorageService {
         `INSERT INTO sessions (
           id, public_id, name, group_name, mode, host, port, username, auth_type,
           key_path, remark, secret_encrypted, created_at, updated_at,
-          jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options
-        ) VALUES (?, ?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
+        ) VALUES (?, ?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -233,8 +239,8 @@ export class StorageService {
         input.host,
         input.port,
         input.username,
-        input.authType,
-        input.keyPath ?? null,
+        'password',
+        null,
         input.remark ?? null,
         this.encryptSecret(input.secret) ?? null,
         now,
@@ -243,7 +249,8 @@ export class StorageService {
         input.jumpHost?.trim() ? (input.jumpPort ?? 22) : null,
         input.jumpHost?.trim() ? input.jumpUsername?.trim() || null : null,
         input.jumpHost?.trim() ? (this.encryptSecret(input.jumpSecret) ?? null) : null,
-        encodeOptions(input.sshOptions)
+        encodeOptions(input.sshOptions),
+        encodeForwards(input.forwards)
       )
     const saved = this.require(id)
     this.publishSsh(id)
@@ -253,7 +260,7 @@ export class StorageService {
   update(id: string, patch: SessionInput): SessionConfig | null {
     const existing = this.db
       .prepare(
-        'SELECT id, secret_encrypted, jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options FROM sessions WHERE id = ?'
+        'SELECT id, secret_encrypted, jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards FROM sessions WHERE id = ?'
       )
       .get(id)
     if (!existing) return null
@@ -270,6 +277,7 @@ export class StorageService {
     const jumpPort = patch.jumpPort ?? optionalInteger(existing.jump_port) ?? 22
     const jumpUsername = (patch.jumpUsername !== undefined ? patch.jumpUsername : text(existing.jump_username)).trim()
     const sshOptions = patch.sshOptions === undefined ? (existing.ssh_options ?? null) : encodeOptions(patch.sshOptions)
+    const forwards = patch.forwards === undefined ? (existing.forwards ?? null) : encodeForwards(patch.forwards)
     this.db
       .prepare(
         `UPDATE sessions SET
@@ -277,7 +285,7 @@ export class StorageService {
           auth_type = ?, key_path = ?, remark = ?,
           secret_encrypted = ?, updated_at = ?,
           jump_host = ?, jump_port = ?, jump_username = ?, jump_secret_encrypted = ?,
-          ssh_options = ?
+          ssh_options = ?, forwards = ?
         WHERE id = ?`
       )
       .run(
@@ -286,8 +294,8 @@ export class StorageService {
         patch.host,
         patch.port,
         patch.username,
-        patch.authType,
-        patch.keyPath ?? null,
+        'password',
+        null,
         patch.remark ?? null,
         secret,
         Date.now(),
@@ -296,6 +304,7 @@ export class StorageService {
         jumpHost ? jumpUsername || null : null,
         jumpSecret,
         sshOptions,
+        forwards,
         id
       )
     const saved = this.require(id)
@@ -384,8 +393,8 @@ export class StorageService {
         `INSERT INTO sessions (
           id, public_id, name, group_name, mode, host, port, username, auth_type,
           key_path, remark, secret_encrypted, created_at, updated_at,
-          jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options
-        ) VALUES (?, ?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
+        ) VALUES (?, ?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         newId,
@@ -395,8 +404,8 @@ export class StorageService {
         text(row.host),
         integer(row.port, 22),
         text(row.username),
-        row.auth_type === 'password' ? 'password' : 'key',
-        optionalText(row.key_path) ?? null,
+        'password',
+        null,
         optionalText(row.remark) ?? null,
         typeof row.secret_encrypted === 'string' ? row.secret_encrypted : null,
         now,
@@ -405,7 +414,8 @@ export class StorageService {
         optionalInteger(row.jump_port) ?? null,
         optionalText(row.jump_username) ?? null,
         typeof row.jump_secret_encrypted === 'string' ? row.jump_secret_encrypted : null,
-        typeof row.ssh_options === 'string' ? row.ssh_options : null
+        typeof row.ssh_options === 'string' ? row.ssh_options : null,
+        typeof row.forwards === 'string' ? row.forwards : null
       )
     const saved = this.require(newId)
     this.publishSsh(newId)
@@ -530,7 +540,6 @@ export class StorageService {
   }
 
   private toPublic(row: Record<string, SQLOutputValue>): SessionConfig {
-    const auth = row.auth_type === 'password' ? 'password' : 'key'
     return {
       id: text(row.id),
       publicId: text(row.public_id),
@@ -539,8 +548,6 @@ export class StorageService {
       host: text(row.host),
       port: integer(row.port, 22),
       username: text(row.username),
-      authType: auth satisfies AuthType,
-      keyPath: optionalText(row.key_path),
       remark: optionalText(row.remark),
       hasSecret: typeof row.secret_encrypted === 'string' && row.secret_encrypted.length > 0,
       jumpHost: optionalText(row.jump_host),
@@ -548,6 +555,7 @@ export class StorageService {
       jumpUsername: optionalText(row.jump_username),
       hasJumpSecret: typeof row.jump_secret_encrypted === 'string' && row.jump_secret_encrypted.length > 0,
       sshOptions: decodeOptions(row.ssh_options),
+      forwards: decodeForwards(row.forwards),
       createdAt: integer(row.created_at, 0),
       updatedAt: integer(row.updated_at, 0)
     }
@@ -597,7 +605,6 @@ export class StorageService {
   }
 
   private insertConfig(alias: string, fields: SshHostFields): void {
-    const [keyPath, ...rest] = fields.identityFiles
     const [jump, ...extra] = fields.jumps
     const session = this.create({
       name: this.uniqueName(alias),
@@ -605,13 +612,11 @@ export class StorageService {
       host: fields.hostName,
       port: fields.port,
       username: fields.username || localUsername(),
-      authType: keyPath ? 'key' : 'password',
-      keyPath,
       remark: '',
       jumpHost: jump?.host ?? '',
       jumpPort: jump?.port,
       jumpUsername: jump?.username,
-      sshOptions: configOptions(rest, extra, fields.proxyCommand)
+      sshOptions: configOptions(extra, fields.proxyCommand)
     })
     this.db.prepare('UPDATE sessions SET config_host = ? WHERE id = ?').run(alias, session.id)
   }
@@ -619,7 +624,6 @@ export class StorageService {
   private applyConfig(id: string, fields: SshHostFields): void {
     const row = this.db.prepare('SELECT ssh_options, jump_host, jump_secret_encrypted FROM sessions WHERE id = ?').get(id)
     if (!row) return
-    const [keyPath, ...rest] = fields.identityFiles
     const [jump, ...extra] = fields.jumps
     const previousJump = optionalText(row.jump_host) ?? ''
     const jumpHost = jump?.host ?? ''
@@ -627,7 +631,7 @@ export class StorageService {
     this.db
       .prepare(
         `UPDATE sessions SET
-          host = ?, port = ?, username = ?, auth_type = ?, key_path = ?,
+          host = ?, port = ?, username = ?,
           jump_host = ?, jump_port = ?, jump_username = ?, jump_secret_encrypted = ?,
           ssh_options = ?, updated_at = ?
         WHERE id = ?`
@@ -636,13 +640,11 @@ export class StorageService {
         fields.hostName,
         fields.port,
         fields.username || localUsername(),
-        keyPath ? 'key' : 'password',
-        keyPath ?? null,
         jumpHost || null,
         jumpHost ? (jump?.port ?? 22) : null,
         jumpHost ? jump?.username || null : null,
         keepSecret ? (row.jump_secret_encrypted ?? null) : null,
-        encodeOptions(configOptions(rest, extra, fields.proxyCommand, decodeOptions(row.ssh_options))),
+        encodeOptions(configOptions(extra, fields.proxyCommand, decodeOptions(row.ssh_options))),
         Date.now(),
         id
       )
@@ -720,7 +722,8 @@ export class StorageService {
         // 旧 JSON 里的反向监听配置不再支持，跳过
         if (row.mode === 'reverse') continue
         const now = Date.now()
-        const auth = row.authType === 'password' ? 'password' : 'key'
+        // 私钥认证已移除：私钥会话转成密码登录，私钥口令不能当密码用，清掉让用户重填
+        const wasKey = row.authType === 'key'
         insert.run(
           row.id,
           typeof row.name === 'string' ? row.name : '未命名',
@@ -728,10 +731,10 @@ export class StorageService {
           typeof row.host === 'string' ? row.host : '',
           typeof row.port === 'number' ? row.port : 22,
           typeof row.username === 'string' ? row.username : '',
-          auth,
-          typeof row.keyPath === 'string' ? row.keyPath : null,
+          'password',
+          null,
           typeof row.remark === 'string' ? row.remark : null,
-          typeof row.secretEncrypted === 'string' ? row.secretEncrypted : null,
+          !wasKey && typeof row.secretEncrypted === 'string' ? row.secretEncrypted : null,
           typeof row.createdAt === 'number' ? row.createdAt : now,
           typeof row.updatedAt === 'number' ? row.updatedAt : now
         )
@@ -819,10 +822,6 @@ function flag(value: SQLOutputValue): boolean {
 }
 
 function fieldsFromSession(session: SessionConfig): SshHostFields {
-  const files =
-    session.authType === 'key' && session.keyPath
-      ? [session.keyPath, ...(session.sshOptions?.keyPaths ?? [])].map(homeRelative)
-      : []
   const jumps = session.jumpHost?.trim()
     ? [
         {
@@ -837,21 +836,17 @@ function fieldsFromSession(session: SessionConfig): SshHostFields {
     hostName: session.host.trim(),
     port: session.port,
     username: session.username.trim(),
-    identityFiles: files,
     jumps,
     proxyCommand: session.sshOptions?.proxyCommand
   }
 }
 
 function configOptions(
-  keyPaths: string[],
   extraJumps: SshHostFields['jumps'],
   proxyCommand: string | undefined,
   previous?: SshConnectOptions
 ): SshConnectOptions | undefined {
   const options: SshConnectOptions = { ...(previous ?? {}) }
-  if (keyPaths.length > 0) options.keyPaths = keyPaths
-  else delete options.keyPaths
   if (extraJumps.length > 0) options.extraJumps = extraJumps
   else delete options.extraJumps
   if (proxyCommand) options.proxyCommand = proxyCommand
@@ -872,4 +867,36 @@ function decodeOptions(value: SQLOutputValue): SessionConfig['sshOptions'] {
   } catch {
     return undefined
   }
+}
+
+/** 存成 JSON 数组字符串；空数组不占用存储，写成 NULL。 */
+function encodeForwards(value: SessionInput['forwards']): string | null {
+  const rules = sanitizeForwards(value)
+  return rules.length > 0 ? JSON.stringify(rules) : null
+}
+
+function decodeForwards(value: SQLOutputValue): SessionConfig['forwards'] {
+  if (typeof value !== 'string' || value.length === 0) return undefined
+  try {
+    const rules = sanitizeForwards(JSON.parse(value))
+    return rules.length > 0 ? rules : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 只保留端口合法的规则；全空和残缺的规则直接丢弃。老数据里的 host 字段忽略，IP 固定 127.0.0.1。 */
+function sanitizeForwards(input: unknown): ForwardRule[] {
+  if (!Array.isArray(input)) return []
+  const rules: ForwardRule[] = []
+  for (const item of input) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const type = row.type === 'local' || row.type === 'remote' ? row.type : null
+    const listenPort = typeof row.listenPort === 'number' ? Math.trunc(row.listenPort) : NaN
+    const targetPort = typeof row.targetPort === 'number' ? Math.trunc(row.targetPort) : NaN
+    if (!type || !(listenPort >= 1 && listenPort <= 65535) || !(targetPort >= 1 && targetPort <= 65535)) continue
+    rules.push({ type, listenPort, targetPort })
+  }
+  return rules
 }

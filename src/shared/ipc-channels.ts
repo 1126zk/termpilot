@@ -68,7 +68,5 @@ export const IPC = {
   termMode: 'term:mode',
   termModeReply: 'term:mode-reply',
 
-  appVersion: 'app:version',
-  /** 表单里选私钥文件，返回绝对路径，取消返回 null */
-  appPickKeyFile: 'app:pick-key-file'
+  appVersion: 'app:version'
 } as const

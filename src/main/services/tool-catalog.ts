@@ -14,12 +14,10 @@ const sessionFields: ZodRawShape = {
   host: z.string().optional().describe('SSH 主机'),
   port: z.number().int().min(1).max(65535).optional().describe('SSH 端口，默认 22'),
   username: z.string().optional().describe('SSH 登录用户'),
-  authType: z.enum(['password', 'key']).optional().describe('password 或 key'),
-  keyPath: z.string().optional().describe('私钥文件的本机绝对路径'),
   secret: z
     .string()
     .optional()
-    .describe('密码或私钥口令。加密保存，之后不会再返回。留空表示不修改'),
+    .describe('密码。加密保存，之后不会再返回。留空表示不修改'),
   group: z.string().optional().describe('侧边栏分组，留空归入未分组'),
   remark: z.string().optional().describe('备注')
 }
@@ -54,7 +52,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: 'connection_create',
     description:
-      '新建并保存一条正向 SSH 连接，返回 conn- 编号。要 host/username/secret（密码或私钥口令加密存在本机）。弄清它是干什么的之后，用 connection_update 写上 remark。',
+      '新建并保存一条正向 SSH 连接，返回 conn- 编号。要 host/username/secret（密码加密存在本机）。弄清它是干什么的之后，用 connection_update 写上 remark。',
     input: { name: z.string().describe('显示名称，不能和已有连接重名'), ...sessionFields }
   },
   {

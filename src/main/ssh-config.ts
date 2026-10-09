@@ -1,5 +1,3 @@
-import { homedir } from 'node:os'
-import { existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2'
@@ -7,30 +5,19 @@ import type { AlgorithmList } from 'ssh2'
 import type { SessionConfig } from '../shared/types'
 import type { SshConnectOptions } from '../shared/ssh-options'
 
-/** 正向 SSH 的连接参数。终端和 SFTP 共用，凭据只在主进程内存里出现。 */
+/** 正向 SSH 的连接参数。终端和 SFTP 共用，凭据只在主进程内存里出现。认证只用密码。 */
 export function buildConnectConfig(session: SessionConfig, secret: string | null): ConnectConfig {
   const cfg: ConnectConfig = {
     host: session.host,
     port: session.port,
     username: session.username,
+    password: secret ?? undefined,
     readyTimeout: 15000,
     // 心跳保活：15 秒一个协议层心跳包，防 NAT / 防火墙 / 云主机空闲断连。
     // 连续 4 个没回应（约 1 分钟）就判定死亡，让池尽快清掉僵尸重拨，
     // 不要拖太久——拖久了 shell / exec / SFTP 会一直拿到死连接。
     keepaliveInterval: 15000,
     keepaliveCountMax: 4
-  }
-  const keyPath = resolveKeyPath(session)
-  switch (session.authType) {
-    case 'password':
-      cfg.password = secret ?? undefined
-      break
-    case 'key':
-      if (keyPath) {
-        cfg.privateKey = readFileSync(keyPath)
-        if (secret) cfg.passphrase = secret
-      }
-      break
   }
   applyDialOptions(cfg, session.sshOptions)
   return cfg
@@ -223,24 +210,6 @@ function algoList(values: string[] | undefined): AlgorithmList<string> | undefin
   if (prepend.length > 0) patch.prepend = prepend
   if (remove.length > 0) patch.remove = remove
   return patch as AlgorithmList<string>
-}
-
-function resolveKeyPath(session: SessionConfig): string | undefined {
-  const candidates = [session.keyPath, ...(session.sshOptions?.keyPaths ?? [])].filter((item): item is string =>
-    Boolean(item?.trim())
-  )
-  for (const candidate of candidates) {
-    const path = expandHome(candidate)
-    if (existsSync(path)) return path
-  }
-  const first = candidates[0]
-  return first ? expandHome(first) : undefined
-}
-
-function expandHome(path: string): string {
-  if (path === '~') return homedir()
-  if (path.startsWith('~/') || path.startsWith('~\\')) return homedir() + path.slice(1)
-  return path
 }
 
 function openProxyCommand(command: string, target: { host: string; port: number; username: string }): Duplex {

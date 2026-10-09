@@ -13,7 +13,6 @@ import type { CaptureReply, TermLinesReply, TermModeReply } from '../../shared/t
 import {
   MCP_DEFAULT_PORT,
   MCP_HOST,
-  type AuthType,
   type McpRuntime,
   type McpSettings,
   type SessionConfig,
@@ -34,8 +33,6 @@ type SessionPatch = {
   host?: string
   port?: number
   username?: string
-  authType?: AuthType
-  keyPath?: string
   secret?: string
   jumpHost?: string
   jumpPort?: number
@@ -520,8 +517,6 @@ export class McpService {
       host: (patch.host ?? current?.host ?? '').trim(),
       port: patch.port ?? current?.port ?? 22,
       username: (patch.username ?? current?.username ?? '').trim(),
-      authType: patch.authType ?? current?.authType ?? 'password',
-      keyPath: (patch.keyPath ?? current?.keyPath ?? '').trim() || undefined,
       remark: patch.remark ?? current?.remark,
       secret: patch.secret ? patch.secret : undefined,
       jumpHost: patch.jumpHost !== undefined ? patch.jumpHost.trim() : (current?.jumpHost ?? ''),
@@ -531,8 +526,7 @@ export class McpService {
     }
     if (!input.name) throw new Error('名称不能为空')
     if (!input.host || !input.username) throw new Error('主机和用户名不能为空')
-    if (input.authType === 'key' && !input.keyPath) throw new Error('私钥认证需要填写 keyPath')
-    if (creating && input.authType === 'password' && !input.secret) throw new Error('密码认证需要填写 secret')
+    if (creating && !input.secret) throw new Error('需要填写密码（secret）')
     if (input.jumpHost && !input.jumpUsername) throw new Error('跳板需要用户名')
     const taken = this.storage.list().some((item) => item.name === input.name && item.id !== current?.id)
     if (taken) throw new Error(`已有同名连接: ${input.name}`)
@@ -939,14 +933,10 @@ function keyArg(raw: Record<string, unknown>): Array<(typeof TERM_KEYS)[number]>
 }
 
 function sessionPatch(raw: Record<string, unknown>): SessionPatch {
-  const authType = textArg(raw, 'authType')
-  if (authType && authType !== 'password' && authType !== 'key') throw new Error('authType 只能是 password 或 key')
   return {
     host: textArg(raw, 'host'),
     port: intArg(raw, 'port'),
     username: textArg(raw, 'username'),
-    authType: authType === 'key' ? 'key' : authType === 'password' ? 'password' : undefined,
-    keyPath: textArg(raw, 'keyPath'),
     secret: textArg(raw, 'secret'),
     group: textArg(raw, 'group'),
     remark: textArg(raw, 'remark')

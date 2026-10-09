@@ -191,8 +191,7 @@ const api = {
     }
   },
   app: {
-    version: () => ipcRenderer.invoke(IPC.appVersion) as Promise<string>,
-    pickKeyFile: () => ipcRenderer.invoke(IPC.appPickKeyFile) as Promise<string | null>
+    version: () => ipcRenderer.invoke(IPC.appVersion) as Promise<string>
   }
 }
 

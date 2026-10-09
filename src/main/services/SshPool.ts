@@ -1,5 +1,6 @@
 import { Client } from 'ssh2'
 import type { SessionConfig } from '../../shared/types'
+import { attachForwards } from '../forward'
 import { dialSsh, endJump } from '../ssh-config'
 
 /** 一条已经连到目标机的 SSH 会话。终端和文件树各算一次引用。 */
@@ -102,6 +103,8 @@ export class SshPool {
     client.once('ready', () => {
       if (settled) return
       settled = true
+      // 端口映射只在共享连接上挂一次；断开回收后重拨会重新挂上
+      attachForwards(client, session.forwards)
       resolveReady()
     })
     client.once('error', (error) => {

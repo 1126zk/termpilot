@@ -7,7 +7,7 @@ export interface SshHop {
 
 /**
  * 从 ssh 命令里认出来、连接时会用上的选项。
- * 主机、端口、用户名、私钥、第一跳跳板仍放在会话自己的字段里。
+ * 主机、端口、用户名、第一跳跳板仍放在会话自己的字段里。
  */
 export interface SshConnectOptions {
   /** 握手等待，毫秒。0 表示命令里写了不超时，连接时改成有上限的等待。 */
@@ -26,8 +26,6 @@ export interface SshConnectOptions {
     serverHostKey?: string[]
     hmac?: string[]
   }
-  /** -i 写了多把私钥时，第一把放在 keyPath，其余留在这里。 */
-  keyPaths?: string[]
   /** 第一跳之后的跳板。 */
   extraJumps?: SshHop[]
   /** 没有跳板时，用这条本地命令代替直连。 */
@@ -58,9 +56,6 @@ export function sanitizeSshOptions(value: unknown): SshConnectOptions | undefine
 
   const algorithms = sanitizeAlgorithms(raw.algorithms)
   if (algorithms) options.algorithms = algorithms
-
-  const keyPaths = stringList(raw.keyPaths, 8, 500)
-  if (keyPaths) options.keyPaths = keyPaths
 
   const hops = sanitizeHops(raw.extraJumps)
   if (hops) options.extraJumps = hops
@@ -111,7 +106,6 @@ export function describeSshOptions(options: SshConnectOptions | null | undefined
   if (clean.algorithms?.kex) parts.push('指定密钥交换')
   if (clean.algorithms?.serverHostKey) parts.push('指定主机密钥算法')
   if (clean.algorithms?.hmac) parts.push('指定校验算法')
-  if (clean.keyPaths?.length) parts.push(`另有 ${clean.keyPaths.length} 把私钥`)
   if (clean.extraJumps?.length) parts.push(`后面还有 ${clean.extraJumps.length} 跳`)
   if (clean.proxyCommand) parts.push('用 ProxyCommand 连接')
   return parts.join('，')
