@@ -1,0 +1,12 @@
+cli/dist/
+node_modules/
+out/
+dist/
+release/
+*.log
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
