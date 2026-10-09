@@ -1,5 +1,6 @@
 import type { StorageService } from './StorageService'
 import type { SshHold, SshPool } from './SshPool'
+import type { OsKind } from '../../shared/types'
 
 export interface ExecResult {
   stdout: string
@@ -132,6 +133,64 @@ export class ExecService {
       truncated: out.truncated || err.truncated
     }
   }
+
+  /**
+   * 探测对端操作系统，给标签页左图标用。先跑 `uname -s`（POSIX），
+   * 认不出来再跑 `ver`（Windows cmd）。都不认就是 unknown。
+   * 不走 exec 的 bash 脚本通道——Windows 上没有 bash/sh，那条路必败。
+   */
+  async detectOs(sessionId: string): Promise<OsKind> {
+    try {
+      const hold = await this.hold(sessionId)
+      try {
+        const uname = await rawExec(hold.client, 'uname -s', 5000)
+        if (/linux/i.test(uname)) return 'linux'
+        if (/darwin/i.test(uname)) return 'macos'
+        const ver = await rawExec(hold.client, 'ver', 5000)
+        if (/windows/i.test(ver)) return 'windows'
+        return 'unknown'
+      } finally {
+        hold.release()
+      }
+    } catch {
+      return 'unknown'
+    }
+  }
+}
+
+/** 裸 exec：原样发命令，收集 stdout+stderr，超时即止。 */
+function rawExec(client: SshHold['client'], command: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let out = ''
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(out)
+    }, timeoutMs)
+    client.exec(command, (error, stream) => {
+      if (error) {
+        clearTimeout(timer)
+        reject(error)
+        return
+      }
+      stream.on('data', (data: Buffer) => {
+        if (out.length < 4096) out += data.toString('utf8')
+      })
+      stream.stderr.on('data', (data: Buffer) => {
+        if (out.length < 4096) out += data.toString('utf8')
+      })
+      stream.on('error', () => {
+        /* close 会跟着来 */
+      })
+      stream.on('close', () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(out)
+      })
+    })
+  })
 }
 
 /**

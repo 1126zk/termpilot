@@ -1,5 +1,5 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
-import { followAppTheme, titleBarOverlay, watchSystemChrome, windowBackground } from './window-chrome'
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { followAppTheme, watchSystemChrome, windowBackground } from './window-chrome'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -23,6 +23,7 @@ import { SshPool } from './services/SshPool'
 import { McpService } from './services/McpService'
 import { registerIpc } from './ipc'
 import { installCli } from './install-cli'
+import { IPC } from '../shared/ipc-channels'
 
 let mainWindow: BrowserWindow | null = null
 let storage: StorageService | null = null
@@ -115,9 +116,8 @@ function createWindow(storage: StorageService): void {
     autoHideMenuBar: true,
     ...(process.platform === 'win32'
       ? {
-          // 系统按钮留在右上角，左边这一行由界面自己画，和它们齐平。
-          titleBarStyle: 'hidden' as const,
-          titleBarOverlay: titleBarOverlay(dark)
+          // 标题栏隐藏，最小化/最大化/关闭由界面自绘（和标签栏同一行）。
+          titleBarStyle: 'hidden' as const
         }
       : {}),
     webPreferences: {
@@ -132,6 +132,14 @@ function createWindow(storage: StorageService): void {
   })
   mainWindow = win
 
+  // 自绘窗口按钮的控制通道（仅 win32 走这里，其他平台用系统标题栏）
+  ipcMain.handle(IPC.winMinimize, () => win.minimize())
+  ipcMain.handle(IPC.winToggleMaximize, () => (win.isMaximized() ? win.unmaximize() : win.maximize()))
+  ipcMain.handle(IPC.winClose, () => win.close())
+  ipcMain.handle(IPC.winIsMaximized, () => win.isMaximized())
+  win.on('maximize', () => win.webContents.send(IPC.winMaximizeChanged, true))
+  win.on('unmaximize', () => win.webContents.send(IPC.winMaximizeChanged, false))
+
   // 终端服务依赖窗口的 webContents 做数据推送，窗口创建后再初始化
   const sender = () =>
     mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null
@@ -141,6 +149,7 @@ function createWindow(storage: StorageService): void {
   exec2 = new ExecService(storage, sshPool)
   mcp = new McpService(storage, terminal, sftp, exec2, sender)
   registerIpc(storage, terminal, sftp, mcp)
+  ipcMain.handle(IPC.sessionDetectOs, (_e, sessionId: string) => exec2!.detectOs(sessionId))
   void mcp.apply(storage.getMcpSettings()).catch((error) => {
     console.error('[TermPilot] MCP start failed:', error)
   })

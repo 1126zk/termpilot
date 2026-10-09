@@ -162,7 +162,7 @@ export function SessionForm() {
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {lockedHost ? `在 ${lockedHost} 上新建连接` : creating ? '新建正向 SSH' : '编辑正向 SSH'}
+            {lockedHost ? `在 ${lockedHost} 上新建连接` : creating ? '新建连接' : '编辑连接'}
           </DialogTitle>
           <DialogDescription>
             {lockedHost

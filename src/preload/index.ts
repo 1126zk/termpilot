@@ -10,6 +10,7 @@ import type {
   McpConfirmRequest,
   McpOpenTab,
   McpRuntime,
+  OsKind,
   RemoteFile,
   SftpInstallEvent,
   Appearance,
@@ -39,6 +40,7 @@ const api = {
     update: (id: string, patch: SessionInput) => ipcRenderer.invoke(IPC.sessionUpdate, id, patch),
     delete: (id: string) => ipcRenderer.invoke(IPC.sessionDelete, id),
     duplicate: (id: string) => ipcRenderer.invoke(IPC.sessionDuplicate, id) as Promise<SessionConfig | null>,
+    detectOs: (id: string) => ipcRenderer.invoke(IPC.sessionDetectOs, id) as Promise<OsKind>,
     onChanged: (cb: (sessions: SessionConfig[]) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, sessions: SessionConfig[]) => cb(sessions)
       ipcRenderer.on(IPC.sessionChanged, listener)
@@ -192,6 +194,19 @@ const api = {
   },
   app: {
     version: () => ipcRenderer.invoke(IPC.appVersion) as Promise<string>
+  },
+  win: {
+    minimize: () => ipcRenderer.invoke(IPC.winMinimize) as Promise<void>,
+    toggleMaximize: () => ipcRenderer.invoke(IPC.winToggleMaximize) as Promise<void>,
+    close: () => ipcRenderer.invoke(IPC.winClose) as Promise<void>,
+    isMaximized: () => ipcRenderer.invoke(IPC.winIsMaximized) as Promise<boolean>,
+    onMaximizeChanged: (cb: (maximized: boolean) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, maximized: boolean) => cb(maximized)
+      ipcRenderer.on(IPC.winMaximizeChanged, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.winMaximizeChanged, listener)
+      }
+    }
   }
 }
 

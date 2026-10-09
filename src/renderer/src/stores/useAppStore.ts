@@ -306,15 +306,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       cols: 80,
       rows: 24
     })
+    // 连上后探测一次对端系统，只用来换标签左图标，失败就保持 unknown
+    void window.api.sessions
+      .detectOs(session.id)
+      .then((os) => {
+        set({ tabs: get().tabs.map((t) => (t.id === tab.id ? { ...t, os } : t)) })
+      })
+      .catch(() => undefined)
   },
 
   openLocalTab: () => {
     const count = get().tabs.filter((t) => t.kind === 'local').length
+    const platform = window.api.platform
     const tab: Tab = {
       id: newTermId(),
       sessionId: null,
       kind: 'local',
-      title: `窗口 ${count + 1}`
+      title: `窗口 ${count + 1}`,
+      os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux'
     }
     set({ tabs: [...get().tabs, tab], activeTabId: tab.id })
     window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, cols: 80, rows: 24 })

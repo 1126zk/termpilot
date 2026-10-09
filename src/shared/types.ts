@@ -65,6 +65,9 @@ export type SessionStatus = 'disconnected' | 'connecting' | 'connected'
 
 export type TabKind = 'ssh' | 'local'
 
+/** 标签页左图标的操作系统种类。unknown 是还没探测完或认不出。 */
+export type OsKind = 'windows' | 'linux' | 'macos' | 'unknown'
+
 export interface Tab {
   id: string
   /** ssh 标签对应会话 id；本地终端为 null */
@@ -74,6 +77,8 @@ export interface Tab {
   title: string
   /** 助手写的备注，帮助以后认出这扇窗口在做什么。 */
   remark?: string
+  /** 对端操作系统，决定标签左边的图标。本机终端按本机系统，SSH 连接后探测一次。 */
+  os?: OsKind
 }
 
 /** 创建终端的请求（renderer → main） */

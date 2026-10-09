@@ -68,5 +68,13 @@ export const IPC = {
   termMode: 'term:mode',
   termModeReply: 'term:mode-reply',
 
-  appVersion: 'app:version'
+  appVersion: 'app:version',
+
+  sessionDetectOs: 'session:detect-os',
+
+  winMinimize: 'win:minimize',
+  winToggleMaximize: 'win:toggle-maximize',
+  winClose: 'win:close',
+  winIsMaximized: 'win:is-maximized',
+  winMaximizeChanged: 'win:maximize-changed'
 } as const

@@ -2,9 +2,8 @@ import { useEffect } from 'react'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppSidebar } from './components/Sidebar'
-import { DragStrip, TabBar } from './components/TabBar'
+import { TabBar } from './components/TabBar'
 import { EditorTabBar } from './components/EditorTabBar'
-import { StatusBar } from './components/StatusBar'
 import { SessionForm } from './components/SessionForm'
 import { SettingsDialog } from './components/SettingsDialog'
 import { McpConfirmDialog } from './components/McpConfirmDialog'
@@ -103,23 +102,23 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      <SidebarProvider className="h-svh min-h-0">
-        <AppSidebar />
-        <SidebarInset className="min-h-0 overflow-hidden">
-          <DragStrip />
-          <TabBar />
-          {fileTabs.length > 0 && <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />}
-          <div className="flex min-h-0 flex-1 flex-col">
-            {currentFile ? (
-              <RemoteEditor key={currentFile.key} tab={currentFile} />
-            ) : activeTab ? (
-              <TerminalView key={activeTab.id} termId={activeTab.id} />
-            ) : (
-              <EmptyState />
-            )}
-          </div>
-          <StatusBar />
-        </SidebarInset>
+      <SidebarProvider className="h-svh min-h-0 flex-col">
+        <TabBar />
+        <div className="flex min-h-0 flex-1">
+          <AppSidebar />
+          <SidebarInset className="min-h-0 overflow-hidden">
+            {fileTabs.length > 0 && <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />}
+            <div className="flex min-h-0 flex-1 flex-col">
+              {currentFile ? (
+                <RemoteEditor key={currentFile.key} tab={currentFile} />
+              ) : activeTab ? (
+                <TerminalView key={activeTab.id} termId={activeTab.id} />
+              ) : (
+                <EmptyState />
+              )}
+            </div>
+          </SidebarInset>
+        </div>
         <SessionForm />
         <SettingsDialog />
         <McpConfirmDialog />
