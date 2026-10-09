@@ -154,3 +154,51 @@
   border-color: var(--foreground);
   box-shadow: none;
 }
+
+/* 终端滚动条：6px 细条，平时透明；host 上有 term-scrolling 时露出，停止滚动 3 秒后由 TerminalPool 摘掉 */
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-track,
+.xterm .xterm-viewport::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+.term-scrolling .xterm-viewport::-webkit-scrollbar-track {
+  background: rgba(128, 128, 128, 0.12);
+}
+.term-scrolling .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.55);
+}
+.term-scrolling .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.8);
+}
+
+/* xterm 6 自带的滚动条(VS Code 式 DOM 滚动条,不是原生那条):
+   压掉它 JS 写的内联宽度,收成 8px 轨道 + 4px 居中滑块;
+   平时透明不可点,host 有 term-scrolling(滚动中及停滚 3 秒内)才露出 */
+.xterm .xterm-scrollable-element > .scrollbar {
+  width: 8px !important;
+  background: transparent !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.2s ease !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar .slider {
+  width: 4px !important;
+  left: 2px !important;
+  border-radius: 2px !important;
+  background: rgba(128, 128, 128, 0.5) !important;
+}
+.term-scrolling .xterm-scrollable-element > .scrollbar {
+  background: rgba(128, 128, 128, 0.08) !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+.term-scrolling .xterm-scrollable-element > .scrollbar .slider:hover {
+  background: rgba(128, 128, 128, 0.8) !important;
+}

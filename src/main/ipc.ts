@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ClipboardItem, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, ipcMain, nativeImage, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -101,6 +101,13 @@ export function registerIpc(
 
   ipcMain.handle(IPC.sftpUpload, (_e, sessionId: string, dir: string) => sftp.upload(sessionId, dir))
 
+  // 从系统拖进来的文件：renderer 用 webUtils 拿到本地路径后传过来
+  ipcMain.handle(IPC.sftpUploadPaths, (_e, sessionId: string, dir: string, paths: string[]) =>
+    sftp.uploadPaths(sessionId, dir, paths)
+  )
+
+  ipcMain.handle(IPC.sftpTransferCancel, (_e, id: string) => sftp.cancelTransfer(id))
+
   ipcMain.handle(IPC.sftpRename, (_e, sessionId: string, from: string, to: string) =>
     sftp.rename(sessionId, from, to)
   )
@@ -108,6 +115,19 @@ export function registerIpc(
   ipcMain.handle(IPC.sftpDownload, (_e, sessionId: string, file: RemoteFile) =>
     sftp.download(sessionId, file)
   )
+
+  // 远程文件拖出窗口：先下载到缓存目录，再用 startDrag 发起系统级拖拽
+  ipcMain.on(IPC.sftpDragOut, async (event, sessionId: string, remotePath: string, name: string) => {
+    try {
+      const dir = join(app.getPath('temp'), 'termpilot-drag')
+      mkdirSync(dir, { recursive: true })
+      const localPath = join(dir, name)
+      await sftp.get(sessionId, remotePath, localPath)
+      event.sender.startDrag({ file: localPath, icon: dragIcon() })
+    } catch (error) {
+      console.error('[TermPilot] 拖出文件失败:', error)
+    }
+  })
 
   ipcMain.handle(IPC.sftpRead, (_e, sessionId: string, path: string) => sftp.readText(sessionId, path))
 
@@ -224,4 +244,14 @@ function assertRect(rect: CaptureRect, contentSize: number[]): void {
     rect.x + rect.width <= width + 1 &&
     rect.y + rect.height <= height + 1
   if (!ok) throw new Error('截图区域超出窗口')
+}
+
+/** 拖拽时跟着鼠标的图标：用应用图标缩到 32px，找不到就给空图（Windows 允许）。 */
+function dragIcon() {
+  const candidates = [join(process.resourcesPath ?? '', 'icon.png'), join(app.getAppPath(), 'resources', 'icon.png')]
+  for (const path of candidates) {
+    const icon = nativeImage.createFromPath(path)
+    if (!icon.isEmpty()) return icon.resize({ width: 32 })
+  }
+  return nativeImage.createEmpty()
 }

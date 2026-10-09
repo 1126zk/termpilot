@@ -38,6 +38,12 @@ export const IPC = {
   sftpRename: 'sftp:rename',
   /** main → renderer，安装 SFTP 的进度和远程日志 */
   sftpInstall: 'sftp:install',
+  /** 拖入上传：renderer 把本地路径数组交给主进程 */
+  sftpUploadPaths: 'sftp:upload-paths',
+  /** main → renderer，单个文件传输进度 */
+  sftpTransfer: 'sftp:transfer',
+  /** renderer → main，取消一条进行中的传输 */
+  sftpTransferCancel: 'sftp:transfer-cancel',
 
   mcpAgents: 'mcp:agents',
   mcpApplyAgent: 'mcp:apply-agent',
@@ -70,6 +76,7 @@ export const IPC = {
 
   appVersion: 'app:version',
 
+  sftpDragOut: 'sftp:drag-out',
   sessionDetectOs: 'session:detect-os',
 
   winMinimize: 'win:minimize',

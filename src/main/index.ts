@@ -32,6 +32,10 @@ let sftp: SftpService | null = null
 let exec2: ExecService | null = null
 let mcp: McpService | null = null
 
+// Windows 上 Chromium 的 Fluent 滚动条会无视 ::-webkit-scrollbar 自定义样式，
+// 关掉它终端的细滚动条（index.css 里 .xterm-viewport 那组规则）才能生效。
+app.commandLine.appendSwitch('disable-features', 'FluentScrollbar,FluentOverlayScrollbar')
+
 function appIcon(): string {
   const packaged = join(process.resourcesPath, 'icon.png')
   if (app.isPackaged && existsSync(packaged)) return packaged

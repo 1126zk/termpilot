@@ -1,15 +1,8 @@
 import { useState, type ComponentProps, ReactNode } from 'react'
-import { Folder, Monitor, Pencil, Plus, Search, Server, Settings } from 'lucide-react'
-import {
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarHeader,
-  useSidebar
-} from '@/components/ui/sidebar'
+import { Pencil, Plus, Search, Server, Settings } from 'lucide-react'
+import { SidebarContent, SidebarGroup, SidebarGroupContent, useSidebar } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -23,7 +16,6 @@ import { hostKeyOf } from '../../../shared/host-key'
 import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 
 import type { SessionConfig } from '../../../shared/types'
-import { FileTree } from './FileTree'
 
 /**
  * 应用侧边栏。不用 shadcn Sidebar 的 fixed 布局：
@@ -33,8 +25,6 @@ import { FileTree } from './FileTree'
 export function AppSidebar() {
   const { state } = useSidebar()
   const collapsed = state === 'collapsed'
-  const pane = useAppStore((s) => s.sidebarPane)
-  const setPane = useAppStore((s) => s.setSidebarPane)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
 
   return (
@@ -44,34 +34,8 @@ export function AppSidebar() {
         collapsed ? 'w-12 min-w-12 max-w-12' : 'w-64 min-w-64 max-w-64'
       )}
     >
-      <SidebarHeader>
-        {!collapsed && (
-          <Tabs value={pane} onValueChange={(v) => setPane(v as 'connect' | 'files')}>
-            <TabsList className="w-full">
-              <TabsTrigger value="connect">连接</TabsTrigger>
-              <TabsTrigger value="files">文件</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        )}
-      </SidebarHeader>
       {collapsed ? (
         <div className="flex min-h-0 flex-1 flex-col items-center gap-1 py-1">
-          <Button
-            variant={pane === 'connect' ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            title="连接"
-            onClick={() => setPane('connect')}
-          >
-            <Monitor />
-          </Button>
-          <Button
-            variant={pane === 'files' ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            title="文件"
-            onClick={() => setPane('files')}
-          >
-            <Folder />
-          </Button>
           <div className="mt-auto flex flex-col items-center gap-1">
             <Button variant="ghost" size="icon-sm" title="设置" onClick={() => setSettingsOpen(true)}>
               <Settings />
@@ -80,7 +44,9 @@ export function AppSidebar() {
         </div>
       ) : (
         <>
-          <SidebarContent className="min-w-0 overflow-x-hidden">{pane === 'connect' ? <ConnectTree /> : <FileTree />}</SidebarContent>
+          <SidebarContent className="min-w-0 overflow-x-hidden">
+            <ConnectTree />
+          </SidebarContent>
           <div className="flex items-center gap-1 border-t px-2 py-2">
             <button
               type="button"

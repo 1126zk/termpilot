@@ -20,6 +20,7 @@ interface PoolEntry {
   fit: FitAddon
   host: HTMLDivElement
   disposeData: () => void
+  disposeScrollHint: () => void
 }
 
 export interface TermLook {
@@ -83,7 +84,7 @@ class TerminalPool {
     })
     void this.restore(term, termId)
 
-    const entry: PoolEntry = { term, fit, host, disposeData }
+    const entry: PoolEntry = { term, fit, host, disposeData, disposeScrollHint: bindScrollHint(host, term) }
     this.entries.set(termId, entry)
     return entry
   }
@@ -283,6 +284,7 @@ class TerminalPool {
     this.savers.get(termId)?.()
     this.savers.delete(termId)
     e.disposeData()
+    e.disposeScrollHint()
     e.term.dispose()
     this.entries.delete(termId)
   }
@@ -305,6 +307,43 @@ class TerminalPool {
     } catch {
       // WebGL 不可用时 xterm 自动回退 Canvas 渲染器
     }
+  }
+}
+
+/**
+ * 滚动时给 host 加 term-scrolling 露出细滚动条，停滚 3 秒摘掉。
+ * 滚动事件走 xterm 的 onScroll API（不依赖内部 DOM，滚轮/拖滑块/程序滚动都覆盖）。
+ * 按住滑块拖的时候（指针没抬）不摘，免得拖到一半条没了。
+ * 返回清理函数，终端销毁时调用。
+ */
+function bindScrollHint(host: HTMLDivElement, term: Terminal): () => void {
+  // xterm 6 的自绘滚动条在 viewport 外面,拖它也要算"按住"
+  const scrollbar = host.querySelector('.xterm-scrollable-element > .scrollbar')
+  let timer = 0
+  let holding = false
+  const show = () => {
+    host.classList.add('term-scrolling')
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      if (!holding) host.classList.remove('term-scrolling')
+    }, 3000)
+  }
+  const onDown = () => {
+    holding = true
+  }
+  const onUp = () => {
+    holding = false
+    // 拖着滑块按住不动时倒计时被挂起，松手后若条还亮着就重新起 3 秒倒计时
+    if (host.classList.contains('term-scrolling')) show()
+  }
+  const disposeScroll = term.onScroll(show)
+  scrollbar?.addEventListener('pointerdown', onDown)
+  window.addEventListener('pointerup', onUp)
+  return () => {
+    window.clearTimeout(timer)
+    disposeScroll.dispose()
+    scrollbar?.removeEventListener('pointerdown', onDown)
+    window.removeEventListener('pointerup', onUp)
   }
 }
 

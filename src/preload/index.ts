@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type {
   CaptureRect,
@@ -13,6 +13,7 @@ import type {
   OsKind,
   RemoteFile,
   SftpInstallEvent,
+  SftpTransferEvent,
   Appearance,
   McpSettingsInput,
   SessionConfig,
@@ -115,10 +116,18 @@ const api = {
       }>,
     mkdir: (sessionId: string, dir: string, name: string) =>
       ipcRenderer.invoke(IPC.sftpMkdir, sessionId, dir, name),
+    /** 把远程文件拖出窗口：主进程先下载到缓存目录，再发起系统拖拽 */
+    dragOut: (sessionId: string, path: string, name: string) =>
+      ipcRenderer.send(IPC.sftpDragOut, sessionId, path, name),
     remove: (sessionId: string, path: string, kind: RemoteFile['kind']) =>
       ipcRenderer.invoke(IPC.sftpRemove, sessionId, path, kind),
     upload: (sessionId: string, dir: string) =>
       ipcRenderer.invoke(IPC.sftpUpload, sessionId, dir) as Promise<number>,
+    /** 拖入上传：renderer 拿不到 File.path，用 webUtils 换本地路径 */
+    filePath: (file: File) => webUtils.getPathForFile(file),
+    uploadPaths: (sessionId: string, dir: string, paths: string[]) =>
+      ipcRenderer.invoke(IPC.sftpUploadPaths, sessionId, dir, paths) as Promise<number>,
+    cancelTransfer: (id: string) => ipcRenderer.invoke(IPC.sftpTransferCancel, id) as Promise<void>,
     rename: (sessionId: string, from: string, to: string) =>
       ipcRenderer.invoke(IPC.sftpRename, sessionId, from, to),
     download: (sessionId: string, file: RemoteFile) =>
@@ -132,6 +141,13 @@ const api = {
       ipcRenderer.on(IPC.sftpInstall, listener)
       return () => {
         ipcRenderer.removeListener(IPC.sftpInstall, listener)
+      }
+    },
+    onTransfer: (cb: (event: SftpTransferEvent) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, event: SftpTransferEvent) => cb(event)
+      ipcRenderer.on(IPC.sftpTransfer, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.sftpTransfer, listener)
       }
     }
   },

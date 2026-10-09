@@ -140,6 +140,17 @@ export interface SftpInstallEvent {
   text: string
 }
 
+/** 文件上传/下载的传输进度（main → renderer）。done 后界面留几秒再移除。 */
+export interface SftpTransferEvent {
+  id: string
+  direction: 'up' | 'down'
+  name: string
+  transferred: number
+  total: number
+  done: boolean
+  error?: string
+}
+
 /** MCP 只监听本机回环，不允许改成其他地址 */
 export const MCP_HOST = '127.0.0.1'
 export const MCP_DEFAULT_PORT = 3927

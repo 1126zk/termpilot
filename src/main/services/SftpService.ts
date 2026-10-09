@@ -1,9 +1,11 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, posix } from 'node:path'
+import type { Readable, Writable } from 'node:stream'
 import { app, dialog, type WebContents } from 'electron'
 import { Client, type OpenMode, type SFTPWrapper } from 'ssh2'
 import { IPC } from '../../shared/ipc-channels'
-import type { RemoteFile, SftpInstallEvent } from '../../shared/types'
+import type { RemoteFile, SftpInstallEvent, SftpTransferEvent } from '../../shared/types'
 import type { StorageService } from './StorageService'
 import type { SshHold, SshPool } from './SshPool'
 
@@ -19,6 +21,8 @@ interface LiveConn {
  */
 export class SftpService {
   private conns = new Map<string, Promise<LiveConn>>()
+  /** 进行中的传输：id → 取消函数。取消只 destroy 两端的流，不动 SFTP 通道本体。 */
+  private active = new Map<string, () => void>()
   /** 这台机器的文件通道该走哪条 SSH。fresh 表示刚改过子系统，不能复用登录时的旧会话。 */
   private route = new Map<string, 'shared' | 'fresh'>()
   private choosing = new Map<string, Promise<'shared' | 'fresh'>>()
@@ -57,9 +61,19 @@ export class SftpService {
   async put(sessionId: string, localPath: string, remotePath: string): Promise<void> {
     assertLocal(localPath)
     if (!existsSync(localPath)) throw new Error('本地文件不存在')
-    refuseHuge(statSync(localPath).size)
+    const total = statSync(localPath).size
+    refuseHuge(total)
     return this.run(sessionId, (sftp) =>
-      using(sftp, remotePath, (target) => call((cb) => sftp.fastPut(localPath, target, XFER, cb)))
+      using(sftp, remotePath, (target) =>
+        this.streamTransfer({
+          direction: 'up',
+          name: basename(target),
+          total,
+          openSource: () => createReadStream(localPath),
+          openDest: () => sftp.createWriteStream(target),
+          cleanupPartial: () => undefined
+        })
+      )
     )
   }
 
@@ -68,8 +82,16 @@ export class SftpService {
     if (!existsSync(dirname(localPath))) throw new Error('本地目录不存在')
     return this.run(sessionId, (sftp) =>
       using(sftp, remotePath, async (target) => {
-        refuseHuge(await statSize(sftp, target))
-        await call((cb) => sftp.fastGet(target, localPath, XFER, cb))
+        const total = await statSize(sftp, target)
+        refuseHuge(total)
+        await this.streamTransfer({
+          direction: 'down',
+          name: basename(target),
+          total,
+          openSource: () => sftp.createReadStream(target),
+          openDest: () => createWriteStream(localPath),
+          cleanupPartial: () => rmSync(localPath, { force: true })
+        })
       })
     )
   }
@@ -102,13 +124,43 @@ export class SftpService {
       properties: ['openFile', 'multiSelections']
     })
     if (picked.canceled || picked.filePaths.length === 0) return 0
+    return this.uploadPaths(sessionId, dir, picked.filePaths)
+  }
+
+  /** 拖入上传：把本地文件按文件名放进 dir。拖进来的目录跳过，不递归。单个文件被取消不影响剩下的。 */
+  async uploadPaths(sessionId: string, dir: string, localPaths: string[]): Promise<number> {
+    const files = localPaths.filter((local) => {
+      try {
+        return statSync(local).isFile()
+      } catch {
+        return false
+      }
+    })
+    if (files.length === 0) return 0
     const sftp = await this.sftpOf(sessionId)
-    for (const local of picked.filePaths) {
-      refuseHuge(statSync(local).size)
+    let done = 0
+    for (const local of files) {
+      const total = statSync(local).size
+      refuseHuge(total)
       const remote = posix.join(dir || '.', basename(local))
-      await using(sftp, remote, (target) => call((cb) => sftp.fastPut(local, target, XFER, cb)))
+      try {
+        await using(sftp, remote, (target) =>
+          this.streamTransfer({
+            direction: 'up',
+            name: basename(target),
+            total,
+            openSource: () => createReadStream(local),
+            openDest: () => sftp.createWriteStream(target),
+            cleanupPartial: () => undefined
+          })
+        )
+        done += 1
+      } catch (error) {
+        if (error instanceof Error && error.message === '已取消') continue
+        throw error
+      }
     }
-    return picked.filePaths.length
+    return done
   }
 
   async download(sessionId: string, file: RemoteFile): Promise<boolean> {
@@ -118,12 +170,26 @@ export class SftpService {
       defaultPath: file.name
     })
     if (picked.canceled || !picked.filePath) return false
+    const localPath = picked.filePath
     const sftp = await this.sftpOf(sessionId)
     await using(sftp, file.path, async (target) => {
-      refuseHuge(await statSize(sftp, target))
-      await call((cb) => sftp.fastGet(target, picked.filePath!, XFER, cb))
+      const total = await statSize(sftp, target)
+      refuseHuge(total)
+      await this.streamTransfer({
+        direction: 'down',
+        name: file.name,
+        total,
+        openSource: () => sftp.createReadStream(target),
+        openDest: () => createWriteStream(localPath),
+        cleanupPartial: () => rmSync(localPath, { force: true })
+      })
     })
     return true
+  }
+
+  /** 取消一条进行中的传输。不在列表里（已完成）就当没发生。 */
+  cancelTransfer(id: string): void {
+    this.active.get(id)?.()
   }
 
   async readText(sessionId: string, path: string): Promise<string> {
@@ -250,6 +316,82 @@ export class SftpService {
     const wc = this.getSender()
     if (!wc || wc.isDestroyed()) return
     wc.send(IPC.sftpInstall, { sessionId, phase, text } satisfies SftpInstallEvent)
+  }
+
+  /**
+   * 流式传输：ssh2 的 fastGet/fastPut 不能取消，所以用 createReadStream/createWriteStream
+   * 自己接管子。data 事件累计进度，结束时推 done；取消或出错时 destroy 两端的流，
+   * 下载还要删掉没传完的本地残留文件。每条传输独立，互不干扰。
+   */
+  private streamTransfer(opts: {
+    direction: SftpTransferEvent['direction']
+    name: string
+    total: number
+    openSource: () => Readable
+    openDest: () => Writable
+    cleanupPartial: () => void
+  }): Promise<void> {
+    const id = randomBytes(6).toString('hex')
+    let transferred = 0
+    const push = (done: boolean, error?: string) => {
+      const wc = this.getSender()
+      if (!wc || wc.isDestroyed()) return
+      const event: SftpTransferEvent = { id, direction: opts.direction, name: opts.name, transferred, total: opts.total, done }
+      if (error) event.error = error
+      wc.send(IPC.sftpTransfer, event)
+    }
+    push(false)
+    return new Promise((resolve, reject) => {
+      let settled = false
+      let source: Readable
+      let dest: Writable
+      try {
+        source = opts.openSource()
+        dest = opts.openDest()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        push(true, message)
+        reject(error instanceof Error ? error : new Error(message))
+        return
+      }
+      const finish = (error?: string) => {
+        if (settled) return
+        settled = true
+        this.active.delete(id)
+        source.destroy()
+        dest.destroy()
+        if (error) {
+          // 文件句柄释放是异步的，稍等一下再删残留
+          setTimeout(() => {
+            try {
+              opts.cleanupPartial()
+            } catch {
+              /* 残留删不掉就算了 */
+            }
+          }, 100)
+        }
+        if (error) push(true, error)
+        else {
+          transferred = opts.total
+          push(true)
+        }
+        if (error) reject(new Error(error))
+        else resolve()
+      }
+      this.active.set(id, () => finish('已取消'))
+      source.on('data', (chunk: Buffer | string) => {
+        transferred += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+        push(false)
+      })
+      source.on('error', (error) => finish(error.message))
+      dest.on('error', (error) => finish(error.message))
+      dest.on('close', () => {
+        if (settled) return
+        // destroy 也会触发 close：字节数够了才算传完
+        finish(transferred >= opts.total ? undefined : '传输中断')
+      })
+      source.pipe(dest)
+    })
   }
 
   private openHold(sessionId: string): Promise<SshHold> {
@@ -482,8 +624,6 @@ function call(run: (cb: (err: Error | undefined | null) => void) => void): Promi
   })
 }
 
-/** ssh2 默认 64 路并行。跳板上窗口一满，传输停住，保活会把连接掐掉。 */
-const XFER = { concurrency: 4, chunkSize: 128 * 1024 }
 /** 几个 GB 的文件不走 SFTP。源码和普通文件停在 512MB 以内。 */
 const MAX_TRANSFER_BYTES = 512 * 1024 * 1024
 const MAX_EDIT_BYTES = 1_500_000

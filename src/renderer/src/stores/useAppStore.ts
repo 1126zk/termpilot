@@ -44,10 +44,8 @@ interface AppState {
 
   /** 侧边栏整体收纳（收成图标栏） */
   sidebarCollapsed: boolean
-  /** 右侧空白面板是否打开 */
+  /** 右侧文件面板是否打开 */
   rightPanelOpen: boolean
-  /** 侧边栏页：连接树 / 远程文件树 */
-  sidebarPane: 'connect' | 'files'
   /** 树节点折叠，key 为 forward / local / 分组名 */
   collapsedGroups: Record<string, boolean>
   search: string
@@ -102,7 +100,6 @@ interface AppState {
   onTermMeta: (e: { termId: string; title: string; remark: string }) => void
 
   toggleSidebar: () => void
-  setSidebarPane: (pane: 'connect' | 'files') => void
   toggleRightPanel: () => void
   toggleGroup: (group: string) => void
   selectSession: (id: string) => void
@@ -133,7 +130,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeTabId: null,
   sidebarCollapsed: false,
   rightPanelOpen: false,
-  sidebarPane: 'connect',
   collapsedGroups: {},
   search: '',
   selectedSessionId: null,
@@ -427,8 +423,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
-  setSidebarPane: (pane) => set({ sidebarPane: pane }),
-
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
   toggleGroup: (group) =>
     set({ collapsedGroups: { ...get().collapsedGroups, [group]: !get().collapsedGroups[group] } }),

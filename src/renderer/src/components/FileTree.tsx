@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { Download, FolderInput, FolderPlus, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Download, FolderInput, FolderPlus, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -11,7 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { openAfterMenu, RemarkDialog } from './RemarkDialog'
-import type { RemoteFile } from '../../../shared/types'
+import type { RemoteFile, SftpTransferEvent } from '../../../shared/types'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
 
@@ -42,9 +42,28 @@ export function FileTree() {
   const [pathError, setPathError] = useState('')
   const [renaming, setRenaming] = useState<RemoteFile | null>(null)
   const [renameError, setRenameError] = useState('')
+  const [dropDir, setDropDir] = useState<string | null>(null)
+  const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
 
   const sessionId = session?.id ?? null
+
+  // 底部传输区：按事件 id 更新；完成的留三秒，失败的留五秒
+  useEffect(() => {
+    return window.api.sftp.onTransfer((event) => {
+      setTransfers((list) => {
+        const index = list.findIndex((t) => t.id === event.id)
+        if (index < 0) return [...list, event]
+        const next = [...list]
+        next[index] = event
+        return next
+      })
+      if (event.done) {
+        const delay = event.error ? 5000 : 3000
+        setTimeout(() => setTransfers((list) => list.filter((t) => t.id !== event.id)), delay)
+      }
+    })
+  }, [])
 
   const showRoot = async (id: string, path: string) => {
     const requested = path.trim().replaceAll('\\', '/') || '.'
@@ -210,6 +229,45 @@ export function FileTree() {
     }
   }
 
+  /** 从系统拖文件进来：上传到 dir，结束后刷新那个目录。拖进来的目录主进程会跳过。 */
+  const uploadInto = async (dir: string, files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const paths = Array.from(files)
+      .map((file) => {
+        try {
+          return window.api.sftp.filePath(file)
+        } catch {
+          return ''
+        }
+      })
+      .filter(Boolean)
+    if (paths.length === 0) return
+    setDropDir(null)
+    try {
+      await window.api.sftp.uploadPaths(session.id, dir, paths)
+      await ensureOpen(dir)
+    } catch (e) {
+      const message = sftpMessage(e)
+      if (message !== '已取消') setError(message)
+    }
+  }
+
+  /** 目录行的拖入目标：悬停高亮，松手上传进这个目录 */
+  const dropTarget = (dir: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+      setDropDir(dir)
+    },
+    onDragLeave: () => setDropDir((current) => (current === dir ? null : current)),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      void uploadInto(dir, e.dataTransfer.files)
+    }
+  })
+
   const mkdir = async (raw: string) => {
     const name = raw.trim()
     if (!name || name.includes('/') || name.includes('\\')) {
@@ -267,10 +325,18 @@ export function FileTree() {
                   role="treeitem"
                   aria-expanded={isDir ? expanded : undefined}
                   aria-selected={selected === item.path}
-                  title={item.kind === 'dir' ? item.path : `${item.name}  ${formatSize(item.size)}`}
+                  title={item.kind === 'dir' ? item.path : `${item.name}  ${formatSize(item.size)}（可拖出窗口下载）`}
+                  draggable={!isDir}
+                  {...(isDir ? dropTarget(item.path) : {})}
+                  onDragStart={(e) => {
+                    if (isDir) return
+                    // 文件在远端：阻止默认拖拽，主进程下载到缓存后发起系统拖拽
+                    e.preventDefault()
+                    window.api.sftp.dragOut(session.id, item.path, item.name)
+                  }}
                   className={`flex h-[22px] w-full cursor-pointer items-center pr-2 text-left text-[13px] select-none hover:bg-foreground/5 ${
                     selected === item.path ? 'bg-foreground/10' : ''
-                  }`}
+                  } ${dropDir === item.path ? 'bg-foreground/10 ring-1 ring-foreground/25 ring-inset' : ''}`}
                   style={{ paddingLeft: depth * TREE_INDENT }}
                   onContextMenu={() => setSelected(item.path)}
                   onClick={() => {
@@ -406,7 +472,21 @@ export function FileTree() {
           {error && <p className="px-3 pb-1 text-[11px] text-destructive">{error}</p>}
           {!(busy && entries.length === 0 && root === '.') && !(error && entries.length === 0 && root === '.') && (
           <ScrollArea className="min-h-0 flex-1">
-            <div role="tree" className="pb-2">
+            <div
+              role="tree"
+              className="pb-2"
+              onDragOver={(e) => {
+                // 空白处（含文件行）松手 = 上传到当前根目录
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setDropDir(root)
+              }}
+              onDragLeave={() => setDropDir(null)}
+              onDrop={(e) => {
+                e.preventDefault()
+                void uploadInto(root, e.dataTransfer.files)
+              }}
+            >
               <ContextMenu>
                 <ContextMenuTrigger asChild>
                   <div
@@ -414,9 +494,10 @@ export function FileTree() {
                     aria-expanded={rootOpen}
                     aria-selected={selected === root}
                     title={root}
+                    {...dropTarget(root)}
                     className={`flex h-[22px] w-full cursor-pointer items-center pr-2 text-[13px] select-none hover:bg-foreground/5 ${
                       selected === root ? 'bg-foreground/10' : ''
-                    }`}
+                    } ${dropDir === root ? 'bg-foreground/10 ring-1 ring-foreground/25 ring-inset' : ''}`}
                     style={{ paddingLeft: 0 }}
                     onContextMenu={() => setSelected(root)}
                     onClick={() => {
@@ -461,6 +542,48 @@ export function FileTree() {
           </ScrollArea>
           )}
         </>
+      )}
+      {transfers.length > 0 && (
+        <div className="shrink-0 border-t px-3 py-1">
+          {transfers.map((t) => {
+            const percent = t.done && !t.error ? 100 : t.total > 0 ? Math.min(100, Math.round((t.transferred / t.total) * 100)) : 0
+            return (
+              <div key={t.id} className="grid gap-0.5 py-0.5 text-xs text-muted-foreground">
+                <div className="flex items-start gap-1.5">
+                  {t.direction === 'up' ? (
+                    <Upload className="mt-0.5 size-3 shrink-0" />
+                  ) : (
+                    <Download className="mt-0.5 size-3 shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 break-all">{t.name}</span>
+                  {t.error ? (
+                    <span className="min-w-0 shrink-0 text-destructive" title={t.error}>
+                      {t.error}
+                    </span>
+                  ) : (
+                    <span className="shrink-0">{percent}%</span>
+                  )}
+                  {!t.done && (
+                    <button
+                      type="button"
+                      title="取消传输"
+                      className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                      onClick={() => void window.api.sftp.cancelTransfer(t.id)}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </div>
+                <div className="h-0.5 rounded-full bg-foreground/10">
+                  <div
+                    className={`h-full rounded-full ${t.error ? 'bg-destructive' : 'bg-foreground/40'}`}
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
       )}
       <RemarkDialog
         open={renaming !== null}

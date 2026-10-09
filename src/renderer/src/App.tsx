@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppSidebar } from './components/Sidebar'
+import { FileTree } from './components/FileTree'
 import { TabBar } from './components/TabBar'
 import { EditorTabBar } from './components/EditorTabBar'
 import { SessionForm } from './components/SessionForm'
@@ -119,7 +120,11 @@ export default function App() {
               )}
             </div>
           </SidebarInset>
-          {rightPanelOpen && <div className="w-64 shrink-0 border-l bg-sidebar" />}
+          {rightPanelOpen && (
+            <div className="flex w-80 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground">
+              <FileTree />
+            </div>
+          )}
         </div>
         <SessionForm />
         <SettingsDialog />
