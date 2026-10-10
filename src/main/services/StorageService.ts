@@ -90,6 +90,7 @@ export class StorageService {
     this.ensureColumn('sessions', 'public_id', 'TEXT')
     this.ensureColumn('sessions', 'config_host', 'TEXT')
     this.ensureColumn('sessions', 'forwards', 'TEXT')
+    this.ensureColumn('sessions', 'os', 'TEXT')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS open_terms (
         id TEXT PRIMARY KEY,
@@ -539,6 +540,11 @@ export class StorageService {
     return this.toPublic(row)
   }
 
+  /** 探测到对端系统/发行版后存下来，连接列表的图标用。 */
+  setOs(id: string, os: string): void {
+    this.db.prepare('UPDATE sessions SET os = ? WHERE id = ?').run(os, id)
+  }
+
   private toPublic(row: Record<string, SQLOutputValue>): SessionConfig {
     return {
       id: text(row.id),
@@ -556,6 +562,7 @@ export class StorageService {
       hasJumpSecret: typeof row.jump_secret_encrypted === 'string' && row.jump_secret_encrypted.length > 0,
       sshOptions: decodeOptions(row.ssh_options),
       forwards: decodeForwards(row.forwards),
+      os: optionalText(row.os),
       createdAt: integer(row.created_at, 0),
       updatedAt: integer(row.updated_at, 0)
     }

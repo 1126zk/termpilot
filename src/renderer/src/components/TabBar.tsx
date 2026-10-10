@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Apple, Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelLeft, PanelRight, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
+import { Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelRight, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
@@ -22,7 +22,7 @@ import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { CaptureDialog } from './CaptureDialog'
-import type { OsKind } from '../../../shared/types'
+import { OsIcon } from './OsIcon'
 
 const drag = { WebkitAppRegion: 'drag' } as CSSProperties
 const noDrag = { WebkitAppRegion: 'no-drag' } as CSSProperties
@@ -35,29 +35,6 @@ function RestoreIcon() {
       <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
     </svg>
   )
-}
-
-/** 标签左边的系统图标。Windows 画四个方块，macOS 用 lucide 的 Apple，Linux 画企鹅，认不出用服务器。 */
-function OsIcon(props: { os?: OsKind }) {
-  if (props.os === 'windows') {
-    return (
-      <svg viewBox="0 0 16 16" className="size-4 shrink-0" fill="currentColor">
-        <rect x="2" y="2" width="5.5" height="5.5" rx="0.5" />
-        <rect x="8.5" y="2" width="5.5" height="5.5" rx="0.5" />
-        <rect x="2" y="8.5" width="5.5" height="5.5" rx="0.5" />
-        <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="0.5" />
-      </svg>
-    )
-  }
-  if (props.os === 'macos') return <Apple className="size-4 shrink-0" strokeWidth={2} />
-  if (props.os === 'linux') {
-    return (
-      <svg viewBox="0 0 16 16" className="size-4 shrink-0" fill="currentColor" fillRule="evenodd">
-        <path d="M8 2.2c-2.5 0-4.2 2.4-4.2 5.6 0 2 .7 3.6 1.7 4.5-.4.2-.9.6-.9 1 0 .5.8.7 1.6.5.6-.1 1.1-.4 1.8-.4s1.2.3 1.8.4c.8.2 1.6 0 1.6-.5 0-.4-.5-.8-.9-1 1-.9 1.7-2.5 1.7-4.5C11.2 4.6 10.5 2.2 8 2.2Z M5.6 7.1a0.7 0.7 0 1 0 1.4 0 0.7 0.7 0 1 0-1.4 0Z M9 7.1a0.7 0.7 0 1 0 1.4 0 0.7 0.7 0 1 0-1.4 0Z M7.2 7.9h1.6L8 9.2Z" />
-      </svg>
-    )
-  }
-  return <Server className="size-4 shrink-0" strokeWidth={2} />
 }
 
 /** 顶栏所有图标按钮的统一规格：一样的高宽、颜色、hover。 */
@@ -185,7 +162,7 @@ export function TabBar() {
       }}
     >
       <button type="button" className={topBtn} style={noDrag} title="收纳侧边栏" onClick={toggleSidebar}>
-        <PanelLeft className="size-5" strokeWidth={2} />
+        <Server className="size-5" strokeWidth={2} />
       </button>
       {overflowing && (
         <button type="button" className={topBtn} style={noDrag} disabled={!canLeft} onClick={() => scrollStrip(-1)}>
@@ -240,7 +217,7 @@ export function TabBar() {
                   {/* 平时是系统图标；悬停标签或标签被选中时变成叉；悬停叉本身时叉变红并带小方框 */}
                   <span className="flex size-5 shrink-0 items-center justify-center">
                     <span className={cn('items-center justify-center', active ? 'hidden' : 'flex group-hover/tab:hidden')}>
-                      <OsIcon os={t.os} />
+                      <OsIcon os={t.os} distro={t.distro} />
                     </span>
                     <span
                       role="button"

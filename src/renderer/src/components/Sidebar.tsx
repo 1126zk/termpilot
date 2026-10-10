@@ -1,5 +1,5 @@
 import { useState, type ComponentProps, ReactNode } from 'react'
-import { Pencil, Plus, Search, Server, Settings } from 'lucide-react'
+import { Pencil, Plus, Search, Settings } from 'lucide-react'
 import { SidebarContent, SidebarGroup, SidebarGroupContent, useSidebar } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ import { useAppStore } from '../stores/useAppStore'
 import { connectionAgentPrompt, copyAgentPrompt } from '../agentPrompt'
 import { hostKeyOf } from '../../../shared/host-key'
 import { openAfterMenu, RemarkDialog } from './RemarkDialog'
+import { OsIcon, osIconProps } from './OsIcon'
 
 import type { SessionConfig } from '../../../shared/types'
 
@@ -132,7 +133,7 @@ function SessionNode(props: { session: SessionConfig }) {
           <TreeRow
             label={session.name}
             hint={remark}
-            icon={<Server />}
+            icon={<OsIcon {...osIconProps(session.os)} />}
             active={selectedId === session.id}
             onClick={() => {
               selectSession(session.id)

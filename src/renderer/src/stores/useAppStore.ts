@@ -13,6 +13,7 @@ import {
   type TermStatusEvent
 } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
+import { osIconProps } from '../components/OsIcon'
 import { dropBuffer, editorKey } from '../editor/editorBuffers'
 import { terminalPool } from '../terminal/TerminalPool'
 import { applyAppearance, readCachedAppearance, resolveAppTheme, type ResolvedAppTheme } from '../theme/applyAppearance'
@@ -154,13 +155,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     restoredWindows = true
     const saved = await window.api.term.saved()
     if (saved.length === 0) return
-    const tabs: Tab[] = saved.map((term) => ({
-      id: term.id,
-      sessionId: term.sessionId,
-      kind: term.kind,
-      title: term.title,
-      remark: term.remark
-    }))
+    const tabs: Tab[] = saved.map((term) => {
+      const session = term.sessionId ? get().sessions.find((s) => s.id === term.sessionId) : undefined
+      const platform = window.api.platform
+      const known =
+        term.kind === 'local'
+          ? { os: (platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux') as Tab['os'] }
+          : osIconProps(session?.os)
+      return {
+        id: term.id,
+        sessionId: term.sessionId,
+        kind: term.kind,
+        title: term.title,
+        remark: term.remark,
+        ...known
+      }
+    })
     const current = tabs[tabs.length - 1]
     set({ tabs, activeTabId: current.id, selectedSessionId: current.sessionId ?? get().selectedSessionId })
     for (const term of saved) {
@@ -172,6 +182,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         cols: 80,
         rows: 24
       })
+    }
+    // 恢复的 SSH 窗口补一次系统/发行版探测，图标刷新到标签和连接列表
+    const sshSessionIds = new Set(
+      saved.filter((t) => t.kind === 'ssh' && t.sessionId).map((t) => t.sessionId!)
+    )
+    for (const sessionId of sshSessionIds) {
+      void window.api.sessions
+        .detectOs(sessionId)
+        .then((info) => {
+          set({
+            tabs: get().tabs.map((t) =>
+              t.sessionId === sessionId && t.kind === 'ssh' ? { ...t, os: info.os, distro: info.distro } : t
+            )
+          })
+          const savedOs = info.distro ?? info.os
+          void window.api.sessions.setOs(sessionId, savedOs).catch(() => undefined)
+          set({ sessions: get().sessions.map((s) => (s.id === sessionId ? { ...s, os: savedOs } : s)) })
+        })
+        .catch(() => undefined)
     }
   },
 
@@ -292,11 +321,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
     const count = get().tabs.filter((t) => t.sessionId === session.id && t.kind === 'ssh').length
+    const known = osIconProps(session.os)
     const tab: Tab = {
       id: newTermId(),
       sessionId: session.id,
       kind: 'ssh',
-      title: `窗口 ${count + 1}`
+      title: `窗口 ${count + 1}`,
+      ...known
     }
     set({ tabs: [...get().tabs, tab], activeTabId: tab.id })
     window.api.term.create({
@@ -307,11 +338,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       cols: 80,
       rows: 24
     })
-    // 连上后探测一次对端系统，只用来换标签左图标，失败就保持 unknown
+    // 连上后探测一次对端系统/发行版，更新标签图标并存回连接配置给列表图标用，失败就保持 unknown
     void window.api.sessions
       .detectOs(session.id)
-      .then((os) => {
-        set({ tabs: get().tabs.map((t) => (t.id === tab.id ? { ...t, os } : t)) })
+      .then((info) => {
+        set({
+          tabs: get().tabs.map((t) => (t.id === tab.id ? { ...t, os: info.os, distro: info.distro } : t))
+        })
+        const saved = info.distro ?? info.os
+        if (saved !== session.os) {
+          void window.api.sessions.setOs(session.id, saved).catch(() => undefined)
+          set({
+            sessions: get().sessions.map((s) => (s.id === session.id ? { ...s, os: saved } : s))
+          })
+        }
       })
       .catch(() => undefined)
   },

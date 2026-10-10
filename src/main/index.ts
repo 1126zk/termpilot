@@ -155,6 +155,7 @@ function createWindow(storage: StorageService): void {
   mcp = new McpService(storage, terminal, sftp, exec2, sender)
   registerIpc(storage, terminal, sftp, mcp, new LocalFsService())
   ipcMain.handle(IPC.sessionDetectOs, (_e, sessionId: string) => exec2!.detectOs(sessionId))
+  ipcMain.handle(IPC.sessionSetOs, (_e, sessionId: string, os: string) => storage.setOs(sessionId, os))
   void mcp.apply(storage.getMcpSettings()).catch((error) => {
     console.error('[TermPilot] MCP start failed:', error)
   })

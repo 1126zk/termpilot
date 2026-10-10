@@ -35,6 +35,8 @@ export interface SessionConfig {
   sshOptions?: SshConnectOptions
   /** 端口映射规则，连接建立后挂在共享 SSH 连接上 */
   forwards?: ForwardRule[]
+  /** 探测到的对端系统/发行版（如 debian、windows），用于连接列表图标。 */
+  os?: string
   createdAt: number
   updatedAt: number
 }
@@ -68,6 +70,12 @@ export type TabKind = 'ssh' | 'local'
 /** 标签页左图标的操作系统种类。unknown 是还没探测完或认不出。 */
 export type OsKind = 'windows' | 'linux' | 'macos' | 'unknown'
 
+/** 对端系统探测结果。distro 是 /etc/os-release 的 ID 小写（如 debian、rhel），认不出就省略。 */
+export interface OsInfo {
+  os: OsKind
+  distro?: string
+}
+
 export interface Tab {
   id: string
   /** ssh 标签对应会话 id；本地终端为 null */
@@ -79,6 +87,8 @@ export interface Tab {
   remark?: string
   /** 对端操作系统，决定标签左边的图标。本机终端按本机系统，SSH 连接后探测一次。 */
   os?: OsKind
+  /** 发行版 id（如 debian），优先于 os 决定标签图标。 */
+  distro?: string
 }
 
 /** 创建终端的请求（renderer → main） */

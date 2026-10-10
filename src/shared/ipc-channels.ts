@@ -91,6 +91,7 @@ export const IPC = {
   localfsRead: 'localfs:read',
   localfsWrite: 'localfs:write',
   sessionDetectOs: 'session:detect-os',
+  sessionSetOs: 'session:set-os',
 
   winMinimize: 'win:minimize',
   winToggleMaximize: 'win:toggle-maximize',

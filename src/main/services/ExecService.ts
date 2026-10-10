@@ -1,6 +1,6 @@
 import type { StorageService } from './StorageService'
 import type { SshHold, SshPool } from './SshPool'
-import type { OsKind } from '../../shared/types'
+import type { OsInfo } from '../../shared/types'
 
 export interface ExecResult {
   stdout: string
@@ -135,25 +135,32 @@ export class ExecService {
   }
 
   /**
-   * 探测对端操作系统，给标签页左图标用。先跑 `uname -s`（POSIX），
+   * 探测对端操作系统，给标签页和连接列表的图标用。先跑 `uname -s`（POSIX），
+   * Linux 再读 /etc/os-release 的 ID 拿发行版；BSD 直接按 uname 认。
    * 认不出来再跑 `ver`（Windows cmd）。都不认就是 unknown。
    * 不走 exec 的 bash 脚本通道——Windows 上没有 bash/sh，那条路必败。
    */
-  async detectOs(sessionId: string): Promise<OsKind> {
+  async detectOs(sessionId: string): Promise<OsInfo> {
     try {
       const hold = await this.hold(sessionId)
       try {
         const uname = await rawExec(hold.client, 'uname -s', 5000)
-        if (/linux/i.test(uname)) return 'linux'
-        if (/darwin/i.test(uname)) return 'macos'
+        if (/linux/i.test(uname)) {
+          const release = await rawExec(hold.client, "sh -c '. /etc/os-release 2>/dev/null; echo $ID'", 5000)
+          const distro = release.trim().split(/\s+/)[0]?.toLowerCase()
+          return distro ? { os: 'linux', distro } : { os: 'linux' }
+        }
+        if (/freebsd/i.test(uname)) return { os: 'linux', distro: 'freebsd' }
+        if (/openbsd/i.test(uname)) return { os: 'linux', distro: 'openbsd' }
+        if (/darwin/i.test(uname)) return { os: 'macos' }
         const ver = await rawExec(hold.client, 'ver', 5000)
-        if (/windows/i.test(ver)) return 'windows'
-        return 'unknown'
+        if (/windows/i.test(ver)) return { os: 'windows' }
+        return { os: 'unknown' }
       } finally {
         hold.release()
       }
     } catch {
-      return 'unknown'
+      return { os: 'unknown' }
     }
   }
 }
