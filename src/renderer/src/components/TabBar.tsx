@@ -214,7 +214,7 @@ export function TabBar() {
                     setRenamingId(t.id)
                   }}
                 >
-                  {/* 平时是系统图标；悬停标签或标签被选中时变成叉；悬停叉本身时叉变红并带小方框 */}
+                  {/* 平时是系统图标；悬停标签或标签被选中时变成叉；悬停叉本身时叉变主题强调色并带小方框 */}
                   <span className="flex size-5 shrink-0 items-center justify-center">
                     <span className={cn('items-center justify-center', active ? 'hidden' : 'flex group-hover/tab:hidden')}>
                       <OsIcon os={t.os} distro={t.distro} />
@@ -223,7 +223,7 @@ export function TabBar() {
                       role="button"
                       title="关闭"
                       className={cn(
-                        'size-5 items-center justify-center rounded-[4px] hover:bg-muted-foreground/20 hover:text-destructive',
+                        'size-5 items-center justify-center rounded-[4px] hover:bg-muted-foreground/20 hover:text-primary',
                         active ? 'flex' : 'hidden group-hover/tab:flex'
                       )}
                       onClick={(e) => {
@@ -234,7 +234,7 @@ export function TabBar() {
                       <X strokeWidth={2} />
                     </span>
                   </span>
-                  <span className="min-w-0 truncate">{windowLabel(t.title, session?.name)}</span>
+                  <span className={cn('min-w-0 truncate', active && 'text-primary')}>{windowLabel(t.title, session?.name)}</span>
                 </button>
               </ContextMenuTrigger>
               <ContextMenuContent>

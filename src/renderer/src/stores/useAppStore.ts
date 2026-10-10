@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   MCP_DEFAULT_PORT,
+  unifiedTheme,
   type Appearance,
   type McpOpenTab,
   type McpRuntime,
@@ -16,7 +17,7 @@ import { newTermId } from '../../../shared/ids'
 import { osIconProps } from '../components/OsIcon'
 import { dropBuffer, editorKey } from '../editor/editorBuffers'
 import { terminalPool } from '../terminal/TerminalPool'
-import { applyAppearance, readCachedAppearance, resolveAppTheme, type ResolvedAppTheme } from '../theme/applyAppearance'
+import { applyAppearance, readCachedAppearance, type ResolvedAppTheme } from '../theme/applyAppearance'
 
 export interface EditorTab {
   key: string
@@ -34,6 +35,9 @@ interface TermState {
   error?: string
 }
 
+/** 右侧面板的四个板块 */
+export type RightPanelPane = 'files' | 'snippets' | 'history' | 'theme'
+
 interface AppState {
   sessions: SessionConfig[]
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
@@ -48,6 +52,8 @@ interface AppState {
   sidebarCollapsed: boolean
   /** 右侧文件面板是否打开 */
   rightPanelOpen: boolean
+  /** 右侧面板当前板块 */
+  rightPanelPane: RightPanelPane
   /** 树节点折叠，key 为 forward / local / 分组名 */
   collapsedGroups: Record<string, boolean>
   search: string
@@ -76,7 +82,6 @@ interface AppState {
   setHostNote: (hostKey: string, remark: string) => Promise<void>
   loadAppearance: () => Promise<void>
   setAppearance: (patch: Partial<Appearance>) => Promise<void>
-  syncSystemTheme: () => void
   loadMcp: () => Promise<void>
   onMcpState: (state: McpRuntime) => void
   onMcpOpenTab: (tab: McpOpenTab) => void
@@ -103,6 +108,7 @@ interface AppState {
 
   toggleSidebar: () => void
   toggleRightPanel: () => void
+  setRightPanelPane: (pane: RightPanelPane) => void
   toggleGroup: (group: string) => void
   selectSession: (id: string) => void
   openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean) => void
@@ -132,6 +138,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeTabId: null,
   sidebarCollapsed: false,
   rightPanelOpen: false,
+  rightPanelPane: 'files',
   collapsedGroups: {},
   search: '',
   selectedSessionId: null,
@@ -140,7 +147,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   editing: null,
   settingsOpen: false,
   appearance: bootAppearance,
-  resolvedApp: resolveAppTheme(bootAppearance.app),
+  resolvedApp: unifiedTheme(bootAppearance.theme).dark ? 'dark' : 'light',
   mcp: null,
   mcpRuntime: { running: false, port: MCP_DEFAULT_PORT, clients: 0 },
   notice: null,
@@ -225,11 +232,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ appearance: prev, resolvedApp: applyAppearance(prev) })
       throw error
     }
-  },
-
-  syncSystemTheme: () => {
-    if (get().appearance.app !== 'system') return
-    set({ resolvedApp: applyAppearance(get().appearance, false) })
   },
 
   loadMcp: async () => {
@@ -465,6 +467,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
+  setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
   toggleGroup: (group) =>
     set({ collapsedGroups: { ...get().collapsedGroups, [group]: !get().collapsedGroups[group] } }),
   selectSession: (id) => set({ selectedSessionId: id }),

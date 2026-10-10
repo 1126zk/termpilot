@@ -14,6 +14,8 @@ import type {
   RemoteFile,
   SftpInstallEvent,
   SftpTransferEvent,
+  Snippet,
+  HistoryEntry,
   Appearance,
   McpSettingsInput,
   SessionConfig,
@@ -176,6 +178,25 @@ const api = {
   appearance: {
     get: () => ipcRenderer.invoke(IPC.appearanceGet) as Promise<Appearance>,
     save: (input: Appearance) => ipcRenderer.invoke(IPC.appearanceSave, input) as Promise<Appearance>
+  },
+  snippets: {
+    list: () => ipcRenderer.invoke(IPC.snippetList) as Promise<Snippet[]>,
+    create: (name: string, command: string) =>
+      ipcRenderer.invoke(IPC.snippetCreate, name, command) as Promise<Snippet>,
+    update: (id: string, name: string, command: string) =>
+      ipcRenderer.invoke(IPC.snippetUpdate, id, name, command) as Promise<void>,
+    remove: (id: string) => ipcRenderer.invoke(IPC.snippetDelete, id) as Promise<void>
+  },
+  history: {
+    list: () => ipcRenderer.invoke(IPC.historyList) as Promise<HistoryEntry[]>,
+    clear: () => ipcRenderer.invoke(IPC.historyClear) as Promise<void>,
+    onChanged: (cb: () => void) => {
+      const listener = () => cb()
+      ipcRenderer.on(IPC.historyChanged, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.historyChanged, listener)
+      }
+    }
   },
   mcp: {
     get: () => ipcRenderer.invoke(IPC.mcpGet),

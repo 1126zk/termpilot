@@ -5,6 +5,7 @@ import { join, relative, resolve } from 'node:path'
 import { IPC } from '../shared/ipc-channels'
 import {
   MCP_HOST,
+  unifiedTheme,
   type AgentId,
   type CaptureRect,
   type CaptureReply,
@@ -110,6 +111,17 @@ export function registerIpc(
 
   ipcMain.handle(IPC.sftpTransferCancel, (_e, id: string) => sftp.cancelTransfer(id))
 
+  // --------------------------------------------------------------- 片段 / 历史
+  ipcMain.handle(IPC.snippetList, () => storage.listSnippets())
+  ipcMain.handle(IPC.snippetCreate, (_e, name: string, command: string) => storage.createSnippet(name, command))
+  ipcMain.handle(IPC.snippetUpdate, (_e, id: string, name: string, command: string) =>
+    storage.updateSnippet(id, name, command)
+  )
+  ipcMain.handle(IPC.snippetDelete, (_e, id: string) => storage.deleteSnippet(id))
+
+  ipcMain.handle(IPC.historyList, () => storage.listHistory())
+  ipcMain.handle(IPC.historyClear, () => storage.clearHistory())
+
   ipcMain.handle(IPC.sftpRename, (_e, sessionId: string, from: string, to: string) =>
     sftp.rename(sessionId, from, to)
   )
@@ -165,7 +177,8 @@ export function registerIpc(
 
   ipcMain.handle(IPC.appearanceSave, (event, input: Appearance) => {
     const saved = storage.saveAppearance(input)
-    paintFromContents(event.sender, saved.app)
+    const theme = unifiedTheme(saved.theme)
+    paintFromContents(event.sender, theme.dark, theme.ui['--background'] ?? '#1e1e1e')
     return saved
   })
 

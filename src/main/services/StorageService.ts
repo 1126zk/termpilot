@@ -8,11 +8,13 @@ import {
   MCP_HOST,
   type Appearance,
   type ForwardRule,
+  type HistoryEntry,
   type McpAuditEntry,
   type McpSettings,
   type McpSettingsInput,
   type SessionConfig,
   type SessionInput,
+  type Snippet,
   parseAppearance
 } from '../../shared/types'
 import { hostKeyOf } from '../../shared/host-key'
@@ -82,6 +84,9 @@ export class StorageService {
       )
     `)
     this.ensureColumn('appearance', 'experimental_screenshot', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('appearance', 'terminal_font', 'TEXT')
+    this.ensureColumn('appearance', 'terminal_size', 'INTEGER')
+    this.ensureColumn('appearance', 'theme', 'TEXT')
     this.ensureColumn('sessions', 'jump_host', 'TEXT')
     this.ensureColumn('sessions', 'jump_port', 'INTEGER')
     this.ensureColumn('sessions', 'jump_username', 'TEXT')
@@ -118,6 +123,21 @@ export class StorageService {
         tool TEXT NOT NULL,
         ok INTEGER NOT NULL,
         detail TEXT NOT NULL DEFAULT ''
+      )
+    `)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS snippets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        command TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+      )
+    `)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        command TEXT NOT NULL,
+        at INTEGER NOT NULL
       )
     `)
     this.db.exec(
@@ -476,11 +496,17 @@ export class StorageService {
       .prepare(`INSERT OR IGNORE INTO appearance (id, app_theme, terminal_theme) VALUES (1, 'dark', 'dark')`)
       .run()
     const row = this.db
-      .prepare('SELECT app_theme, terminal_theme, experimental_screenshot FROM appearance WHERE id = 1')
+      .prepare(
+        'SELECT app_theme, terminal_theme, theme, terminal_font, terminal_size, experimental_screenshot FROM appearance WHERE id = 1'
+      )
       .get()
     return parseAppearance({
-      app: row?.app_theme,
-      terminal: row?.terminal_theme,
+      theme: row ? optionalText(row.theme) : undefined,
+      // 老库没有 theme 列的值，按 app + terminal 组合映射；system 按深色
+      app: row ? optionalText(row.app_theme) : undefined,
+      terminal: row ? optionalText(row.terminal_theme) : undefined,
+      terminalFont: row ? optionalText(row.terminal_font) : undefined,
+      terminalSize: row ? optionalInteger(row.terminal_size) : undefined,
       experimentalScreenshot: flag(row?.experimental_screenshot ?? 0)
     })
   }
@@ -490,10 +516,62 @@ export class StorageService {
     this.getAppearance()
     this.db
       .prepare(
-        'UPDATE appearance SET app_theme = ?, terminal_theme = ?, experimental_screenshot = ? WHERE id = 1'
+        `UPDATE appearance
+         SET theme = ?, terminal_font = ?, terminal_size = ?, experimental_screenshot = ?
+         WHERE id = 1`
       )
-      .run(next.app, next.terminal, next.experimentalScreenshot ? 1 : 0)
+      .run(next.theme, next.terminalFont, next.terminalSize, next.experimentalScreenshot ? 1 : 0)
     return next
+  }
+
+  listSnippets(): Snippet[] {
+    const rows = this.db.prepare('SELECT * FROM snippets ORDER BY created_at ASC, rowid ASC').all()
+    return rows.map((row) => ({
+      id: text(row.id),
+      name: text(row.name),
+      command: text(row.command),
+      createdAt: integer(row.created_at, 0)
+    }))
+  }
+
+  createSnippet(name: string, command: string): Snippet {
+    const snippet: Snippet = { id: randomUUID(), name: name.trim(), command, createdAt: Date.now() }
+    this.db
+      .prepare('INSERT INTO snippets (id, name, command, created_at) VALUES (?, ?, ?, ?)')
+      .run(snippet.id, snippet.name, snippet.command, snippet.createdAt)
+    return snippet
+  }
+
+  updateSnippet(id: string, name: string, command: string): void {
+    this.db.prepare('UPDATE snippets SET name = ?, command = ? WHERE id = ?').run(name.trim(), command, id)
+  }
+
+  deleteSnippet(id: string): void {
+    this.db.prepare('DELETE FROM snippets WHERE id = ?').run(id)
+  }
+
+  listHistory(): HistoryEntry[] {
+    const rows = this.db.prepare('SELECT id, command, at FROM history ORDER BY id DESC LIMIT 200').all()
+    return rows.map((row) => ({
+      id: integer(row.id, 0),
+      command: text(row.command),
+      at: integer(row.at, 0)
+    }))
+  }
+
+  /** 从终端按键流结算出来的一条命令。连续重复的不再插，只留最近 200 条。返回是否真的写入了。 */
+  appendHistory(command: string): boolean {
+    const cmd = command.trim().slice(0, 500)
+    if (cmd.length < 2) return false
+    const latest = this.db.prepare('SELECT command FROM history ORDER BY id DESC LIMIT 1').get()
+    if (latest && text(latest.command) === cmd) return false
+    this.db.prepare('INSERT INTO history (command, at) VALUES (?, ?)').run(cmd, Date.now())
+    this.db.exec('DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 200)')
+    return true
+  }
+
+  clearHistory(): void {
+    this.db.exec('DELETE FROM history')
   }
 
   saveMcpSettings(input: McpSettingsInput): McpSettings {

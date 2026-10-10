@@ -23,6 +23,8 @@ interface PoolEntry {
   disposeScrollHint: () => void
 }
 
+const DEFAULT_FONT_FAMILY = 'Consolas, "Cascadia Mono", "Microsoft YaHei", monospace'
+
 export interface TermLook {
   cols: number
   rows: number
@@ -37,7 +39,9 @@ class TerminalPool {
   private entries = new Map<string, PoolEntry>()
   /** 存盘定时器的清理。终端销毁时停掉。 */
   private savers = new Map<string, () => void>()
-  private palette: ITheme = terminalPalette('light').theme
+  private palette: ITheme = terminalPalette('termius-dark').theme
+  /** 字体设置来自外观配置，启动时 applyAppearance 会推过来。 */
+  private font = { family: DEFAULT_FONT_FAMILY, size: 14 }
 
   /** 换终端配色。已经打开的终端一起改，后面新建的也用这一套。 */
   setTheme(theme: ITheme): void {
@@ -45,13 +49,28 @@ class TerminalPool {
     for (const entry of this.entries.values()) this.paint(entry)
   }
 
+  /** 换终端字体/字号。已经打开的终端一起改并重排，后面新建的也用这一套。 */
+  setFont(family: string, size: number): void {
+    this.font = { family, size }
+    for (const entry of this.entries.values()) {
+      entry.term.options.fontFamily = family
+      entry.term.options.fontSize = size
+      entry.term.refresh(0, Math.max(0, entry.term.rows - 1))
+      try {
+        entry.fit.fit()
+      } catch {
+        /* 容器不可见时 fit 会抛错，忽略 */
+      }
+    }
+  }
+
   ensure(termId: string): PoolEntry {
     const existing = this.entries.get(termId)
     if (existing) return existing
 
     const term = new Terminal({
-      fontFamily: 'Consolas, "Cascadia Mono", "Microsoft YaHei", monospace',
-      fontSize: 14,
+      fontFamily: this.font.family,
+      fontSize: this.font.size,
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'block',
@@ -182,7 +201,7 @@ class TerminalPool {
     return {
       cols: term.cols,
       rows: term.rows,
-      fontFamily: term.options.fontFamily || 'Consolas, "Cascadia Mono", "Microsoft YaHei", monospace',
+      fontFamily: term.options.fontFamily || DEFAULT_FONT_FAMILY,
       fontSize: term.options.fontSize ?? 14,
       lineHeight: term.options.lineHeight ?? 1.2,
       theme,
@@ -208,7 +227,7 @@ class TerminalPool {
     return composeTerminalRange(term, start, end, {
       cellWidth,
       cellHeight,
-      fontFamily: term.options.fontFamily || 'Consolas, "Cascadia Mono", "Microsoft YaHei", monospace',
+      fontFamily: term.options.fontFamily || DEFAULT_FONT_FAMILY,
       fontSize: term.options.fontSize ?? 14,
       theme
     })

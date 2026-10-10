@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppSidebar } from './components/Sidebar'
-import { FileTree } from './components/FileTree'
+import { RightPanel } from './components/RightPanel'
 import { TabBar } from './components/TabBar'
 import { EditorTabBar } from './components/EditorTabBar'
 import { SessionForm } from './components/SessionForm'
@@ -20,7 +20,6 @@ export default function App() {
   const loadSessions = useAppStore((s) => s.loadSessions)
   const loadWindows = useAppStore((s) => s.loadWindows)
   const loadAppearance = useAppStore((s) => s.loadAppearance)
-  const syncSystemTheme = useAppStore((s) => s.syncSystemTheme)
   const loadMcp = useAppStore((s) => s.loadMcp)
   const onTermStatus = useAppStore((s) => s.onTermStatus)
   const onTermMeta = useAppStore((s) => s.onTermMeta)
@@ -63,9 +62,6 @@ export default function App() {
     void loadSessions().then(() => loadWindows())
     loadAppearance()
     loadMcp()
-    const themeQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const onTheme = () => syncSystemTheme()
-    themeQuery.addEventListener('change', onTheme)
     const offStatus = window.api.term.onStatus(onTermStatus)
     const offMeta = window.api.term.onMeta(onTermMeta)
     const offMcpState = window.api.mcp.onState(onMcpState)
@@ -73,7 +69,6 @@ export default function App() {
     const offMcpClose = window.api.mcp.onCloseTab(onMcpCloseTab)
     const offSessions = window.api.sessions.onChanged(onSessionsChanged)
     return () => {
-      themeQuery.removeEventListener('change', onTheme)
       offStatus()
       offMeta()
       offMcpState()
@@ -85,7 +80,6 @@ export default function App() {
     loadSessions,
     loadWindows,
     loadAppearance,
-    syncSystemTheme,
     loadMcp,
     onTermStatus,
     onTermMeta,
@@ -120,11 +114,7 @@ export default function App() {
               )}
             </div>
           </SidebarInset>
-          {rightPanelOpen && (
-            <div className="flex w-80 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
-              <FileTree />
-            </div>
-          )}
+          {rightPanelOpen && <RightPanel />}
         </div>
         <SessionForm />
         <SettingsDialog />

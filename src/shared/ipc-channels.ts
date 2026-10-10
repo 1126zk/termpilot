@@ -47,6 +47,16 @@ export const IPC = {
   /** renderer → main，取消一条进行中的传输 */
   sftpTransferCancel: 'sftp:transfer-cancel',
 
+  snippetList: 'snippet:list',
+  snippetCreate: 'snippet:create',
+  snippetUpdate: 'snippet:update',
+  snippetDelete: 'snippet:delete',
+
+  historyList: 'history:list',
+  historyClear: 'history:clear',
+  /** main → renderer，写入了新的历史指令 */
+  historyChanged: 'history:changed',
+
   mcpAgents: 'mcp:agents',
   mcpApplyAgent: 'mcp:apply-agent',
   mcpAudit: 'mcp:audit',

@@ -1,39 +1,22 @@
 import { BrowserWindow, nativeTheme, type WebContents } from 'electron'
-import type { AppTheme } from '../shared/types'
 
-/** 窗口底色和界面 --background 对齐。深色是 #1e1e1e。 */
-export function windowBackground(dark: boolean): string {
-  return dark ? '#1e1e1e' : '#ffffff'
+/**
+ * 系统标题栏按钮的明暗跟着当前主题走（themeSource 固定为 dark/light，不再跟随系统）。
+ * 返回该主题是不是深色，给窗口底色用。
+ */
+export function followAppTheme(dark: boolean): boolean {
+  nativeTheme.themeSource = dark ? 'dark' : 'light'
+  return dark
 }
 
-export function isDarkChrome(): boolean {
-  return nativeTheme.shouldUseDarkColors
-}
-
-/** 让系统标题栏按钮跟着应用主题。跟随系统时，系统切换也会触发 updated。 */
-export function followAppTheme(appTheme: AppTheme): boolean {
-  nativeTheme.themeSource = appTheme === 'system' ? 'system' : appTheme
-  return nativeTheme.shouldUseDarkColors
-}
-
-export function paintWindowChrome(win: BrowserWindow, dark = isDarkChrome()): void {
+/** 窗口还没显示时改背景色，Windows 会把第一帧停在白屏。 */
+export function paintWindowChrome(win: BrowserWindow, background: string): void {
   if (process.platform !== 'win32' || win.isDestroyed()) return
-  win.setBackgroundColor(windowBackground(dark))
+  win.setBackgroundColor(background)
 }
 
-export function paintFromContents(contents: WebContents, appTheme: AppTheme): void {
-  const dark = followAppTheme(appTheme)
+export function paintFromContents(contents: WebContents, dark: boolean, background: string): void {
+  nativeTheme.themeSource = dark ? 'dark' : 'light'
   const win = BrowserWindow.fromWebContents(contents)
-  if (win) paintWindowChrome(win, dark)
-}
-
-export function watchSystemChrome(): void {
-  nativeTheme.on('updated', () => {
-    const dark = nativeTheme.shouldUseDarkColors
-    for (const win of BrowserWindow.getAllWindows()) {
-      // 窗口还没显示时改背景色，Windows 会把第一帧停在白屏。
-      if (!win.isVisible()) continue
-      paintWindowChrome(win, dark)
-    }
-  })
+  if (win) paintWindowChrome(win, background)
 }

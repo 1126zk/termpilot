@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
-import { followAppTheme, watchSystemChrome, windowBackground } from './window-chrome'
+import { followAppTheme } from './window-chrome'
+import { unifiedTheme } from '../shared/types'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -108,14 +109,15 @@ function recoverBlankWindow(win: BrowserWindow): void {
 }
 
 function createWindow(storage: StorageService): void {
-  const dark = followAppTheme(storage.getAppearance().app)
+  const theme = unifiedTheme(storage.getAppearance().theme)
+  followAppTheme(theme.dark)
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: windowBackground(dark),
+    backgroundColor: theme.ui['--background'] ?? '#1e1e1e',
     title: 'TermPilot',
     icon: appIcon(),
     autoHideMenuBar: true,
@@ -189,7 +191,6 @@ if (!single) {
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
-    watchSystemChrome()
     const sessions = new StorageService()
     storage = sessions
     sessions.setLaunch(process.execPath, app.isPackaged ? [] : [app.getAppPath()])

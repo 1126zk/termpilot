@@ -64,6 +64,8 @@ export class TerminalService {
   private viewReady = new Set<string>()
   /** 正在退出。此时断开不要把窗口从库里删掉。 */
   private parking = false
+  /** 每扇终端正在输入的那一行。回车结算进历史指令。 */
+  private commandLines = new Map<string, { buf: string; dirty: boolean; cr: boolean }>()
 
   constructor(
     private storage: StorageService,
@@ -86,7 +88,42 @@ export class TerminalService {
   }
 
   input(termId: string, data: string): void {
+    this.captureInput(termId, data)
     this.terms.get(termId)?.channel?.write(data)
+  }
+
+  /**
+   * 按键流按行组装历史指令：回车结算一行；退格删一个字符；含方向键、粘贴换行等
+   * 其他控制字符的行丢弃；strip 后少于 2 个字符的也丢弃。CRLF 里的 LF 不算控制字符。
+   */
+  private captureInput(termId: string, data: string): void {
+    let state = this.commandLines.get(termId) ?? { buf: '', dirty: false, cr: false }
+    for (const ch of data) {
+      if (ch === '\r') {
+        const command = state.buf.trim()
+        if (!state.dirty && command.length >= 2 && this.storage.appendHistory(command)) {
+          const wc = this.getSender()
+          if (wc && !wc.isDestroyed()) wc.send(IPC.historyChanged)
+        }
+        state = { buf: '', dirty: false, cr: true }
+        continue
+      }
+      if (ch === '\n' && state.cr) {
+        state.cr = false
+        continue
+      }
+      state.cr = false
+      if (ch === '\x7f' || ch === '\b') {
+        state.buf = state.buf.slice(0, -1)
+        continue
+      }
+      if (ch.charCodeAt(0) < 0x20) {
+        state.dirty = true
+        continue
+      }
+      state.buf += ch
+    }
+    this.commandLines.set(termId, state)
   }
 
   resize(termId: string, cols: number, rows: number): void {
@@ -134,6 +171,7 @@ export class TerminalService {
     this.terms.delete(termId)
     this.output.delete(termId)
     this.savedLines.delete(termId)
+    this.commandLines.delete(termId)
     this.dropped.delete(termId)
     this.lastStatus.delete(termId)
     this.viewReady.delete(termId)
