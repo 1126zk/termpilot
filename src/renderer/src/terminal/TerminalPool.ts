@@ -276,6 +276,10 @@ class TerminalPool {
     term.focus()
   }
 
+  focus(termId: string): void {
+    this.entries.get(termId)?.term.focus()
+  }
+
   /** 读出缓冲里的行。start 含、end 不含。没传范围时返回当前画面。 */
   bufferLines(
     termId: string,

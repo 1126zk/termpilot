@@ -123,8 +123,8 @@ export function registerIpc(
   )
   ipcMain.handle(IPC.snippetDelete, (_e, id: string) => storage.deleteSnippet(id))
 
-  ipcMain.handle(IPC.historyList, () => storage.listHistory())
-  ipcMain.handle(IPC.historyClear, () => storage.clearHistory())
+  ipcMain.handle(IPC.historyList, (_e, termId: string) => storage.listHistory(termId))
+  ipcMain.handle(IPC.historyClear, (_e, termId: string) => storage.clearHistory(termId))
 
   ipcMain.handle(IPC.sftpRename, (_e, sessionId: string, from: string, to: string) =>
     sftp.rename(sessionId, from, to)

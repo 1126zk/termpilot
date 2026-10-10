@@ -88,6 +88,7 @@ export class StorageService {
     this.ensureColumn('appearance', 'terminal_size', 'INTEGER')
     this.ensureColumn('appearance', 'theme', 'TEXT')
     this.ensureColumn('open_terms', 'shell', 'TEXT')
+    this.ensureColumn('history', 'term_id', 'TEXT')
     this.ensureColumn('sessions', 'jump_host', 'TEXT')
     this.ensureColumn('sessions', 'jump_port', 'INTEGER')
     this.ensureColumn('sessions', 'jump_username', 'TEXT')
@@ -568,28 +569,35 @@ export class StorageService {
     this.db.prepare('DELETE FROM snippets WHERE id = ?').run(id)
   }
 
-  listHistory(): HistoryEntry[] {
-    const rows = this.db.prepare('SELECT id, command, at FROM history ORDER BY id DESC LIMIT 200').all()
+  listHistory(termId: string): HistoryEntry[] {
+    const rows = this.db
+      .prepare('SELECT id, command, at FROM history WHERE term_id = ? ORDER BY id DESC LIMIT 200')
+      .all(termId)
     return rows.map((row) => ({
       id: integer(row.id, 0),
+      termId,
       command: text(row.command),
       at: integer(row.at, 0)
     }))
   }
 
   /** 从终端按键流结算出来的一条命令。连续重复的不再插，只留最近 200 条。返回是否真的写入了。 */
-  appendHistory(command: string): boolean {
+  appendHistory(termId: string, command: string): boolean {
     const cmd = command.trim().slice(0, 500)
     if (cmd.length < 2) return false
-    const latest = this.db.prepare('SELECT command FROM history ORDER BY id DESC LIMIT 1').get()
+    const latest = this.db
+      .prepare('SELECT command FROM history WHERE term_id = ? ORDER BY id DESC LIMIT 1')
+      .get(termId)
     if (latest && text(latest.command) === cmd) return false
-    this.db.prepare('INSERT INTO history (command, at) VALUES (?, ?)').run(cmd, Date.now())
-    this.db.exec('DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 200)')
+    this.db.prepare('INSERT INTO history (term_id, command, at) VALUES (?, ?, ?)').run(termId, cmd, Date.now())
+    this.db.prepare(
+      'DELETE FROM history WHERE term_id = ? AND id NOT IN (SELECT id FROM history WHERE term_id = ? ORDER BY id DESC LIMIT 200)'
+    ).run(termId, termId)
     return true
   }
 
-  clearHistory(): void {
-    this.db.exec('DELETE FROM history')
+  clearHistory(termId: string): void {
+    this.db.prepare('DELETE FROM history WHERE term_id = ?').run(termId)
   }
 
   saveMcpSettings(input: McpSettingsInput): McpSettings {

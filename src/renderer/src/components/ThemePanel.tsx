@@ -71,7 +71,8 @@ export function ThemePanel() {
       </div>
 
       {/* 只有主题列表自己滚动，滑块因此细小 */}
-      <p className="px-3 pt-4 pb-1.5 text-xs text-muted-foreground">主题</p>
+      <div className="mx-3 mt-3 h-px bg-muted-foreground/15" />
+      <p className="px-3 pt-3 pb-1.5 text-xs text-muted-foreground">主题</p>
       <ScrollArea className="min-h-0 flex-1 px-3 pb-3">
         <div className="grid gap-1.5">
           {UNIFIED_THEMES.map((item) => (
@@ -126,8 +127,8 @@ function ThemeCard(props: { item: UnifiedTheme; selected: boolean; onSelect: () 
     <button
       type="button"
       className={cn(
-        'group flex items-center gap-2.5 rounded-lg border px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground',
-        props.selected && 'border-foreground/40 text-foreground ring-1 ring-foreground/20'
+        'group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+        props.selected && 'bg-accent text-primary hover:bg-accent hover:text-primary'
       )}
       onClick={props.onSelect}
     >

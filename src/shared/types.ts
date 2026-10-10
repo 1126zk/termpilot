@@ -2634,6 +2634,8 @@ export interface Snippet {
 /** 一条历史指令。从终端按键流里结算出来，只留最近 200 条 */
 export interface HistoryEntry {
   id: number
+  /** 这条命令属于哪扇终端，历史按窗口隔离 */
+  termId: string
   command: string
   at: number
 }

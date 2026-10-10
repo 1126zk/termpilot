@@ -192,10 +192,10 @@ const api = {
     remove: (id: string) => ipcRenderer.invoke(IPC.snippetDelete, id) as Promise<void>
   },
   history: {
-    list: () => ipcRenderer.invoke(IPC.historyList) as Promise<HistoryEntry[]>,
-    clear: () => ipcRenderer.invoke(IPC.historyClear) as Promise<void>,
-    onChanged: (cb: () => void) => {
-      const listener = () => cb()
+    list: (termId: string) => ipcRenderer.invoke(IPC.historyList, termId) as Promise<HistoryEntry[]>,
+    clear: (termId: string) => ipcRenderer.invoke(IPC.historyClear, termId) as Promise<void>,
+    onChanged: (cb: (termId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, termId: string) => cb(termId)
       ipcRenderer.on(IPC.historyChanged, listener)
       return () => {
         ipcRenderer.removeListener(IPC.historyChanged, listener)

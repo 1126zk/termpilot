@@ -101,13 +101,19 @@ export class TerminalService {
    * 其他控制字符的行丢弃；strip 后少于 2 个字符的也丢弃。CRLF 里的 LF 不算控制字符。
    */
   private captureInput(termId: string, data: string): void {
+    // 滤掉非输入序列：焦点事件报告（\x1b[I 进 / \x1b[O 出，focus() 会触发）和括号粘贴标记
+    const cleaned = data
+      .replaceAll('\x1b[I', '')
+      .replaceAll('\x1b[O', '')
+      .replaceAll('\x1b[200~', '')
+      .replaceAll('\x1b[201~', '')
     let state = this.commandLines.get(termId) ?? { buf: '', dirty: false, cr: false }
-    for (const ch of data) {
+    for (const ch of cleaned) {
       if (ch === '\r') {
         const command = state.buf.trim()
-        if (!state.dirty && command.length >= 2 && this.storage.appendHistory(command)) {
+        if (!state.dirty && command.length >= 2 && this.storage.appendHistory(termId, command)) {
           const wc = this.getSender()
-          if (wc && !wc.isDestroyed()) wc.send(IPC.historyChanged)
+          if (wc && !wc.isDestroyed()) wc.send(IPC.historyChanged, termId)
         }
         state = { buf: '', dirty: false, cr: true }
         continue

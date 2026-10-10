@@ -13,13 +13,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
+import { terminalPool } from '../terminal/TerminalPool'
 import type { Snippet } from '../../../shared/types'
 
-/** 发到当前活跃终端执行。没有活跃终端时静默不做事。 */
-export function sendToActiveTerminal(command: string): void {
+/** 发到当前活跃终端并把焦点还给终端。execute 为 true 时补回车直接执行，false 只填入等用户自己回车。没有活跃终端时静默不做事。 */
+export function sendToActiveTerminal(command: string, execute = true): void {
   const activeTabId = useAppStore.getState().activeTabId
   if (!activeTabId) return
-  window.api.term.input(activeTabId, `${command}\r`)
+  window.api.term.input(activeTabId, execute ? `${command}\r` : command)
+  terminalPool.focus(activeTabId)
 }
 
 /** 指令片段：常用命令存起来，点一下就发到当前终端。 */
