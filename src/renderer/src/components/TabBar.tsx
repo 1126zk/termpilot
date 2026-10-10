@@ -58,7 +58,7 @@ function RestoreIcon() {
 
 /** 顶栏所有图标按钮的统一规格：36×36 正方形高亮，和标签胶囊视觉同档。 */
 const topBtn =
-  'flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
+  'flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
 /** 自绘窗口控制按钮：右侧面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。 */
 function WindowControls() {
@@ -241,12 +241,11 @@ export function TabBar() {
         followPointer(id)
       },
       onEnd: () => {
-        // 拖完会补一个 click，不能当成选中/关闭
+        // 拖完会补一个 click，不能当成选中/关闭。排序只留在内存，不持久化
         suppressTabClick.current = true
         prevLeft.current.clear()
         setDragTabId(null)
         setDragOffset(0)
-        window.api.term.reorder(useAppStore.getState().tabs.map((tab) => tab.id))
       }
     })
   }

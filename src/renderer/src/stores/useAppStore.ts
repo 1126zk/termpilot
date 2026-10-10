@@ -82,7 +82,6 @@ interface AppState {
 
   loadSessions: () => Promise<void>
   loadLocalShells: () => Promise<void>
-  loadWindows: () => Promise<void>
   setHostNote: (hostKey: string, remark: string) => Promise<void>
   loadAppearance: () => Promise<void>
   setAppearance: (patch: Partial<Appearance>) => Promise<void>
@@ -132,7 +131,6 @@ interface AppState {
 }
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
-let restoredWindows = false
 const bootAppearance = readCachedAppearance()
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -166,64 +164,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadLocalShells: async () => {
     set({ localShells: await window.api.shells.list() })
-  },
-
-  loadWindows: async () => {
-    if (restoredWindows || get().tabs.length > 0) return
-    restoredWindows = true
-    const saved = await window.api.term.saved()
-    if (saved.length === 0) return
-    const tabs: Tab[] = saved.map((term) => {
-      const session = term.sessionId ? get().sessions.find((s) => s.id === term.sessionId) : undefined
-      const platform = window.api.platform
-      const known =
-        term.kind === 'local'
-          ? {
-              os: (platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux') as Tab['os'],
-              shell: term.shell
-            }
-          : osIconProps(session?.os)
-      return {
-        id: term.id,
-        sessionId: term.sessionId,
-        kind: term.kind,
-        title: term.title,
-        remark: term.remark,
-        ...known
-      }
-    })
-    const current = tabs[tabs.length - 1]
-    set({ tabs, activeTabId: current.id, selectedSessionId: current.sessionId ?? get().selectedSessionId })
-    for (const term of saved) {
-      window.api.term.create({
-        termId: term.id,
-        kind: term.kind,
-        sessionId: term.sessionId ?? undefined,
-        title: term.title,
-        shell: term.shell,
-        cols: 80,
-        rows: 24
-      })
-    }
-    // 恢复的 SSH 窗口补一次系统/发行版探测，图标刷新到标签和连接列表
-    const sshSessionIds = new Set(
-      saved.filter((t) => t.kind === 'ssh' && t.sessionId).map((t) => t.sessionId!)
-    )
-    for (const sessionId of sshSessionIds) {
-      void window.api.sessions
-        .detectOs(sessionId)
-        .then((info) => {
-          set({
-            tabs: get().tabs.map((t) =>
-              t.sessionId === sessionId && t.kind === 'ssh' ? { ...t, os: info.os, distro: info.distro } : t
-            )
-          })
-          const savedOs = info.distro ?? info.os
-          void window.api.sessions.setOs(sessionId, savedOs).catch(() => undefined)
-          set({ sessions: get().sessions.map((s) => (s.id === sessionId ? { ...s, os: savedOs } : s)) })
-        })
-        .catch(() => undefined)
-    }
   },
 
   setHostNote: async (hostKey, remark) => {

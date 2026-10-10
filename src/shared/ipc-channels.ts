@@ -10,18 +10,11 @@ export const IPC = {
   hostNoteList: 'host:note-list',
   hostNoteSet: 'host:note-set',
 
-  termSaved: 'term:saved',
-  /** 恢复窗口时取出上次退出时已经画好的行。不再回放原始流。 */
-  termHistory: 'term:history',
-  /** 界面把当前缓冲里的行交给主进程存盘 */
-  termScrollSave: 'term:scroll-save',
   termBindView: 'term:bind-view',
   termCreate: 'term:create',
   termInput: 'term:input',
   termResize: 'term:resize',
   termClose: 'term:close',
-  /** 标签栏拖动排序后，按新顺序持久化 */
-  termReorder: 'term:reorder',
   /** renderer → main，窗口短标题变了 */
   termLabel: 'term:label',
   /** main → renderer，助手改了终端备注 */

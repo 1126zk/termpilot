@@ -54,16 +54,6 @@ export function registerIpc(
   ipcMain.handle(IPC.hostNoteSet, (_e, hostKey: string, remark: string) => storage.setHostNote(hostKey, remark))
 
   // -------------------------------------------------------------- 终端
-  ipcMain.handle(IPC.termSaved, () => terminal.saved())
-
-  ipcMain.handle(IPC.termHistory, (_e, termId: string) =>
-    typeof termId === 'string' ? terminal.history(termId) : { text: '' }
-  )
-
-  ipcMain.on(IPC.termScrollSave, (_e, termId: string, text: string) => {
-    if (typeof termId === 'string' && typeof text === 'string') terminal.saveScrollback(termId, text)
-  })
-
   ipcMain.handle(IPC.termCreate, (_e, opts: TermCreateOptions) => terminal.create(opts))
 
   ipcMain.on(IPC.termBindView, (_e, termId: string) => {
@@ -89,10 +79,6 @@ export function registerIpc(
 
   ipcMain.on(IPC.termClose, (_e, termId: string) => {
     terminal.close(termId)
-  })
-
-  ipcMain.handle(IPC.termReorder, (_e, ids: string[]) => {
-    if (Array.isArray(ids)) storage.reorderOpenTerms(ids)
   })
 
   // --------------------------------------------------------------- SFTP

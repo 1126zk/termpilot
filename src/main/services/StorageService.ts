@@ -87,7 +87,6 @@ export class StorageService {
     this.ensureColumn('appearance', 'terminal_font', 'TEXT')
     this.ensureColumn('appearance', 'terminal_size', 'INTEGER')
     this.ensureColumn('appearance', 'theme', 'TEXT')
-    this.ensureColumn('open_terms', 'shell', 'TEXT')
     this.ensureColumn('history', 'term_id', 'TEXT')
     this.ensureColumn('sessions', 'jump_host', 'TEXT')
     this.ensureColumn('sessions', 'jump_port', 'INTEGER')
@@ -98,17 +97,8 @@ export class StorageService {
     this.ensureColumn('sessions', 'config_host', 'TEXT')
     this.ensureColumn('sessions', 'forwards', 'TEXT')
     this.ensureColumn('sessions', 'os', 'TEXT')
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS open_terms (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        kind TEXT NOT NULL,
-        title TEXT NOT NULL,
-        remark TEXT NOT NULL DEFAULT '',
-        scrollback TEXT NOT NULL DEFAULT '',
-        sort_order INTEGER NOT NULL
-      )
-    `)
+    // 窗口持久化已移除：老库里的 open_terms 整个清掉，启动永远是空白
+    this.db.exec('DROP TABLE IF EXISTS open_terms')
     this.dropRemovedKinds()
     this.backfillPublicIds()
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id)')
@@ -196,7 +186,6 @@ export class StorageService {
       .filter(Boolean)
       .join(' OR ')
     if (!where) return
-    this.db.exec(`DELETE FROM open_terms WHERE session_id IN (SELECT id FROM sessions WHERE ${where})`)
     this.db.exec(`DELETE FROM sessions WHERE ${where}`)
   }
 
@@ -337,7 +326,6 @@ export class StorageService {
 
   delete(id: string): boolean {
     const alias = this.configAlias(id)
-    this.db.prepare('DELETE FROM open_terms WHERE session_id = ?').run(id)
     const result = this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
     if (result.changes > 0 && alias) {
       try {
@@ -347,79 +335,6 @@ export class StorageService {
       }
     }
     return result.changes > 0
-  }
-
-  listOpenTerms(): {
-    id: string
-    sessionId: string | null
-    kind: 'ssh' | 'local'
-    title: string
-    remark: string
-    shell?: string
-    scrollback: string
-  }[] {
-    const rows = this.db.prepare('SELECT * FROM open_terms ORDER BY sort_order ASC, rowid ASC').all()
-    return rows.flatMap((row) => {
-      const kind = row.kind === 'local' ? 'local' : row.kind === 'ssh' ? 'ssh' : null
-      if (!kind) return []
-      return [
-        {
-          id: text(row.id),
-          sessionId: optionalText(row.session_id) ?? null,
-          kind,
-          title: text(row.title) || '窗口',
-          remark: text(row.remark),
-          shell: optionalText(row.shell),
-          scrollback: text(row.scrollback)
-        }
-      ]
-    })
-  }
-
-  saveOpenTerm(term: {
-    id: string
-    sessionId: string | null
-    kind: 'ssh' | 'local'
-    title: string
-    remark: string
-    shell?: string
-  }): void {
-    const orderRow = this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS n FROM open_terms').get()
-    const next = integer(orderRow && 'n' in orderRow ? orderRow.n : 0, 0) + 1
-    this.db
-      .prepare(
-        `INSERT INTO open_terms (id, session_id, kind, title, remark, shell, scrollback, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, '', ?)
-         ON CONFLICT(id) DO UPDATE SET
-           session_id = excluded.session_id,
-           kind = excluded.kind,
-           title = excluded.title,
-           remark = excluded.remark,
-           shell = excluded.shell`
-      )
-      .run(term.id, term.sessionId, term.kind, term.title, term.remark, term.shell ?? null, next)
-  }
-
-  /** 存的是界面已经画好的行，不是原始 PTY 流。 */
-  saveTermScrollback(id: string, scrollback: string): void {
-    this.db.prepare('UPDATE open_terms SET scrollback = ? WHERE id = ?').run(scrollback.slice(-200_000), id)
-  }
-
-  /** 标签栏拖动排序后按新顺序重写 sort_order，重启恢复时按它排。 */
-  reorderOpenTerms(ids: string[]): void {
-    this.db.exec('BEGIN')
-    try {
-      const update = this.db.prepare('UPDATE open_terms SET sort_order = ? WHERE id = ?')
-      ids.forEach((id, index) => update.run(index + 1, id))
-      this.db.exec('COMMIT')
-    } catch (error) {
-      this.db.exec('ROLLBACK')
-      throw error
-    }
-  }
-
-  forgetOpenTerm(id: string): void {
-    this.db.prepare('DELETE FROM open_terms WHERE id = ?').run(id)
   }
 
   /** 复制一条连接，凭据密文原样带上，不把密码交回界面 */

@@ -21,7 +21,6 @@ import type {
   McpSettingsInput,
   SessionConfig,
   SessionInput,
-  SavedTerm,
   TermCreateOptions,
   TermDataEvent,
   TermLinesReply,
@@ -62,17 +61,12 @@ const api = {
       ipcRenderer.invoke(IPC.hostNoteSet, hostKey, remark) as Promise<Record<string, string>>
   },
   term: {
-    saved: () => ipcRenderer.invoke(IPC.termSaved) as Promise<SavedTerm[]>,
-    history: (termId: string) =>
-      ipcRenderer.invoke(IPC.termHistory, termId) as Promise<{ text: string }>,
-    saveScrollback: (termId: string, text: string) => ipcRenderer.send(IPC.termScrollSave, termId, text),
     bindView: (termId: string) => ipcRenderer.send(IPC.termBindView, termId),
     create: (opts: TermCreateOptions) => ipcRenderer.invoke(IPC.termCreate, opts),
     input: (termId: string, data: string) => ipcRenderer.send(IPC.termInput, termId, data),
     resize: (termId: string, cols: number, rows: number) =>
       ipcRenderer.send(IPC.termResize, termId, cols, rows),
     close: (termId: string) => ipcRenderer.send(IPC.termClose, termId),
-    reorder: (ids: string[]) => ipcRenderer.invoke(IPC.termReorder, ids),
     label: (termId: string, patch: { title?: string; remark?: string }) =>
       ipcRenderer.send(IPC.termLabel, termId, patch),
     onMeta: (cb: (e: TermMetaEvent) => void) => {

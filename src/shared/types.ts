@@ -118,17 +118,6 @@ export interface TermCreateOptions {
   rows: number
 }
 
-/** 重启后要恢复的终端。编号、标题和备注留着，上次退出时已经画好的行也留着。 */
-export interface SavedTerm {
-  id: string
-  sessionId: string | null
-  kind: 'ssh' | 'local'
-  title: string
-  remark: string
-  /** kind = local 时用的壳，重启后按它恢复 */
-  shell?: LocalShell
-}
-
 /** 终端标题或备注变了（main → renderer） */
 export interface TermMetaEvent {
   termId: string

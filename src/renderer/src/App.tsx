@@ -19,7 +19,6 @@ import { terminalPool } from './terminal/TerminalPool'
 export default function App() {
   const loadSessions = useAppStore((s) => s.loadSessions)
   const loadLocalShells = useAppStore((s) => s.loadLocalShells)
-  const loadWindows = useAppStore((s) => s.loadWindows)
   const loadAppearance = useAppStore((s) => s.loadAppearance)
   const loadMcp = useAppStore((s) => s.loadMcp)
   const onTermStatus = useAppStore((s) => s.onTermStatus)
@@ -60,7 +59,7 @@ export default function App() {
   )
 
   useEffect(() => {
-    void loadSessions().then(() => loadWindows())
+    void loadSessions()
     void loadLocalShells()
     loadAppearance()
     loadMcp()
@@ -81,7 +80,6 @@ export default function App() {
   }, [
     loadSessions,
     loadLocalShells,
-    loadWindows,
     loadAppearance,
     loadMcp,
     onTermStatus,
