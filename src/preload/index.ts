@@ -72,6 +72,7 @@ const api = {
     resize: (termId: string, cols: number, rows: number) =>
       ipcRenderer.send(IPC.termResize, termId, cols, rows),
     close: (termId: string) => ipcRenderer.send(IPC.termClose, termId),
+    reorder: (ids: string[]) => ipcRenderer.invoke(IPC.termReorder, ids),
     label: (termId: string, patch: { title?: string; remark?: string }) =>
       ipcRenderer.send(IPC.termLabel, termId, patch),
     onMeta: (cb: (e: TermMetaEvent) => void) => {

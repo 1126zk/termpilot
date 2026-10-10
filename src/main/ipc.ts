@@ -91,6 +91,10 @@ export function registerIpc(
     terminal.close(termId)
   })
 
+  ipcMain.handle(IPC.termReorder, (_e, ids: string[]) => {
+    if (Array.isArray(ids)) storage.reorderOpenTerms(ids)
+  })
+
   // --------------------------------------------------------------- SFTP
   ipcMain.handle(IPC.sftpList, (_e, sessionId: string, dir: string) => sftp.list(sessionId, dir))
 

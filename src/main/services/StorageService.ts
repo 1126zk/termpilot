@@ -404,6 +404,19 @@ export class StorageService {
     this.db.prepare('UPDATE open_terms SET scrollback = ? WHERE id = ?').run(scrollback.slice(-200_000), id)
   }
 
+  /** 标签栏拖动排序后按新顺序重写 sort_order，重启恢复时按它排。 */
+  reorderOpenTerms(ids: string[]): void {
+    this.db.exec('BEGIN')
+    try {
+      const update = this.db.prepare('UPDATE open_terms SET sort_order = ? WHERE id = ?')
+      ids.forEach((id, index) => update.run(index + 1, id))
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   forgetOpenTerm(id: string): void {
     this.db.prepare('DELETE FROM open_terms WHERE id = ?').run(id)
   }

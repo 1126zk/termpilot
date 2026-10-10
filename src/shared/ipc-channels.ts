@@ -20,6 +20,8 @@ export const IPC = {
   termInput: 'term:input',
   termResize: 'term:resize',
   termClose: 'term:close',
+  /** 标签栏拖动排序后，按新顺序持久化 */
+  termReorder: 'term:reorder',
   /** renderer → main，窗口短标题变了 */
   termLabel: 'term:label',
   /** main → renderer，助手改了终端备注 */

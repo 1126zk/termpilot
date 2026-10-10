@@ -106,6 +106,8 @@ interface AppState {
   setTabRemark: (tabId: string, remark: string) => void
   setSessionRemark: (session: SessionConfig, remark: string) => Promise<void>
   setActiveTab: (tabId: string) => void
+  /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面） */
+  reorderTabs: (ids: string[]) => void
   /** 主进程终端状态事件入口（App 中订阅一次） */
   onTermStatus: (e: TermStatusEvent) => void
   onTermMeta: (e: { termId: string; title: string; remark: string }) => void
@@ -456,6 +458,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedSessionId: tab?.sessionId ?? get().selectedSessionId,
       activeEditorKey: null
     })
+  },
+
+  reorderTabs: (ids) => {
+    const pos = new Map(ids.map((id, index) => [id, index]))
+    const tabs = [...get().tabs].sort(
+      (a, b) => (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+    )
+    set({ tabs })
   },
 
   onTermStatus: (e) => {

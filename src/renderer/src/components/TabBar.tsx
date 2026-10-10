@@ -114,6 +114,7 @@ export function TabBar() {
   const openLocalTab = useAppStore((s) => s.openLocalTab)
   const localShells = useAppStore((s) => s.localShells)
   const openSessionTab = useAppStore((s) => s.openSessionTab)
+  const reorderTabs = useAppStore((s) => s.reorderTabs)
   const renameTab = useAppStore((s) => s.renameTab)
   const setTabRemark = useAppStore((s) => s.setTabRemark)
   const setNotice = useAppStore((s) => s.setNotice)
@@ -126,6 +127,146 @@ export function TabBar() {
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(false)
+  // 标签拖拽排序：pointerdown 记起点，过 4px 阈值才进拖拽态（阈值内仍是点击/双击）。
+  // 拖拽态里被拖标签用 translateX 跟手浮在其他标签上面，其余标签实时让位。
+  const [dragTabId, setDragTabId] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  const suppressTabClick = useRef(false)
+  // + 菜单项拖拽排序：顺序存 localStorage，竖直拖，同样 4px 阈值
+  const [menuOrder, setMenuOrder] = useState<string[]>(readMenuOrder)
+  const menuOrderRef = useRef(menuOrder)
+  const [dragMenuKey, setDragMenuKey] = useState<string | null>(null)
+  const suppressMenuSelect = useRef(false)
+  const menuContentRef = useRef<HTMLDivElement>(null)
+
+  const updateMenuOrder = (next: string[]) => {
+    menuOrderRef.current = next
+    setMenuOrder(next)
+  }
+
+  /**
+   * 指针 x 落在各标签中点之前的位置，实时重排；顺序没变就返回 null。
+   * 被拖标签带 transform，位移计算一律用 offsetLeft/offsetWidth（不受 transform 影响）。
+   */
+  const tabDropOrder = (clientX: number, dragId: string): string[] | null => {
+    const strip = stripRef.current
+    if (!strip) return null
+    const pointerInStrip = clientX - strip.getBoundingClientRect().left + strip.scrollLeft
+    const ids = useAppStore.getState().tabs.map((tab) => tab.id)
+    const rest = ids.filter((id) => id !== dragId)
+    const buttons = [...strip.querySelectorAll<HTMLElement>('[data-tab-id]')]
+    let insert = rest.length
+    for (const button of buttons) {
+      const id = button.dataset.tabId!
+      if (id === dragId) continue
+      if (pointerInStrip < button.offsetLeft + button.offsetWidth / 2) {
+        insert = rest.indexOf(id)
+        break
+      }
+    }
+    const next = [...rest.slice(0, insert), dragId, ...rest.slice(insert)]
+    return next.join() === ids.join() ? null : next
+  }
+
+  const startTabDrag = (event: React.PointerEvent, id: string) => {
+    if (event.button !== 0) return
+    let active = false
+    const startX = event.clientX
+    // 拖拽开始瞬间的布局位。数组实时重排后 offsetLeft 自动变，
+    // translateX = 指针位移 - 布局位移，公式一直成立
+    let startOffsetLeft = 0
+    const dragged = () => stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
+    const move = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.abs(ev.clientX - startX) < 4) return
+        active = true
+        startOffsetLeft = dragged()?.offsetLeft ?? 0
+        setDragTabId(id)
+        setDragOffset(0)
+      }
+      const next = tabDropOrder(ev.clientX, id)
+      if (next) reorderTabs(next)
+      const current = dragged()
+      if (current) setDragOffset(ev.clientX - startX - (current.offsetLeft - startOffsetLeft))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      if (!active) return
+      // 拖完会补一个 click，不能当成选中/关闭
+      suppressTabClick.current = true
+      setDragTabId(null)
+      setDragOffset(0)
+      window.api.term.reorder(useAppStore.getState().tabs.map((tab) => tab.id))
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /** 菜单项竖直拖拽：指针 y 对同分区各项中点，实时改顺序 */
+  const menuDropOrder = (clientY: number, dragKey: string): string[] | null => {
+    const content = menuContentRef.current
+    if (!content) return null
+    const shellKeys = localShells.map((shell) => `shell:${shell.id}`)
+    const sessionKeys = sessions.map((session) => `session:${session.id}`)
+    const orderedShells = applyOrder(shellKeys, menuOrderRef.current)
+    const orderedSessions = applyOrder(sessionKeys, menuOrderRef.current)
+    const inShells = orderedShells.includes(dragKey)
+    const section = inShells ? orderedShells : orderedSessions
+    const rest = section.filter((key) => key !== dragKey)
+    const nodes = [...content.querySelectorAll<HTMLElement>('[data-menu-key]')]
+    let insert = rest.length
+    for (const node of nodes) {
+      const key = node.dataset.menuKey!
+      if (key === dragKey || !rest.includes(key)) continue
+      const rect = node.getBoundingClientRect()
+      if (clientY < rect.top + rect.height / 2) {
+        insert = rest.indexOf(key)
+        break
+      }
+    }
+    const nextSection = [...rest.slice(0, insert), dragKey, ...rest.slice(insert)]
+    const next = inShells ? [...nextSection, ...orderedSessions] : [...orderedShells, ...nextSection]
+    const current = [...orderedShells, ...orderedSessions]
+    return next.join() === current.join() ? null : next
+  }
+
+  const startMenuDrag = (event: React.PointerEvent, key: string) => {
+    if (event.button !== 0) return
+    let active = false
+    const startY = event.clientY
+    const move = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.abs(ev.clientY - startY) < 4) return
+        active = true
+        setDragMenuKey(key)
+      }
+      const next = menuDropOrder(ev.clientY, key)
+      if (next) updateMenuOrder(next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      if (!active) return
+      // 拖完菜单项会补一次 select，不能当成打开
+      suppressMenuSelect.current = true
+      setDragMenuKey(null)
+      writeMenuOrder(menuOrderRef.current)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  const shellById = new Map(localShells.map((shell) => [`shell:${shell.id}`, shell]))
+  const sessionById = new Map(sessions.map((session) => [`session:${session.id}`, session]))
+  const orderedShellKeys = applyOrder(
+    localShells.map((shell) => `shell:${shell.id}`),
+    menuOrder
+  )
+  const orderedSessionKeys = applyOrder(
+    sessions.map((session) => `session:${session.id}`),
+    menuOrder
+  )
 
   const updateArrows = () => {
     const el = stripRef.current
@@ -217,13 +358,26 @@ export function TabBar() {
                 <button
                   type="button"
                   data-active={active || undefined}
+                  data-tab-id={t.id}
                   className={cn(
                     'group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors',
-                    active && 'bg-primary/15 text-primary'
+                    active && 'bg-primary/15 text-primary',
+                    dragTabId === t.id && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
                   )}
-                  style={noDrag}
+                  style={
+                    dragTabId === t.id
+                      ? { ...noDrag, transform: `translateX(${dragOffset}px)` }
+                      : noDrag
+                  }
                   title={t.remark?.trim() || undefined}
-                  onClick={() => setActiveTab(t.id)}
+                  onPointerDown={(e) => startTabDrag(e, t.id)}
+                  onClick={() => {
+                    if (suppressTabClick.current) {
+                      suppressTabClick.current = false
+                      return
+                    }
+                    setActiveTab(t.id)
+                  }}
                   onDoubleClick={(event) => {
                     event.preventDefault()
                     setRenamingId(t.id)
@@ -243,6 +397,10 @@ export function TabBar() {
                       )}
                       onClick={(e) => {
                         e.stopPropagation()
+                        if (suppressTabClick.current) {
+                          suppressTabClick.current = false
+                          return
+                        }
                         closeTab(t.id)
                       }}
                     >
@@ -278,20 +436,52 @@ export function TabBar() {
               <Plus className="size-5" strokeWidth={2} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {localShells.map((shell) => (
-              <DropdownMenuItem key={shell.id} onClick={() => openLocalTab(shell.id)}>
-                <ShellIcon shell={shell.id} />
-                {shell.label}
-              </DropdownMenuItem>
-            ))}
+          <DropdownMenuContent align="start" ref={menuContentRef}>
+            {orderedShellKeys.map((key) => {
+              const shell = shellById.get(key)!
+              return (
+                <DropdownMenuItem
+                  key={key}
+                  data-menu-key={key}
+                  className={cn(dragMenuKey === key && 'opacity-60 ring-1 ring-foreground/30')}
+                  onPointerDown={(e) => startMenuDrag(e, key)}
+                  onSelect={(event) => {
+                    if (suppressMenuSelect.current) {
+                      suppressMenuSelect.current = false
+                      event.preventDefault()
+                      return
+                    }
+                    openLocalTab(shell.id)
+                  }}
+                >
+                  <ShellIcon shell={shell.id} />
+                  {shell.label}
+                </DropdownMenuItem>
+              )
+            })}
             {sessions.length > 0 && <DropdownMenuSeparator />}
-            {sessions.map((s) => (
-              <DropdownMenuItem key={s.id} onClick={() => openSessionTab(s, true)}>
-                <OsIcon {...osIconProps(s.os)} />
-                {s.name}
-              </DropdownMenuItem>
-            ))}
+            {orderedSessionKeys.map((key) => {
+              const s = sessionById.get(key)!
+              return (
+                <DropdownMenuItem
+                  key={key}
+                  data-menu-key={key}
+                  className={cn(dragMenuKey === key && 'opacity-60 ring-1 ring-foreground/30')}
+                  onPointerDown={(e) => startMenuDrag(e, key)}
+                  onSelect={(event) => {
+                    if (suppressMenuSelect.current) {
+                      suppressMenuSelect.current = false
+                      event.preventDefault()
+                      return
+                    }
+                    openSessionTab(s, true)
+                  }}
+                >
+                  <OsIcon {...osIconProps(s.os)} />
+                  {s.name}
+                </DropdownMenuItem>
+              )
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -356,4 +546,28 @@ export function TabBar() {
     />
     </>
   )
+}
+
+/** 按保存的顺序排 key；不在顺序表里的新项保持原相对顺序排在末尾。 */
+function applyOrder(keys: string[], order: string[]): string[] {
+  const pos = new Map(order.map((key, index) => [key, index]))
+  return [...keys].sort(
+    (a, b) => (pos.get(a) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b) ?? Number.MAX_SAFE_INTEGER)
+  )
+}
+
+const MENU_ORDER_KEY = 'termpilot.menuOrder'
+
+function readMenuOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(MENU_ORDER_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeMenuOrder(order: string[]): void {
+  localStorage.setItem(MENU_ORDER_KEY, JSON.stringify(order))
 }
