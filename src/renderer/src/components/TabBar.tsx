@@ -154,7 +154,7 @@ export function TabBar() {
   return (
     <>
     <div
-      className="flex h-12 shrink-0 items-center gap-1 border-b bg-background px-2"
+      className="flex h-12 shrink-0 items-center gap-1 bg-background px-2"
       style={drag}
       onDoubleClick={(e) => {
         // 标题栏空白处双击 = 最大化/还原（点到的必须是我们这个行本身，不是里面的控件）

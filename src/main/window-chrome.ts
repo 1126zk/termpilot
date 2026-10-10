@@ -1,9 +1,9 @@
 import { BrowserWindow, nativeTheme, type WebContents } from 'electron'
 import type { AppTheme } from '../shared/types'
 
-/** 窗口底色和界面 --background 对齐。深色是 oklch(0.145 0 0)。 */
+/** 窗口底色和界面 --background 对齐。深色是 #1e1e1e。 */
 export function windowBackground(dark: boolean): string {
-  return dark ? '#0a0a0a' : '#ffffff'
+  return dark ? '#1e1e1e' : '#ffffff'
 }
 
 export function isDarkChrome(): boolean {

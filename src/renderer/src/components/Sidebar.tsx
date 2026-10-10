@@ -1,7 +1,6 @@
 import { useState, type ComponentProps, ReactNode } from 'react'
 import { Pencil, Plus, Search, Settings } from 'lucide-react'
 import { SidebarContent, SidebarGroup, SidebarGroupContent, useSidebar } from '@/components/ui/sidebar'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   ContextMenu,
@@ -31,19 +30,11 @@ export function AppSidebar() {
   return (
     <div
       className={cn(
-        'flex h-full shrink-0 flex-col overflow-hidden border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200',
-        collapsed ? 'w-12 min-w-12 max-w-12' : 'w-64 min-w-64 max-w-64'
+        'flex h-full shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground transition-[width] duration-200',
+        collapsed ? 'w-0 min-w-0 max-w-0' : 'w-64 min-w-64 max-w-64'
       )}
     >
-      {collapsed ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center gap-1 py-1">
-          <div className="mt-auto flex flex-col items-center gap-1">
-            <Button variant="ghost" size="icon-sm" title="设置" onClick={() => setSettingsOpen(true)}>
-              <Settings />
-            </Button>
-          </div>
-        </div>
-      ) : (
+      {collapsed ? null : (
         <>
           <SidebarContent className="min-w-0 overflow-x-hidden">
             <ConnectTree />

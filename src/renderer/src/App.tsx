@@ -121,7 +121,7 @@ export default function App() {
             </div>
           </SidebarInset>
           {rightPanelOpen && (
-            <div className="flex w-80 shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground">
+            <div className="flex w-80 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
               <FileTree />
             </div>
           )}
