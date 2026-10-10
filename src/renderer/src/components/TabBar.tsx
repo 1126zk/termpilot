@@ -56,9 +56,9 @@ function RestoreIcon() {
   )
 }
 
-/** 顶栏所有图标按钮的统一规格：一样的高宽、颜色、hover。 */
+/** 顶栏所有图标按钮的统一规格：36×36 正方形高亮，和标签胶囊视觉同档。 */
 const topBtn =
-  'flex h-9 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
+  'flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
 /** 自绘窗口控制按钮：右侧面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。 */
 function WindowControls() {
@@ -72,7 +72,7 @@ function WindowControls() {
   }, [])
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 pl-1" style={noDrag}>
+    <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
       <button
         type="button"
         className={topBtn}
