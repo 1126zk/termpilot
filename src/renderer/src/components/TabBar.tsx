@@ -49,16 +49,16 @@ const noDrag = { WebkitAppRegion: 'no-drag' } as CSSProperties
 /** 最大化状态下「还原」的图标：两个叠着的方块。lucide 没有现成的，画一个。 */
 function RestoreIcon() {
   return (
-    <svg viewBox="0 0 16 16" className="size-5" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1" />
       <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
     </svg>
   )
 }
 
-/** 顶栏所有图标按钮的统一规格：36×36 正方形高亮，和标签胶囊视觉同档。 */
+/** 顶栏所有图标按钮的统一规格：28×28 正方形，与标签胶囊同高。 */
 const topBtn =
-  'flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
+  'flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
 /** 自绘窗口控制按钮：右侧面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。 */
 function WindowControls() {
@@ -80,13 +80,13 @@ function WindowControls() {
         onClick={toggleRightPanel}
       >
         {rightPanelOpen ? (
-          <PanelRightClose className="size-5" strokeWidth={2} />
+          <PanelRightClose className="size-4" strokeWidth={2} />
         ) : (
-          <PanelRightOpen className="size-5" strokeWidth={2} />
+          <PanelRightOpen className="size-4" strokeWidth={2} />
         )}
       </button>
       <button type="button" className={topBtn} title="最小化" onClick={() => void window.api.win.minimize()}>
-        <Minus className="size-5" strokeWidth={2} />
+        <Minus className="size-4" strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -97,7 +97,7 @@ function WindowControls() {
         {maximized ? <RestoreIcon /> : <Square className="size-4" strokeWidth={2} />}
       </button>
       <button type="button" className={topBtn} title="关闭" onClick={() => void window.api.win.close()}>
-        <X className="size-5" strokeWidth={2} />
+        <X className="size-4" strokeWidth={2} />
       </button>
     </div>
   )
@@ -356,11 +356,11 @@ export function TabBar() {
       }}
     >
       <button type="button" className={topBtn} style={noDrag} title="收纳侧边栏" onClick={toggleSidebar}>
-        <Server className="size-5" strokeWidth={2} />
+        <Server className="size-4" strokeWidth={2} />
       </button>
       {overflowing && (
         <button type="button" className={topBtn} style={noDrag} disabled={!canLeft} onClick={() => scrollStrip(-1)}>
-          <ChevronLeft className="size-5" strokeWidth={2} />
+          <ChevronLeft className="size-4" strokeWidth={2} />
         </button>
       )}
       <div
@@ -390,8 +390,8 @@ export function TabBar() {
                   data-active={active || undefined}
                   data-tab-id={t.id}
                   className={cn(
-                    'group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors',
-                    active && 'bg-primary/15 text-primary',
+                    'group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
+                    active && 'bg-primary/15 text-primary hover:bg-primary/15',
                     dragTabId === t.id && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
                   )}
                   style={
@@ -463,7 +463,7 @@ export function TabBar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className={cn(topBtn, 'shrink-0')} style={noDrag} title="新建终端">
-              <Plus className="size-5" strokeWidth={2} />
+              <Plus className="size-4" strokeWidth={2} />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" ref={menuContentRef} className="relative">
@@ -519,7 +519,7 @@ export function TabBar() {
       </div>
       {overflowing && (
         <button type="button" className={topBtn} style={noDrag} disabled={!canRight} onClick={() => scrollStrip(1)}>
-          <ChevronRight className="size-5" strokeWidth={2} />
+          <ChevronRight className="size-4" strokeWidth={2} />
         </button>
       )}
       <button
@@ -530,7 +530,7 @@ export function TabBar() {
         disabled={!activeTabId}
         onClick={() => shoot('viewport')}
       >
-        <Camera className="size-5" strokeWidth={2} />
+        <Camera className="size-4" strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -540,7 +540,7 @@ export function TabBar() {
         disabled={!activeTabId}
         onClick={() => shoot('scrollback')}
       >
-        <GalleryVertical className="size-5" strokeWidth={2} />
+        <GalleryVertical className="size-4" strokeWidth={2} />
       </button>
       {window.api.platform === 'win32' && <WindowControls />}
     </div>
