@@ -116,13 +116,12 @@ const api = {
       }>,
     mkdir: (sessionId: string, dir: string, name: string) =>
       ipcRenderer.invoke(IPC.sftpMkdir, sessionId, dir, name),
-    /** 把远程文件拖出窗口：主进程先下载到缓存目录，再发起系统拖拽 */
-    dragOut: (sessionId: string, path: string, name: string) =>
-      ipcRenderer.send(IPC.sftpDragOut, sessionId, path, name),
     remove: (sessionId: string, path: string, kind: RemoteFile['kind']) =>
       ipcRenderer.invoke(IPC.sftpRemove, sessionId, path, kind),
     upload: (sessionId: string, dir: string) =>
       ipcRenderer.invoke(IPC.sftpUpload, sessionId, dir) as Promise<number>,
+    uploadDir: (sessionId: string, dir: string) =>
+      ipcRenderer.invoke(IPC.sftpUploadDir, sessionId, dir) as Promise<number>,
     /** 拖入上传：renderer 拿不到 File.path，用 webUtils 换本地路径 */
     filePath: (file: File) => webUtils.getPathForFile(file),
     uploadPaths: (sessionId: string, dir: string, paths: string[]) =>
@@ -132,6 +131,8 @@ const api = {
       ipcRenderer.invoke(IPC.sftpRename, sessionId, from, to),
     download: (sessionId: string, file: RemoteFile) =>
       ipcRenderer.invoke(IPC.sftpDownload, sessionId, file) as Promise<boolean>,
+    downloadDir: (sessionId: string, file: RemoteFile) =>
+      ipcRenderer.invoke(IPC.sftpDownloadDir, sessionId, file) as Promise<boolean>,
     read: (sessionId: string, path: string) =>
       ipcRenderer.invoke(IPC.sftpRead, sessionId, path) as Promise<string>,
     write: (sessionId: string, path: string, text: string) =>
@@ -150,6 +151,26 @@ const api = {
         ipcRenderer.removeListener(IPC.sftpTransfer, listener)
       }
     }
+  },
+  localfs: {
+    list: (dir: string) =>
+      ipcRenderer.invoke(IPC.localfsList, dir) as Promise<{
+        path: string
+        entries: RemoteFile[]
+      }>,
+    mkdir: (dir: string, name: string) => ipcRenderer.invoke(IPC.localfsMkdir, dir, name),
+    remove: (path: string, kind: RemoteFile['kind']) =>
+      ipcRenderer.invoke(IPC.localfsRemove, path, kind),
+    rename: (from: string, to: string) => ipcRenderer.invoke(IPC.localfsRename, from, to),
+    upload: (dir: string) => ipcRenderer.invoke(IPC.localfsUpload, dir) as Promise<number>,
+    uploadDir: (dir: string) => ipcRenderer.invoke(IPC.localfsUploadDir, dir) as Promise<number>,
+    uploadPaths: (dir: string, paths: string[]) =>
+      ipcRenderer.invoke(IPC.localfsUploadPaths, dir, paths) as Promise<number>,
+    download: (file: RemoteFile) => ipcRenderer.invoke(IPC.localfsDownload, file) as Promise<boolean>,
+    downloadDir: (file: RemoteFile) =>
+      ipcRenderer.invoke(IPC.localfsDownloadDir, file) as Promise<boolean>,
+    read: (path: string) => ipcRenderer.invoke(IPC.localfsRead, path) as Promise<string>,
+    write: (path: string, text: string) => ipcRenderer.invoke(IPC.localfsWrite, path, text)
   },
   appearance: {
     get: () => ipcRenderer.invoke(IPC.appearanceGet) as Promise<Appearance>,

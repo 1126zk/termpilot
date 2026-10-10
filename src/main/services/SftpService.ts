@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream, existsSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, posix } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
@@ -13,6 +13,18 @@ interface LiveConn {
   client: Client
   sftp: SFTPWrapper
   release: () => void
+}
+
+/** 文件夹传输的聚合进度：整棵树共用一条 sftp:transfer 事件，transferred 跨文件累计。 */
+interface TransferGroup {
+  id: string
+  direction: SftpTransferEvent['direction']
+  name: string
+  total: number
+  transferred: number
+  cancelled: boolean
+  /** 取消时毁掉正在传的那个文件 */
+  abort?: () => void
 }
 
 /**
@@ -71,7 +83,7 @@ export class SftpService {
           total,
           openSource: () => createReadStream(localPath),
           openDest: () => sftp.createWriteStream(target),
-          cleanupPartial: () => undefined
+          cleanupPartial: () => sftp.unlink(target, () => undefined)
         })
       )
     )
@@ -127,38 +139,43 @@ export class SftpService {
     return this.uploadPaths(sessionId, dir, picked.filePaths)
   }
 
-  /** 拖入上传：把本地文件按文件名放进 dir。拖进来的目录跳过，不递归。单个文件被取消不影响剩下的。 */
-  async uploadPaths(sessionId: string, dir: string, localPaths: string[]): Promise<number> {
-    const files = localPaths.filter((local) => {
-      try {
-        return statSync(local).isFile()
-      } catch {
-        return false
-      }
+  async uploadDir(sessionId: string, dir: string): Promise<number> {
+    const picked = await dialog.showOpenDialog({
+      title: '上传文件夹到当前目录',
+      properties: ['openDirectory', 'multiSelections']
     })
-    if (files.length === 0) return 0
+    if (picked.canceled || picked.filePaths.length === 0) return 0
+    return this.uploadPaths(sessionId, dir, picked.filePaths)
+  }
+
+  /** 拖入上传：文件按文件名放进 dir，目录整棵递归上传。单个文件被取消不影响剩下的。 */
+  async uploadPaths(sessionId: string, dir: string, localPaths: string[]): Promise<number> {
     const sftp = await this.sftpOf(sessionId)
     let done = 0
-    for (const local of files) {
-      const total = statSync(local).size
-      refuseHuge(total)
-      const remote = posix.join(dir || '.', basename(local))
+    for (const local of localPaths) {
+      let stat
       try {
-        await using(sftp, remote, (target) =>
-          this.streamTransfer({
-            direction: 'up',
-            name: basename(target),
-            total,
-            openSource: () => createReadStream(local),
-            openDest: () => sftp.createWriteStream(target),
-            cleanupPartial: () => undefined
-          })
-        )
-        done += 1
-      } catch (error) {
-        if (error instanceof Error && error.message === '已取消') continue
-        throw error
+        stat = statSync(local)
+      } catch {
+        continue
       }
+      const remote = posix.join(dir || '.', basename(local))
+      if (stat.isDirectory()) {
+        const total = localTreeSize(local)
+        refuseHuge(total)
+        const group = this.beginGroup('up', basename(local), total)
+        try {
+          done += await this.uploadTree(sessionId, sftp, local, remote, group)
+          this.endGroup(group)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          this.endGroup(group, message)
+          if (message !== '已取消') throw error
+        }
+        continue
+      }
+      if (!stat.isFile()) continue
+      if (await this.uploadFile(sftp, local, remote)) done += 1
     }
     return done
   }
@@ -183,6 +200,32 @@ export class SftpService {
         openDest: () => createWriteStream(localPath),
         cleanupPartial: () => rmSync(localPath, { force: true })
       })
+    })
+    return true
+  }
+
+  async downloadDir(sessionId: string, file: RemoteFile): Promise<boolean> {
+    if (file.kind !== 'dir') throw new Error('只能下载目录')
+    const picked = await dialog.showOpenDialog({
+      title: '下载文件夹到',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return false
+    const localDir = join(picked.filePaths[0], file.name)
+    mkdirSync(localDir, { recursive: true })
+    const sftp = await this.sftpOf(sessionId)
+    await using(sftp, file.path, async (target) => {
+      const total = await remoteTreeSize(sftp, target)
+      refuseHuge(total)
+      const group = this.beginGroup('down', file.name, total)
+      try {
+        await this.downloadTree(sftp, target, localDir, group)
+        this.endGroup(group)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.endGroup(group, message)
+        throw error
+      }
     })
     return true
   }
@@ -318,10 +361,86 @@ export class SftpService {
     wc.send(IPC.sftpInstall, { sessionId, phase, text } satisfies SftpInstallEvent)
   }
 
+  private async uploadFile(sftp: SFTPWrapper, local: string, remote: string, group?: TransferGroup): Promise<boolean> {
+    const total = statSync(local).size
+    refuseHuge(total)
+    try {
+      await using(sftp, remote, (target) =>
+        this.streamTransfer({
+          direction: 'up',
+          name: basename(target),
+          total,
+          openSource: () => createReadStream(local),
+          openDest: () => sftp.createWriteStream(target),
+          cleanupPartial: () => sftp.unlink(target, () => undefined),
+          group
+        })
+      )
+      return true
+    } catch (error) {
+      // 聚合传输里取消要抛出去让整棵树停下
+      if (group) throw error
+      if (error instanceof Error && error.message === '已取消') return false
+      throw error
+    }
+  }
+
+  private async uploadTree(
+    sessionId: string,
+    sftp: SFTPWrapper,
+    localDir: string,
+    remoteDir: string,
+    group?: TransferGroup
+  ): Promise<number> {
+    // 目录已存在时 mkdir 报错属正常，接着往里传
+    await this.mkdirPath(sessionId, remoteDir).catch(() => undefined)
+    let done = 0
+    for (const item of readdirSync(localDir, { withFileTypes: true })) {
+      if (group?.cancelled) throw new Error('已取消')
+      const local = join(localDir, item.name)
+      const remote = posix.join(remoteDir, item.name)
+      if (item.isDirectory()) {
+        done += await this.uploadTree(sessionId, sftp, local, remote, group)
+        continue
+      }
+      if (!item.isFile()) continue
+      if (await this.uploadFile(sftp, local, remote, group)) done += 1
+    }
+    return done
+  }
+
+  private async downloadTree(sftp: SFTPWrapper, remoteDir: string, localDir: string, group?: TransferGroup): Promise<void> {
+    const entries = await readdir(sftp, remoteDir)
+    for (const item of entries) {
+      if (group?.cancelled) throw new Error('已取消')
+      const local = join(localDir, item.name)
+      if (item.kind === 'dir') {
+        mkdirSync(local, { recursive: true })
+        await this.downloadTree(sftp, item.path, local, group)
+        continue
+      }
+      if (item.kind !== 'file') continue
+      const total = await statSize(sftp, item.path)
+      refuseHuge(total)
+      await this.streamTransfer({
+        direction: 'down',
+        name: item.name,
+        total,
+        openSource: () => sftp.createReadStream(item.path),
+        openDest: () => createWriteStream(local),
+        cleanupPartial: () => rmSync(local, { force: true }),
+        group
+      })
+    }
+  }
+
   /**
    * 流式传输：ssh2 的 fastGet/fastPut 不能取消，所以用 createReadStream/createWriteStream
    * 自己接管子。data 事件累计进度，结束时推 done；取消或出错时 destroy 两端的流，
-   * 下载还要删掉没传完的本地残留文件。每条传输独立，互不干扰。
+   * 并删掉没传完的残留（下载删本地文件，上传删远程文件）。每条传输独立，互不干扰。
+   * 带 group 时并入文件夹聚合进度：复用 group.id 跨文件累计推进度，不单独推 done、
+   * 不在 active 注册、不删残留；取消由 group.abort 毁掉当前文件，遍历方在每个文件
+   * 开始前检查 group.cancelled 停下，半成品和已完成的文件都留着。
    */
   private streamTransfer(opts: {
     direction: SftpTransferEvent['direction']
@@ -330,17 +449,24 @@ export class SftpService {
     openSource: () => Readable
     openDest: () => Writable
     cleanupPartial: () => void
+    group?: TransferGroup
   }): Promise<void> {
-    const id = randomBytes(6).toString('hex')
+    const group = opts.group
+    const id = group?.id ?? randomBytes(6).toString('hex')
     let transferred = 0
     const push = (done: boolean, error?: string) => {
-      const wc = this.getSender()
-      if (!wc || wc.isDestroyed()) return
-      const event: SftpTransferEvent = { id, direction: opts.direction, name: opts.name, transferred, total: opts.total, done }
+      const event: SftpTransferEvent = {
+        id,
+        direction: group?.direction ?? opts.direction,
+        name: group?.name ?? opts.name,
+        transferred: group ? group.transferred : transferred,
+        total: group?.total ?? opts.total,
+        done
+      }
       if (error) event.error = error
-      wc.send(IPC.sftpTransfer, event)
+      this.pushTransfer(event)
     }
-    push(false)
+    if (!group) push(false)
     return new Promise((resolve, reject) => {
       let settled = false
       let source: Readable
@@ -350,16 +476,21 @@ export class SftpService {
         dest = opts.openDest()
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        push(true, message)
+        if (!group) push(true, message)
         reject(error instanceof Error ? error : new Error(message))
         return
       }
       const finish = (error?: string) => {
         if (settled) return
         settled = true
-        this.active.delete(id)
         source.destroy()
         dest.destroy()
+        if (group) {
+          if (error) reject(new Error(error))
+          else resolve()
+          return
+        }
+        this.active.delete(id)
         if (error) {
           // 文件句柄释放是异步的，稍等一下再删残留
           setTimeout(() => {
@@ -369,18 +500,20 @@ export class SftpService {
               /* 残留删不掉就算了 */
             }
           }, 100)
-        }
-        if (error) push(true, error)
-        else {
+          push(true, error)
+          reject(new Error(error))
+        } else {
           transferred = opts.total
           push(true)
+          resolve()
         }
-        if (error) reject(new Error(error))
-        else resolve()
       }
-      this.active.set(id, () => finish('已取消'))
+      if (group) group.abort = () => finish('已取消')
+      else this.active.set(id, () => finish('已取消'))
       source.on('data', (chunk: Buffer | string) => {
-        transferred += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+        const size = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+        transferred += size
+        if (group) group.transferred += size
         push(false)
       })
       source.on('error', (error) => finish(error.message))
@@ -392,6 +525,45 @@ export class SftpService {
       })
       source.pipe(dest)
     })
+  }
+
+  /** 文件夹传输开始：聚合成一条进度，取消时标记 cancelled 并毁掉正在传的那个文件。 */
+  private beginGroup(direction: SftpTransferEvent['direction'], name: string, total: number): TransferGroup {
+    const group: TransferGroup = {
+      id: randomBytes(6).toString('hex'),
+      direction,
+      name,
+      total,
+      transferred: 0,
+      cancelled: false
+    }
+    this.active.set(group.id, () => {
+      group.cancelled = true
+      group.abort?.()
+    })
+    this.pushTransfer({ id: group.id, direction, name, transferred: 0, total, done: false })
+    return group
+  }
+
+  /** 整棵树传完（或出错、取消）时收尾：推 done 并摘掉取消入口。 */
+  private endGroup(group: TransferGroup, error?: string): void {
+    this.active.delete(group.id)
+    const event: SftpTransferEvent = {
+      id: group.id,
+      direction: group.direction,
+      name: group.name,
+      transferred: error ? group.transferred : group.total,
+      total: group.total,
+      done: true
+    }
+    if (error) event.error = error
+    this.pushTransfer(event)
+  }
+
+  private pushTransfer(event: SftpTransferEvent): void {
+    const wc = this.getSender()
+    if (!wc || wc.isDestroyed()) return
+    wc.send(IPC.sftpTransfer, event)
   }
 
   private openHold(sessionId: string): Promise<SshHold> {
@@ -645,6 +817,27 @@ function statSize(sftp: SFTPWrapper, path: string): Promise<number> {
       else resolve(stats.size)
     })
   })
+}
+
+/** 远程目录整棵的字节数，给聚合进度当 total。 */
+async function remoteTreeSize(sftp: SFTPWrapper, dir: string): Promise<number> {
+  let total = 0
+  for (const item of await readdir(sftp, dir)) {
+    if (item.kind === 'dir') total += await remoteTreeSize(sftp, item.path)
+    else if (item.kind === 'file') total += await statSize(sftp, item.path)
+  }
+  return total
+}
+
+/** 本地目录整棵的字节数。 */
+function localTreeSize(dir: string): number {
+  let total = 0
+  for (const item of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, item.name)
+    if (item.isDirectory()) total += localTreeSize(path)
+    else if (item.isFile()) total += statSync(path).size
+  }
+  return total
 }
 
 async function readAll(sftp: SFTPWrapper, path: string): Promise<Buffer> {

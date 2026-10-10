@@ -96,7 +96,7 @@ export default function App() {
   ])
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  const fileTabs = activeTab?.sessionId
+  const fileTabs = activeTab
     ? editorTabs.filter((t) => t.sessionId === activeTab.sessionId)
     : []
   const currentFile = fileTabs.find((t) => t.key === remoteEditor) ?? null

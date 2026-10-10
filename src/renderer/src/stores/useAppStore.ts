@@ -19,7 +19,8 @@ import { applyAppearance, readCachedAppearance, resolveAppTheme, type ResolvedAp
 
 export interface EditorTab {
   key: string
-  sessionId: string
+  /** null 表示本机文件 */
+  sessionId: string | null
   path: string
   name: string
   /** 斜体预览：再单击别的文件会替换它 */
@@ -51,7 +52,7 @@ interface AppState {
   search: string
   /** 文件树跟随的会话 */
   selectedSessionId: string | null
-  /** 当前连接下打开的远程文件。和会话标签分开，按机器保留。 */
+  /** 当前连接或本机下打开的文件。和会话标签分开，按机器保留。 */
   editorTabs: EditorTab[]
   /** 正在看的文件。null 表示回到这台机器的终端。 */
   activeEditorKey: string | null
@@ -103,7 +104,7 @@ interface AppState {
   toggleRightPanel: () => void
   toggleGroup: (group: string) => void
   selectSession: (id: string) => void
-  openRemoteEditor: (sessionId: string, file: { path: string; name: string }, pin?: boolean) => void
+  openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean) => void
   closeEditorTab: (key: string) => void
   activateEditorTab: (key: string) => void
   setEditorDirty: (key: string, dirty: boolean) => void

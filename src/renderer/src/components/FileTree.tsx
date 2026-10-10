@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
-import { Download, FolderInput, FolderPlus, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -15,18 +15,27 @@ import type { RemoteFile, SftpTransferEvent } from '../../../shared/types'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
 
-/** 当前正向 SSH 的远程目录，按 VS Code 资源管理器的方式就地展开。 */
+type FsBackend = {
+  list: (dir: string) => Promise<{ path: string; entries: RemoteFile[] }>
+  mkdir: (dir: string, name: string) => Promise<void>
+  remove: (path: string, kind: RemoteFile['kind']) => Promise<void>
+  rename: (from: string, to: string) => Promise<void>
+  upload: (dir: string) => Promise<number>
+  uploadDir: (dir: string) => Promise<number>
+  uploadPaths: (dir: string, paths: string[]) => Promise<number>
+  download: (file: RemoteFile) => Promise<boolean>
+  downloadDir: (file: RemoteFile) => Promise<boolean>
+}
+
+/** 跟随当前活动终端窗口：SSH 窗口显示服务器文件，本地终端显示本机文件。 */
 export function FileTree() {
-  const sessions = useAppStore((s) => s.sessions)
-  const selectedId = useAppStore((s) => s.selectedSessionId)
   const tabs = useAppStore((s) => s.tabs)
   const activeTabId = useAppStore((s) => s.activeTabId)
 
-  const active = tabs.find((t) => t.id === activeTabId)
-  const session =
-    sessions.find((s) => s.id === selectedId) ??
-    sessions.find((s) => s.id === active?.sessionId) ??
-    null
+  const tab = tabs.find((t) => t.id === activeTabId)
+  const local = tab?.kind === 'local'
+  const sessionId = local ? null : tab?.sessionId ?? null
+  const backendKey = local ? 'local' : sessionId
 
   const [root, setRoot] = useState('.')
   const [entries, setEntries] = useState<RemoteFile[]>([])
@@ -37,18 +46,45 @@ export function FileTree() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [making, setMaking] = useState(false)
+  const [mkdirTarget, setMkdirTarget] = useState<string | null>(null)
   const [folderError, setFolderError] = useState('')
-  const [picking, setPicking] = useState(false)
-  const [pathError, setPathError] = useState('')
+  const [draft, setDraft] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<RemoteFile | null>(null)
   const [renameError, setRenameError] = useState('')
   const [dropDir, setDropDir] = useState<string | null>(null)
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
+  const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
 
-  const sessionId = session?.id ?? null
+  const toggleHidden = () =>
+    setShowHidden((v) => {
+      localStorage.setItem(HIDDEN_KEY, v ? '0' : '1')
+      return !v
+    })
 
-  // 底部传输区：按事件 id 更新；完成的留三秒，失败的留五秒
+  const visible = (items: RemoteFile[]) =>
+    showHidden ? items : items.filter((i) => !i.name.startsWith('.'))
+
+  // 统一文件后端：本地终端走 localfs，SSH 窗口走绑了 sessionId 的 sftp
+  const fs = useMemo<FsBackend | null>(() => {
+    if (local) return window.api.localfs
+    if (!sessionId) return null
+    const id = sessionId
+    const sftp = window.api.sftp
+    return {
+      list: (dir) => sftp.list(id, dir),
+      mkdir: (dir, name) => sftp.mkdir(id, dir, name),
+      remove: (path, kind) => sftp.remove(id, path, kind),
+      rename: (from, to) => sftp.rename(id, from, to),
+      upload: (dir) => sftp.upload(id, dir),
+      uploadDir: (dir) => sftp.uploadDir(id, dir),
+      uploadPaths: (dir, paths) => sftp.uploadPaths(id, dir, paths),
+      download: (file) => sftp.download(id, file),
+      downloadDir: (file) => sftp.downloadDir(id, file)
+    }
+  }, [local, sessionId])
+
+  // 底部传输区：按事件 id 更新；成功的留十秒，失败的不自动消失，只能点 × 关闭
   useEffect(() => {
     return window.api.sftp.onTransfer((event) => {
       setTransfers((list) => {
@@ -58,51 +94,53 @@ export function FileTree() {
         next[index] = event
         return next
       })
-      if (event.done) {
-        const delay = event.error ? 5000 : 3000
-        setTimeout(() => setTransfers((list) => list.filter((t) => t.id !== event.id)), delay)
+      if (event.done && !event.error) {
+        setTimeout(() => setTransfers((list) => list.filter((t) => t.id !== event.id)), 10000)
       }
     })
   }, [])
 
-  const showRoot = async (id: string, path: string) => {
-    const requested = path.trim().replaceAll('\\', '/') || '.'
-    const res = await window.api.sftp.list(id, requested)
-    setRoot(res.path)
-    setEntries(sortEntries(res.entries))
-    setCache({})
-    setOpen({ [res.path]: true })
-    setSelected(res.path)
-    setError('')
-    writeRoot(id, res.path)
-  }
+  const showRoot = useCallback(
+    async (path: string) => {
+      if (!fs || !backendKey) return
+      const requested = path.trim().replaceAll('\\', '/') || '.'
+      const res = await fs.list(requested)
+      setRoot(res.path)
+      setEntries(sortEntries(res.entries))
+      setCache({})
+      setOpen({ [res.path]: true })
+      setSelected(res.path)
+      setError('')
+      writeRoot(backendKey, res.path)
+    },
+    [fs, backendKey]
+  )
 
-  const loadRoot = useCallback(async (id: string, path: string, fallback = false) => {
-    setBusy(true)
-    setError('')
-    try {
-      await showRoot(id, path)
-      setPicking(false)
-      setPathError('')
-    } catch (e) {
-      if (fallback && path !== '.') {
-        try {
-          await showRoot(id, '.')
-          setError('上次打开的目录打不开，已回到登录目录')
-          setPicking(false)
-          return
-        } catch (again) {
-          setEntries([])
-          setError(sftpMessage(again))
-          return
+  const loadRoot = useCallback(
+    async (path: string, fallback = false) => {
+      setBusy(true)
+      setError('')
+      try {
+        await showRoot(path)
+      } catch (e) {
+        if (fallback && path !== '.') {
+          try {
+            await showRoot('.')
+            setError('上次打开的目录打不开，已回到登录目录')
+            return
+          } catch (again) {
+            setEntries([])
+            setError(sftpMessage(again))
+            return
+          }
         }
+        setError(sftpMessage(e))
+      } finally {
+        setBusy(false)
       }
-      setError(sftpMessage(e))
-      setPathError(sftpMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }, [])
+    },
+    [showRoot]
+  )
 
   useEffect(() => {
     setRoot('.')
@@ -111,20 +149,20 @@ export function FileTree() {
     setOpen({})
     setSelected(null)
     setError('')
-    setPicking(false)
+    setDraft(null)
     setMaking(false)
     setRenaming(null)
-    if (!sessionId) return
-    const saved = readRoot(sessionId)
-    void loadRoot(sessionId, saved || '.', Boolean(saved))
-  }, [sessionId, loadRoot])
+    if (!backendKey) return
+    const saved = readRoot(backendKey)
+    void loadRoot(saved || '.', Boolean(saved))
+  }, [backendKey, loadRoot])
 
   const listInto = useCallback(
     async (path: string) => {
-      if (!session) return
+      if (!fs) return
       setLoading((s) => ({ ...s, [path]: true }))
       try {
-        const res = await window.api.sftp.list(session.id, path)
+        const res = await fs.list(path)
         const sorted = sortEntries(res.entries)
         if (path === root) {
           setRoot(res.path)
@@ -140,7 +178,7 @@ export function FileTree() {
         setLoading((s) => ({ ...s, [path]: false }))
       }
     },
-    [session, root]
+    [fs, root]
   )
 
   const toggle = async (path: string) => {
@@ -158,18 +196,11 @@ export function FileTree() {
     else await listInto(path)
   }
 
-  if (!session) {
-    return <Hint text="在「连接」里选一条正向 SSH，这里显示那台机器的文件。" />
+  if (!fs) {
+    return <Hint text="打开一个终端窗口，这里显示那台机器的文件。" />
   }
 
-  const unsupported = error === NO_SFTP
-
-  const directoryOf = (path: string | null) => {
-    if (!path || path === root) return root
-    const found = findFile(path, root, entries, cache)
-    if (found?.kind === 'dir') return found.path
-    return parentDir(path) ?? root
-  }
+  const unsupported = !local && error === NO_SFTP
 
   const commitRename = async (raw: string) => {
     if (!renaming) return
@@ -187,7 +218,7 @@ export function FileTree() {
     const to = slash < 0 ? name : slash === 0 ? `/${name}` : `${renaming.path.slice(0, slash)}/${name}`
     const parent = parentDir(renaming.path) ?? root
     try {
-      await window.api.sftp.rename(session.id, renaming.path, to)
+      await fs.rename(renaming.path, to)
       setRenaming(null)
       setRenameError('')
       await listInto(parent)
@@ -201,19 +232,30 @@ export function FileTree() {
       item.kind === 'dir' ? `删除目录 ${item.name} 及其中的文件？` : `删除 ${item.name}？`
     if (!confirm(message)) return
     try {
-      await window.api.sftp.remove(session.id, item.path, item.kind)
+      await fs.remove(item.path, item.kind)
       await listInto(parentDir(item.path) ?? root)
     } catch (e) {
       setError(sftpMessage(e))
     }
   }
 
-  const upload = async () => {
-    const dest = directoryOf(selected)
+  const uploadFilesInto = async (dir: string) => {
     setBusy(true)
     try {
-      await window.api.sftp.upload(session.id, dest)
-      await ensureOpen(dest)
+      await fs.upload(dir)
+      await ensureOpen(dir)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const uploadDirInto = async (dir: string) => {
+    setBusy(true)
+    try {
+      await fs.uploadDir(dir)
+      await ensureOpen(dir)
     } catch (e) {
       setError(sftpMessage(e))
     } finally {
@@ -223,13 +265,21 @@ export function FileTree() {
 
   const download = async (item: RemoteFile) => {
     try {
-      await window.api.sftp.download(session.id, item)
+      await fs.download(item)
     } catch (e) {
       setError(sftpMessage(e))
     }
   }
 
-  /** 从系统拖文件进来：上传到 dir，结束后刷新那个目录。拖进来的目录主进程会跳过。 */
+  const downloadDir = async (item: RemoteFile) => {
+    try {
+      await fs.downloadDir(item)
+    } catch (e) {
+      setError(sftpMessage(e))
+    }
+  }
+
+  /** 从系统拖文件进来：上传到 dir，结束后刷新那个目录。拖进来的目录会递归上传/复制。 */
   const uploadInto = async (dir: string, files: FileList | null) => {
     if (!files || files.length === 0) return
     const paths = Array.from(files)
@@ -244,7 +294,7 @@ export function FileTree() {
     if (paths.length === 0) return
     setDropDir(null)
     try {
-      await window.api.sftp.uploadPaths(session.id, dir, paths)
+      await fs.uploadPaths(dir, paths)
       await ensureOpen(dir)
     } catch (e) {
       const message = sftpMessage(e)
@@ -274,9 +324,9 @@ export function FileTree() {
       setFolderError('名称不能为空，也不能包含斜杠')
       return
     }
-    const dest = directoryOf(selected)
+    const dest = mkdirTarget ?? root
     try {
-      await window.api.sftp.mkdir(session.id, dest, name)
+      await fs.mkdir(dest, name)
       setMaking(false)
       setFolderError('')
       await ensureOpen(dest)
@@ -289,7 +339,7 @@ export function FileTree() {
     setBusy(true)
     setError('')
     try {
-      const res = await window.api.sftp.list(session.id, root)
+      const res = await fs.list(root)
       setRoot(res.path)
       setEntries(sortEntries(res.entries))
       const paths = Object.keys(open).filter((p) => open[p] && p !== root && p !== res.path)
@@ -297,7 +347,7 @@ export function FileTree() {
       await Promise.all(
         paths.map(async (p) => {
           try {
-            const child = await window.api.sftp.list(session.id, p)
+            const child = await fs.list(p)
             next[p] = { entries: sortEntries(child.entries) }
           } catch (e) {
             next[p] = { entries: [], error: sftpMessage(e) }
@@ -313,7 +363,7 @@ export function FileTree() {
   }
 
   const renderNodes = (items: RemoteFile[], depth: number) =>
-    items.map((item) => {
+    visible(items).map((item) => {
       const isDir = item.kind === 'dir'
       const expanded = isDir && !!open[item.path]
       const listing = cache[item.path]
@@ -325,16 +375,13 @@ export function FileTree() {
                   role="treeitem"
                   aria-expanded={isDir ? expanded : undefined}
                   aria-selected={selected === item.path}
-                  title={item.kind === 'dir' ? item.path : `${item.name}  ${formatSize(item.size)}（可拖出窗口下载）`}
-                  draggable={!isDir}
+                  title={
+                    item.kind === 'dir'
+                      ? item.path
+                      : `${item.name}  ${formatSize(item.size)}`
+                  }
                   {...(isDir ? dropTarget(item.path) : {})}
-                  onDragStart={(e) => {
-                    if (isDir) return
-                    // 文件在远端：阻止默认拖拽，主进程下载到缓存后发起系统拖拽
-                    e.preventDefault()
-                    window.api.sftp.dragOut(session.id, item.path, item.name)
-                  }}
-                  className={`flex h-[22px] w-full cursor-pointer items-center pr-2 text-left text-[13px] select-none hover:bg-foreground/5 ${
+                  className={`flex h-7 w-full cursor-pointer items-center pr-2 text-left text-sm select-none hover:bg-foreground/5 ${
                     selected === item.path ? 'bg-foreground/10' : ''
                   } ${dropDir === item.path ? 'bg-foreground/10 ring-1 ring-foreground/25 ring-inset' : ''}`}
                   style={{ paddingLeft: depth * TREE_INDENT }}
@@ -342,37 +389,53 @@ export function FileTree() {
                   onClick={() => {
                     setSelected(item.path)
                     if (isDir) {
-                      if (!open[item.path]) void toggle(item.path)
+                      void toggle(item.path)
                     } else {
-                      openRemoteEditor(session.id, { path: item.path, name: item.name }, false)
+                      openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, false)
                     }
                   }}
                   onDoubleClick={() => {
-                    if (isDir) {
-                      if (!open[item.path]) void toggle(item.path)
-                    } else {
-                      openRemoteEditor(session.id, { path: item.path, name: item.name }, true)
+                    if (!isDir) {
+                      openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)
                     }
                   }}
                 >
-                  <Twistie
-                    dir={isDir}
-                    open={expanded}
-                    onToggle={() => void toggle(item.path)}
-                  />
                   <FileIcon name={item.name} kind={item.kind} open={expanded} />
                   <span className="min-w-0 flex-1 truncate pl-1">{item.name}</span>
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent>
                 {item.kind === 'dir' && (
-                  <ContextMenuItem onClick={() => void loadRoot(session.id, item.path)}>
+                  <ContextMenuItem onClick={() => void loadRoot(item.path)}>
                     <FolderInput /> 打开此目录
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem
+                    onClick={() =>
+                      openAfterMenu(() => {
+                        setFolderError('')
+                        setMkdirTarget(item.path)
+                        setMaking(true)
+                      })
+                    }
+                  >
+                    <FolderPlus /> 新建文件夹
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => void uploadFilesInto(item.path)}>
+                    <Upload /> 上传文件
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => void uploadDirInto(item.path)}>
+                    <FolderUp /> 上传文件夹
                   </ContextMenuItem>
                 )}
                 {item.kind !== 'dir' && (
                   <ContextMenuItem
-                    onClick={() => openRemoteEditor(session.id, { path: item.path, name: item.name }, true)}
+                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)}
                   >
                     编辑
                   </ContextMenuItem>
@@ -392,6 +455,11 @@ export function FileTree() {
                     <Download /> 下载
                   </ContextMenuItem>
                 )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => downloadDir(item)}>
+                    <Download /> 下载
+                  </ContextMenuItem>
+                )}
                 <ContextMenuItem variant="destructive" onClick={() => remove(item)}>
                   <Trash2 /> 删除
                 </ContextMenuItem>
@@ -400,17 +468,17 @@ export function FileTree() {
           {expanded && (
             <div>
               {loading[item.path] && !listing && (
-                <p className="flex h-[22px] items-center text-[12px] text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT + TREE_TWISTIE }}>
+                <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
                   正在加载
                 </p>
               )}
               {listing?.error && (
-                <p className="text-[11px] text-destructive" style={{ paddingLeft: (depth + 1) * TREE_INDENT + TREE_TWISTIE }}>
+                <p className="text-[11px] text-destructive" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
                   {listing.error}
                 </p>
               )}
-              {listing && listing.entries.length === 0 && !listing.error && (
-                <p className="flex h-[22px] items-center text-[12px] text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT + TREE_TWISTIE }}>
+              {listing && visible(listing.entries).length === 0 && !listing.error && (
+                <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
                   空目录
                 </p>
               )}
@@ -426,47 +494,55 @@ export function FileTree() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 px-2 py-1">
-        <p className="min-w-0 flex-1 truncate text-xs font-medium">{session.name}</p>
+      <div className="flex items-center gap-1 pr-1 pb-1">
+        <input
+          className="h-8 min-w-0 flex-1 rounded bg-foreground/5 px-2 text-sm outline-none focus:bg-foreground/10"
+          value={draft ?? (root === '.' ? '' : root)}
+          placeholder={local ? 'C:\\Users\\...' : '/root 或 /home'}
+          title={root === '.' ? '' : root}
+          spellCheck={false}
+          onFocus={() => setDraft(root === '.' ? '' : root)}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const path = e.currentTarget.value.trim()
+              setDraft(null)
+              if (path) void loadRoot(path)
+            } else if (e.key === 'Escape') {
+              setDraft(null)
+            }
+          }}
+          onBlur={() => setDraft(null)}
+        />
+        <Button variant="ghost" size="icon-sm" title="回到家目录" disabled={busy} onClick={() => void loadRoot('.')}>
+          <Home />
+        </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          title="打开目录"
-          aria-expanded={picking}
-          onClick={() => {
-            setPathError('')
-            setPicking(true)
-          }}
+          title="回到上级目录"
+          disabled={busy || !parentDir(root)}
+          onClick={() => void loadRoot(parentDir(root)!)}
         >
-          <FolderInput />
+          <ArrowUp />
         </Button>
         <Button variant="ghost" size="icon-sm" title="刷新" disabled={busy} onClick={() => void refresh()}>
           <RefreshCw />
         </Button>
-        {!unsupported && (
-          <>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="新建文件夹"
-              onClick={() => {
-                setFolderError('')
-                setMaking(true)
-              }}
-            >
-              <FolderPlus />
-            </Button>
-            <Button variant="ghost" size="icon-sm" title="上传" disabled={busy} onClick={() => void upload()}>
-              <Upload />
-            </Button>
-          </>
-        )}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title={showHidden ? '隐藏以 . 开头的文件' : '显示隐藏文件'}
+          onClick={toggleHidden}
+        >
+          {showHidden ? <Eye /> : <EyeOff />}
+        </Button>
       </div>
       {unsupported ? (
         <Hint text="内置 SFTP 没有用起来，机器上原来的文件通道也打不开。改 sshd 需要 root 或免密 sudo。" />
       ) : (
         <>
-          {busy && entries.length === 0 && !error && (
+          {!local && busy && entries.length === 0 && !error && (
             <Hint text="正在通过当前 SSH 连接准备 SFTP，不会另开端口。" />
           )}
           {error && <p className="px-3 pb-1 text-[11px] text-destructive">{error}</p>}
@@ -495,43 +571,56 @@ export function FileTree() {
                     aria-selected={selected === root}
                     title={root}
                     {...dropTarget(root)}
-                    className={`flex h-[22px] w-full cursor-pointer items-center pr-2 text-[13px] select-none hover:bg-foreground/5 ${
+                    className={`flex h-7 w-full cursor-pointer items-center pr-2 text-sm select-none hover:bg-foreground/5 ${
                       selected === root ? 'bg-foreground/10' : ''
                     } ${dropDir === root ? 'bg-foreground/10 ring-1 ring-foreground/25 ring-inset' : ''}`}
                     style={{ paddingLeft: 0 }}
                     onContextMenu={() => setSelected(root)}
                     onClick={() => {
                       setSelected(root)
-                      if (!rootOpen) void toggle(root)
+                      void toggle(root)
                     }}
                   >
-                    <Twistie dir open={rootOpen} onToggle={() => void toggle(root)} />
                     <FileIcon name={rootName} kind="dir" open={rootOpen} />
                     <span className="min-w-0 flex-1 truncate pl-1">{rootName}</span>
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
                   {parentDir(root) && (
-                    <ContextMenuItem onClick={() => void loadRoot(session.id, parentDir(root)!)}>
+                    <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
                       打开上级目录
                     </ContextMenuItem>
                   )}
                   <ContextMenuItem
                     onClick={() =>
                       openAfterMenu(() => {
-                        setPathError('')
-                        setPicking(true)
+                        setFolderError('')
+                        setMkdirTarget(root)
+                        setMaking(true)
                       })
                     }
                   >
-                    <FolderInput /> 打开其他目录
+                    <FolderPlus /> 新建文件夹
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => void uploadFilesInto(root)}>
+                    <Upload /> 上传文件
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => void uploadDirInto(root)}>
+                    <FolderUp /> 上传文件夹
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() =>
+                      downloadDir({ name: rootName, path: root, kind: 'dir', size: 0, mtime: 0 })
+                    }
+                  >
+                    <Download /> 下载
                   </ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>
               {rootOpen && (
                 <>
-                  {entries.length === 0 && !busy && !error && (
-                    <p className="flex h-[22px] items-center text-[12px] text-muted-foreground" style={{ paddingLeft: TREE_INDENT + TREE_TWISTIE }}>
+                  {visible(entries).length === 0 && !busy && !error && (
+                    <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: TREE_INDENT }}>
                       空目录
                     </p>
                   )}
@@ -563,16 +652,17 @@ export function FileTree() {
                   ) : (
                     <span className="shrink-0">{percent}%</span>
                   )}
-                  {!t.done && (
-                    <button
-                      type="button"
-                      title="取消传输"
-                      className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                      onClick={() => void window.api.sftp.cancelTransfer(t.id)}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    title={t.done ? '关闭' : '取消传输'}
+                    className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    onClick={() => {
+                      if (t.done) setTransfers((list) => list.filter((item) => item.id !== t.id))
+                      else void window.api.sftp.cancelTransfer(t.id)
+                    }}
+                  >
+                    <X className="size-3" />
+                  </button>
                 </div>
                 <div className="h-0.5 rounded-full bg-foreground/10">
                   <div
@@ -615,86 +705,12 @@ export function FileTree() {
         }}
         onSave={(value) => void mkdir(value)}
       />
-      <RemarkDialog
-        open={picking}
-        title="打开目录"
-        description="填写这台机器上的目录。"
-        initial={root === '.' ? '/' : root}
-        placeholder="/root 或 /home"
-        error={pathError}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPicking(false)
-            setPathError('')
-          }
-        }}
-        onSave={(value) => {
-          const path = value.trim()
-          if (!path) {
-            setPathError('目录不能为空')
-            return
-          }
-          setPathError('')
-          void loadRoot(session.id, path)
-        }}
-      />
     </div>
   )
 }
 
-/** 与 VS Code 资源管理器相同：每级缩进 8px，箭头槽和图标都是 16px，图标自成一列。 */
-const TREE_INDENT = 8
-const TREE_TWISTIE = 16
-
-function Twistie(props: { dir: boolean; open?: boolean; onToggle?: () => void }) {
-  if (!props.dir) return <span className="size-4 shrink-0" />
-  return (
-    <button
-      type="button"
-      className="flex size-4 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-muted-foreground"
-      onClick={(e) => {
-        e.stopPropagation()
-        props.onToggle?.()
-      }}
-    >
-      <svg
-        viewBox="0 0 16 16"
-        className={`size-4 origin-center ${props.open ? 'rotate-90' : ''}`}
-        aria-hidden
-      >
-        <path
-          d="M6 3.5 11 8 6 12.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </button>
-  )
-}
-
-function findFile(
-  path: string,
-  root: string,
-  entries: RemoteFile[],
-  cache: Record<string, DirListing>
-): RemoteFile | null {
-  if (path === root) return { name: baseName(root), path: root, kind: 'dir', size: 0, mtime: 0 }
-  const scan = (items: RemoteFile[]): RemoteFile | null => {
-    for (const item of items) {
-      if (item.path === path) return item
-      const nested = cache[item.path]
-      if (nested) {
-        const hit = scan(nested.entries)
-        if (hit) return hit
-      }
-    }
-    return null
-  }
-  return scan(entries)
-}
+/** 每级缩进 12px，图标自成一列。 */
+const TREE_INDENT = 12
 
 function sortEntries(items: RemoteFile[]): RemoteFile[] {
   return [...items].sort((a, b) => {
@@ -713,12 +729,15 @@ function baseName(path: string): string {
 }
 
 function parentDir(path: string): string | null {
-  if (!path.startsWith('/')) return null
   const trimmed = path.replace(/\/+$/, '')
-  if (!trimmed) return null
+  if (!trimmed || trimmed === '/') return null
+  // POSIX 绝对路径或 Windows 盘符路径（C:/...），其余（相对路径等）没有上级
+  if (!trimmed.startsWith('/') && !/^[A-Za-z]:(\/|$)/.test(trimmed)) return null
   const slash = trimmed.lastIndexOf('/')
   if (slash < 0) return null
-  return slash === 0 ? '/' : trimmed.slice(0, slash)
+  if (slash === 0) return '/'
+  const parent = trimmed.slice(0, slash)
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}/` : parent
 }
 
 function Hint(props: { text: string }) {
@@ -726,19 +745,20 @@ function Hint(props: { text: string }) {
 }
 
 const ROOTS_KEY = 'termpilot.fileRoots'
+const HIDDEN_KEY = 'termpilot.showHidden'
 
-function readRoot(sessionId: string): string {
+function readRoot(key: string): string {
   try {
     const raw = localStorage.getItem(ROOTS_KEY)
     if (!raw) return ''
     const saved = JSON.parse(raw) as Record<string, unknown>
-    return typeof saved[sessionId] === 'string' ? saved[sessionId] : ''
+    return typeof saved[key] === 'string' ? saved[key] : ''
   } catch {
     return ''
   }
 }
 
-function writeRoot(sessionId: string, path: string): void {
+function writeRoot(key: string, path: string): void {
   const saved = (() => {
     try {
       const raw = localStorage.getItem(ROOTS_KEY)
@@ -748,7 +768,7 @@ function writeRoot(sessionId: string, path: string): void {
       return {}
     }
   })()
-  saved[sessionId] = path
+  saved[key] = path
   localStorage.setItem(ROOTS_KEY, JSON.stringify(saved))
 }
 

@@ -20,7 +20,7 @@ self.MonacoEnvironment = {
 }
 loader.config({ monaco })
 
-/** 主区域里的远程文本编辑器。Ctrl/Cmd+S 写回 SSH 上的原文件。 */
+/** 主区域里的文本编辑器。Ctrl/Cmd+S 写回原文件（SSH 服务器或本机）。 */
 export function RemoteEditor(props: { tab: EditorTab }) {
   const tab = props.tab
   const setEditorDirty = useAppStore((s) => s.setEditorDirty)
@@ -55,7 +55,9 @@ export function RemoteEditor(props: { tab: EditorTab }) {
     setLoading(true)
     setError('')
     try {
-      const content = await window.api.sftp.read(tab.sessionId, tab.path)
+      const content = tab.sessionId
+        ? await window.api.sftp.read(tab.sessionId, tab.path)
+        : await window.api.localfs.read(tab.path)
       textRef.current = content
       savedRef.current = content
       writeBuffer(tab.key, { text: content, saved: content, loaded: true, error: '' })
@@ -75,7 +77,11 @@ export function RemoteEditor(props: { tab: EditorTab }) {
 
   const save = useCallback(async () => {
     try {
-      await window.api.sftp.write(tab.sessionId, tab.path, textRef.current)
+      if (tab.sessionId) {
+        await window.api.sftp.write(tab.sessionId, tab.path, textRef.current)
+      } else {
+        await window.api.localfs.write(tab.path, textRef.current)
+      }
       remember(textRef.current, textRef.current)
       setError('')
     } catch (e) {

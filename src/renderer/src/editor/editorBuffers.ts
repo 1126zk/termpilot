@@ -7,8 +7,8 @@ export interface EditorBuffer {
 
 const buffers = new Map<string, EditorBuffer>()
 
-export function editorKey(sessionId: string, path: string): string {
-  return `${sessionId}\n${path}`
+export function editorKey(sessionId: string | null, path: string): string {
+  return `${sessionId ?? 'local'}\n${path}`
 }
 
 export function readBuffer(key: string): EditorBuffer | undefined {

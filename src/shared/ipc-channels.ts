@@ -33,6 +33,8 @@ export const IPC = {
   sftpRemove: 'sftp:remove',
   sftpUpload: 'sftp:upload',
   sftpDownload: 'sftp:download',
+  sftpUploadDir: 'sftp:upload-dir',
+  sftpDownloadDir: 'sftp:download-dir',
   sftpRead: 'sftp:read',
   sftpWrite: 'sftp:write',
   sftpRename: 'sftp:rename',
@@ -76,7 +78,18 @@ export const IPC = {
 
   appVersion: 'app:version',
 
-  sftpDragOut: 'sftp:drag-out',
+  /** 本机文件面板，参数为统一正斜杠路径，无 sessionId */
+  localfsList: 'localfs:list',
+  localfsMkdir: 'localfs:mkdir',
+  localfsRemove: 'localfs:remove',
+  localfsUpload: 'localfs:upload',
+  localfsUploadPaths: 'localfs:upload-paths',
+  localfsDownload: 'localfs:download',
+  localfsUploadDir: 'localfs:upload-dir',
+  localfsDownloadDir: 'localfs:download-dir',
+  localfsRename: 'localfs:rename',
+  localfsRead: 'localfs:read',
+  localfsWrite: 'localfs:write',
   sessionDetectOs: 'session:detect-os',
 
   winMinimize: 'win:minimize',

@@ -50,7 +50,11 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
     }
     setSaving(true)
     try {
-      await window.api.sftp.write(pending.sessionId, pending.path, buffer.text)
+      if (pending.sessionId) {
+        await window.api.sftp.write(pending.sessionId, pending.path, buffer.text)
+      } else {
+        await window.api.localfs.write(pending.path, buffer.text)
+      }
       closeEditorTab(pending.key)
       setPending(null)
     } catch (e) {

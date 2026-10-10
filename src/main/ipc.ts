@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ClipboardItem, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, ipcMain, shell } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -20,6 +20,7 @@ import type { StorageService } from './services/StorageService'
 import type { TerminalService } from './services/TerminalService'
 import type { McpService } from './services/McpService'
 import type { SftpService } from './services/SftpService'
+import type { LocalFsService } from './services/LocalFsService'
 import { listAgentTargets, writeAgentTarget } from './services/AgentConfigService'
 import { paintFromContents } from './window-chrome'
 
@@ -28,7 +29,8 @@ export function registerIpc(
   storage: StorageService,
   terminal: TerminalService,
   sftp: SftpService,
-  mcp: McpService
+  mcp: McpService,
+  localfs: LocalFsService
 ): void {
   // ------------------------------------------------------------ 会话 CRUD
   ipcMain.handle(IPC.sessionList, () => storage.list())
@@ -116,24 +118,47 @@ export function registerIpc(
     sftp.download(sessionId, file)
   )
 
-  // 远程文件拖出窗口：先下载到缓存目录，再用 startDrag 发起系统级拖拽
-  ipcMain.on(IPC.sftpDragOut, async (event, sessionId: string, remotePath: string, name: string) => {
-    try {
-      const dir = join(app.getPath('temp'), 'termpilot-drag')
-      mkdirSync(dir, { recursive: true })
-      const localPath = join(dir, name)
-      await sftp.get(sessionId, remotePath, localPath)
-      event.sender.startDrag({ file: localPath, icon: dragIcon() })
-    } catch (error) {
-      console.error('[TermPilot] 拖出文件失败:', error)
-    }
-  })
+  ipcMain.handle(IPC.sftpUploadDir, (_e, sessionId: string, dir: string) =>
+    sftp.uploadDir(sessionId, dir)
+  )
+
+  ipcMain.handle(IPC.sftpDownloadDir, (_e, sessionId: string, file: RemoteFile) =>
+    sftp.downloadDir(sessionId, file)
+  )
 
   ipcMain.handle(IPC.sftpRead, (_e, sessionId: string, path: string) => sftp.readText(sessionId, path))
 
   ipcMain.handle(IPC.sftpWrite, (_e, sessionId: string, path: string, text: string) =>
     sftp.writeText(sessionId, path, text)
   )
+
+  // ------------------------------------------------------------- 本地文件
+  ipcMain.handle(IPC.localfsList, (_e, dir: string) => localfs.list(dir))
+
+  ipcMain.handle(IPC.localfsMkdir, (_e, dir: string, name: string) => localfs.mkdir(dir, name))
+
+  ipcMain.handle(IPC.localfsRemove, (_e, path: string, kind: RemoteFile['kind']) =>
+    localfs.remove(path, kind)
+  )
+
+  ipcMain.handle(IPC.localfsUpload, (_e, dir: string) => localfs.upload(dir))
+
+  // 从系统拖进来的文件：renderer 用 webUtils 拿到本地路径后传过来
+  ipcMain.handle(IPC.localfsUploadPaths, (_e, dir: string, paths: string[]) =>
+    localfs.uploadPaths(dir, paths)
+  )
+
+  ipcMain.handle(IPC.localfsDownload, (_e, file: RemoteFile) => localfs.download(file))
+
+  ipcMain.handle(IPC.localfsUploadDir, (_e, dir: string) => localfs.uploadDir(dir))
+
+  ipcMain.handle(IPC.localfsDownloadDir, (_e, file: RemoteFile) => localfs.downloadDir(file))
+
+  ipcMain.handle(IPC.localfsRename, (_e, from: string, to: string) => localfs.rename(from, to))
+
+  ipcMain.handle(IPC.localfsRead, (_e, path: string) => localfs.readText(path))
+
+  ipcMain.handle(IPC.localfsWrite, (_e, path: string, text: string) => localfs.writeText(path, text))
 
   // --------------------------------------------------------------- MCP
   ipcMain.handle(IPC.appearanceGet, () => storage.getAppearance())
@@ -244,14 +269,4 @@ function assertRect(rect: CaptureRect, contentSize: number[]): void {
     rect.x + rect.width <= width + 1 &&
     rect.y + rect.height <= height + 1
   if (!ok) throw new Error('截图区域超出窗口')
-}
-
-/** 拖拽时跟着鼠标的图标：用应用图标缩到 32px，找不到就给空图（Windows 允许）。 */
-function dragIcon() {
-  const candidates = [join(process.resourcesPath ?? '', 'icon.png'), join(app.getAppPath(), 'resources', 'icon.png')]
-  for (const path of candidates) {
-    const icon = nativeImage.createFromPath(path)
-    if (!icon.isEmpty()) return icon.resize({ width: 32 })
-  }
-  return nativeImage.createEmpty()
 }
