@@ -19,20 +19,24 @@ export function RightPanel() {
   const setPane = useAppStore((s) => s.setRightPanelPane)
 
   return (
-    <div className="flex w-80 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+    <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card text-sidebar-foreground">
+      <div className="flex shrink-0 items-center px-2 py-1.5">
         {panes.map((item) => (
           <button
             key={item.id}
             type="button"
             title={item.title}
-            className={cn(
-              'flex h-8 flex-1 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-              pane === item.id && 'bg-accent text-foreground'
-            )}
+            className="group flex flex-1 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => setPane(item.id)}
           >
-            <item.icon className="size-4" />
+            <span
+              className={cn(
+                'flex size-9 items-center justify-center rounded-md transition-colors group-hover:bg-accent',
+                pane === item.id && 'bg-primary/15 text-primary group-hover:bg-primary/15'
+              )}
+            >
+              <item.icon className="size-4" />
+            </span>
           </button>
         ))}
       </div>

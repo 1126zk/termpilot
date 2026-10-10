@@ -23,10 +23,10 @@ export function ThemePanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="grid gap-4 px-3 pt-3">
-        <section className="grid gap-1.5">
+        <section className="flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">字体</p>
           <Select value={appearance.terminalFont} onValueChange={(terminalFont) => change({ terminalFont })}>
-            <SelectTrigger className="w-full text-muted-foreground [&_svg]:hidden">
+            <SelectTrigger className="w-44 text-muted-foreground [&_svg]:hidden">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -39,7 +39,7 @@ export function ThemePanel() {
           </Select>
         </section>
 
-        <section className="grid gap-1.5">
+        <section className="flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">字号</p>
           <div className="flex items-center gap-2">
             <button

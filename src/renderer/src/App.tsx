@@ -117,7 +117,11 @@ export default function App() {
               )}
             </div>
           </SidebarInset>
-          {rightPanelOpen && <RightPanel />}
+          {rightPanelOpen && (
+            <div className="flex shrink-0 flex-col py-2 pr-2">
+              <RightPanel />
+            </div>
+          )}
         </div>
         <SessionForm />
         <SettingsDialog />
