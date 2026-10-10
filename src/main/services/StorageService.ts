@@ -90,9 +90,6 @@ export class StorageService {
     this.ensureColumn('sessions', 'public_id', 'TEXT')
     this.ensureColumn('sessions', 'config_host', 'TEXT')
     this.ensureColumn('sessions', 'forwards', 'TEXT')
-    this.dropRemovedKinds()
-    this.backfillPublicIds()
-    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id)')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS open_terms (
         id TEXT PRIMARY KEY,
@@ -104,6 +101,9 @@ export class StorageService {
         sort_order INTEGER NOT NULL
       )
     `)
+    this.dropRemovedKinds()
+    this.backfillPublicIds()
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id)')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS host_notes (
         host_key TEXT PRIMARY KEY,
