@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
+import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
@@ -127,80 +128,65 @@ export function TabBar() {
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(false)
-  // 标签拖拽排序：pointerdown 记起点，过 4px 阈值才进拖拽态（阈值内仍是点击/双击）。
-  // 拖拽态里被拖标签用 translateX 跟手浮在其他标签上面，其余标签实时让位。
+  // ---- 拖拽排序（标签横向 / 菜单竖向共用 ./flip 里的公共件）----
+  // 被拖项 transform 跟手浮动 + z-index/阴影；其余项 FLIP 160ms 让位；
+  // 4px 阈值内仍是点击/双击；容器 relative 保证 offset* 与指针同一坐标系
   const [dragTabId, setDragTabId] = useState<string | null>(null)
   const [dragOffset, setDragOffset] = useState(0)
   const suppressTabClick = useRef(false)
-  // + 菜单项拖拽排序：顺序存 localStorage，竖直拖，同样 4px 阈值
+  const prevLeft = useRef(new Map<string, number>())
+  const tabDragStart = useRef({ pos: 0, layout: 0 })
+  const pointerX = useRef(0)
+  // + 菜单项拖拽排序：顺序存 localStorage
   const [menuOrder, setMenuOrder] = useState<string[]>(readMenuOrder)
   const menuOrderRef = useRef(menuOrder)
   const [dragMenuKey, setDragMenuKey] = useState<string | null>(null)
+  const [menuDragOffset, setMenuDragOffset] = useState(0)
   const suppressMenuSelect = useRef(false)
   const menuContentRef = useRef<HTMLDivElement>(null)
+  const prevMenuTop = useRef(new Map<string, number>())
+  const menuDragStart = useRef({ pos: 0, layout: 0 })
+  const pointerY = useRef(0)
 
   const updateMenuOrder = (next: string[]) => {
     menuOrderRef.current = next
     setMenuOrder(next)
   }
 
-  /**
-   * 指针 x 落在各标签中点之前的位置，实时重排；顺序没变就返回 null。
-   * 被拖标签带 transform，位移计算一律用 offsetLeft/offsetWidth（不受 transform 影响）。
-   */
+  /** 被拖标签跟手：translateX = 指针位移 − 布局位移。用当前 DOM 的真实 offsetLeft 算 */
+  const followPointer = (id: string) => {
+    const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
+    if (!el) return
+    setDragOffset(pointerX.current - tabDragStart.current.pos - (el.offsetLeft - tabDragStart.current.layout))
+  }
+
+  /** 被拖菜单项跟手（竖向版） */
+  const followMenuPointer = (key: string) => {
+    const el = menuContentRef.current?.querySelector<HTMLElement>(`[data-menu-key="${key}"]`)
+    if (!el) return
+    setMenuDragOffset(pointerY.current - menuDragStart.current.pos - (el.offsetTop - menuDragStart.current.layout))
+  }
+
+  // 重排渲染后：其余项 FLIP 滑过去；被拖项用新布局位重算跟手位移（move 里算时 DOM 还没更新）
+  useFlipSlide(dragTabId !== null, stripRef, 'data-tab-id', 'x', dragTabId, prevLeft, [tabs, dragTabId])
+  useLayoutEffect(() => {
+    if (dragTabId) followPointer(dragTabId)
+  }, [tabs, dragTabId])
+  useFlipSlide(dragMenuKey !== null, menuContentRef, 'data-menu-key', 'y', dragMenuKey, prevMenuTop, [
+    menuOrder,
+    dragMenuKey
+  ])
+  useLayoutEffect(() => {
+    if (dragMenuKey) followMenuPointer(dragMenuKey)
+  }, [menuOrder, dragMenuKey])
+
+  /** 指针 x 越过相邻标签中点就交换，返回新顺序；没变返回 null */
   const tabDropOrder = (clientX: number, dragId: string): string[] | null => {
     const strip = stripRef.current
     if (!strip) return null
-    const pointerInStrip = clientX - strip.getBoundingClientRect().left + strip.scrollLeft
+    const pointer = clientX - strip.getBoundingClientRect().left + strip.scrollLeft
     const ids = useAppStore.getState().tabs.map((tab) => tab.id)
-    const rest = ids.filter((id) => id !== dragId)
-    const buttons = [...strip.querySelectorAll<HTMLElement>('[data-tab-id]')]
-    let insert = rest.length
-    for (const button of buttons) {
-      const id = button.dataset.tabId!
-      if (id === dragId) continue
-      if (pointerInStrip < button.offsetLeft + button.offsetWidth / 2) {
-        insert = rest.indexOf(id)
-        break
-      }
-    }
-    const next = [...rest.slice(0, insert), dragId, ...rest.slice(insert)]
-    return next.join() === ids.join() ? null : next
-  }
-
-  const startTabDrag = (event: React.PointerEvent, id: string) => {
-    if (event.button !== 0) return
-    let active = false
-    const startX = event.clientX
-    // 拖拽开始瞬间的布局位。数组实时重排后 offsetLeft 自动变，
-    // translateX = 指针位移 - 布局位移，公式一直成立
-    let startOffsetLeft = 0
-    const dragged = () => stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
-    const move = (ev: PointerEvent) => {
-      if (!active) {
-        if (Math.abs(ev.clientX - startX) < 4) return
-        active = true
-        startOffsetLeft = dragged()?.offsetLeft ?? 0
-        setDragTabId(id)
-        setDragOffset(0)
-      }
-      const next = tabDropOrder(ev.clientX, id)
-      if (next) reorderTabs(next)
-      const current = dragged()
-      if (current) setDragOffset(ev.clientX - startX - (current.offsetLeft - startOffsetLeft))
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      if (!active) return
-      // 拖完会补一个 click，不能当成选中/关闭
-      suppressTabClick.current = true
-      setDragTabId(null)
-      setDragOffset(0)
-      window.api.term.reorder(useAppStore.getState().tabs.map((tab) => tab.id))
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    return moveTo(ids, dragId, dropIndex(strip, 'data-tab-id', 'x', pointer, dragId, ids))
   }
 
   /** 菜单项竖直拖拽：指针 y 对同分区各项中点，实时改顺序 */
@@ -213,48 +199,72 @@ export function TabBar() {
     const orderedSessions = applyOrder(sessionKeys, menuOrderRef.current)
     const inShells = orderedShells.includes(dragKey)
     const section = inShells ? orderedShells : orderedSessions
-    const rest = section.filter((key) => key !== dragKey)
-    const nodes = [...content.querySelectorAll<HTMLElement>('[data-menu-key]')]
-    let insert = rest.length
-    for (const node of nodes) {
-      const key = node.dataset.menuKey!
-      if (key === dragKey || !rest.includes(key)) continue
-      const rect = node.getBoundingClientRect()
-      if (clientY < rect.top + rect.height / 2) {
-        insert = rest.indexOf(key)
-        break
+    const pointer = clientY - content.getBoundingClientRect().top + content.scrollTop
+    const moved = moveTo(section, dragKey, dropIndex(content, 'data-menu-key', 'y', pointer, dragKey, section))
+    if (!moved) return null
+    return inShells ? [...moved, ...orderedSessions] : [...orderedShells, ...moved]
+  }
+
+  const startTabDrag = (event: React.PointerEvent, id: string) => {
+    startPointerDrag({
+      event,
+      axis: 'x',
+      onActivate: () => {
+        // 拖拽开始瞬间的布局位。数组实时重排后 offsetLeft 自动变，
+        // translateX = 指针位移 - 布局位移，公式一直成立
+        const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
+        tabDragStart.current = { pos: event.clientX, layout: el?.offsetLeft ?? 0 }
+        setDragTabId(id)
+        setDragOffset(0)
+      },
+      onMove: (x) => {
+        pointerX.current = x
+        const next = tabDropOrder(x, id)
+        if (next && stripRef.current) {
+          capturePositions(stripRef.current, 'data-tab-id', 'x', prevLeft.current)
+          reorderTabs(next)
+        }
+        followPointer(id)
+      },
+      onEnd: () => {
+        // 拖完会补一个 click，不能当成选中/关闭
+        suppressTabClick.current = true
+        prevLeft.current.clear()
+        setDragTabId(null)
+        setDragOffset(0)
+        window.api.term.reorder(useAppStore.getState().tabs.map((tab) => tab.id))
       }
-    }
-    const nextSection = [...rest.slice(0, insert), dragKey, ...rest.slice(insert)]
-    const next = inShells ? [...nextSection, ...orderedSessions] : [...orderedShells, ...nextSection]
-    const current = [...orderedShells, ...orderedSessions]
-    return next.join() === current.join() ? null : next
+    })
   }
 
   const startMenuDrag = (event: React.PointerEvent, key: string) => {
-    if (event.button !== 0) return
-    let active = false
-    const startY = event.clientY
-    const move = (ev: PointerEvent) => {
-      if (!active) {
-        if (Math.abs(ev.clientY - startY) < 4) return
-        active = true
+    startPointerDrag({
+      event,
+      axis: 'y',
+      onActivate: () => {
+        const el = menuContentRef.current?.querySelector<HTMLElement>(`[data-menu-key="${key}"]`)
+        menuDragStart.current = { pos: event.clientY, layout: el?.offsetTop ?? 0 }
         setDragMenuKey(key)
+        setMenuDragOffset(0)
+      },
+      onMove: (y) => {
+        pointerY.current = y
+        const next = menuDropOrder(y, key)
+        if (next && menuContentRef.current) {
+          capturePositions(menuContentRef.current, 'data-menu-key', 'y', prevMenuTop.current)
+          updateMenuOrder(next)
+        }
+        followMenuPointer(key)
+      },
+      onEnd: () => {
+        // 拖完菜单项会补一次 select，不能当成打开
+        suppressMenuSelect.current = true
+        prevMenuTop.current.clear()
+        setDragMenuKey(null)
+        setMenuDragOffset(0)
+        writeMenuOrder(menuOrderRef.current)
       }
-      const next = menuDropOrder(ev.clientY, key)
-      if (next) updateMenuOrder(next)
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      if (!active) return
-      // 拖完菜单项会补一次 select，不能当成打开
-      suppressMenuSelect.current = true
-      setDragMenuKey(null)
-      writeMenuOrder(menuOrderRef.current)
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    })
   }
 
   const shellById = new Map(localShells.map((shell) => [`shell:${shell.id}`, shell]))
@@ -346,7 +356,7 @@ export function TabBar() {
           // 标签条的空白处双击 = 最大化/还原
           if (window.api.platform === 'win32' && e.target === e.currentTarget) void window.api.win.toggleMaximize()
         }}
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map((t, i) => {
           const active = t.id === activeTabId
@@ -436,14 +446,15 @@ export function TabBar() {
               <Plus className="size-5" strokeWidth={2} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" ref={menuContentRef}>
+          <DropdownMenuContent align="start" ref={menuContentRef} className="relative">
             {orderedShellKeys.map((key) => {
               const shell = shellById.get(key)!
               return (
                 <DropdownMenuItem
                   key={key}
                   data-menu-key={key}
-                  className={cn(dragMenuKey === key && 'opacity-60 ring-1 ring-foreground/30')}
+                  className={cn(dragMenuKey === key && 'relative z-10 shadow-lg ring-1 ring-foreground/30')}
+                  style={dragMenuKey === key ? { transform: `translateY(${menuDragOffset}px)` } : undefined}
                   onPointerDown={(e) => startMenuDrag(e, key)}
                   onSelect={(event) => {
                     if (suppressMenuSelect.current) {
@@ -466,7 +477,8 @@ export function TabBar() {
                 <DropdownMenuItem
                   key={key}
                   data-menu-key={key}
-                  className={cn(dragMenuKey === key && 'opacity-60 ring-1 ring-foreground/30')}
+                  className={cn(dragMenuKey === key && 'relative z-10 shadow-lg ring-1 ring-foreground/30')}
+                  style={dragMenuKey === key ? { transform: `translateY(${menuDragOffset}px)` } : undefined}
                   onPointerDown={(e) => startMenuDrag(e, key)}
                   onSelect={(event) => {
                     if (suppressMenuSelect.current) {
