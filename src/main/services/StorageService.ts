@@ -87,6 +87,7 @@ export class StorageService {
     this.ensureColumn('appearance', 'terminal_font', 'TEXT')
     this.ensureColumn('appearance', 'terminal_size', 'INTEGER')
     this.ensureColumn('appearance', 'theme', 'TEXT')
+    this.ensureColumn('open_terms', 'shell', 'TEXT')
     this.ensureColumn('sessions', 'jump_host', 'TEXT')
     this.ensureColumn('sessions', 'jump_port', 'INTEGER')
     this.ensureColumn('sessions', 'jump_username', 'TEXT')
@@ -353,6 +354,7 @@ export class StorageService {
     kind: 'ssh' | 'local'
     title: string
     remark: string
+    shell?: string
     scrollback: string
   }[] {
     const rows = this.db.prepare('SELECT * FROM open_terms ORDER BY sort_order ASC, rowid ASC').all()
@@ -366,6 +368,7 @@ export class StorageService {
           kind,
           title: text(row.title) || '窗口',
           remark: text(row.remark),
+          shell: optionalText(row.shell),
           scrollback: text(row.scrollback)
         }
       ]
@@ -378,20 +381,22 @@ export class StorageService {
     kind: 'ssh' | 'local'
     title: string
     remark: string
+    shell?: string
   }): void {
     const orderRow = this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS n FROM open_terms').get()
     const next = integer(orderRow && 'n' in orderRow ? orderRow.n : 0, 0) + 1
     this.db
       .prepare(
-        `INSERT INTO open_terms (id, session_id, kind, title, remark, scrollback, sort_order)
-         VALUES (?, ?, ?, ?, ?, '', ?)
+        `INSERT INTO open_terms (id, session_id, kind, title, remark, shell, scrollback, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, '', ?)
          ON CONFLICT(id) DO UPDATE SET
            session_id = excluded.session_id,
            kind = excluded.kind,
            title = excluded.title,
-           remark = excluded.remark`
+           remark = excluded.remark,
+           shell = excluded.shell`
       )
-      .run(term.id, term.sessionId, term.kind, term.title, term.remark, next)
+      .run(term.id, term.sessionId, term.kind, term.title, term.remark, term.shell ?? null, next)
   }
 
   /** 存的是界面已经画好的行，不是原始 PTY 流。 */

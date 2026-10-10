@@ -3,6 +3,8 @@ import {
   MCP_DEFAULT_PORT,
   unifiedTheme,
   type Appearance,
+  type LocalShell,
+  type LocalShellInfo,
   type McpOpenTab,
   type McpRuntime,
   type McpSettings,
@@ -40,6 +42,7 @@ export type RightPanelPane = 'files' | 'snippets' | 'history' | 'theme'
 
 interface AppState {
   sessions: SessionConfig[]
+  localShells: LocalShellInfo[]
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
   hostNotes: Record<string, string>
   sessionStatus: Record<string, SessionStatus>
@@ -78,6 +81,7 @@ interface AppState {
   notice: string | null
 
   loadSessions: () => Promise<void>
+  loadLocalShells: () => Promise<void>
   loadWindows: () => Promise<void>
   setHostNote: (hostKey: string, remark: string) => Promise<void>
   loadAppearance: () => Promise<void>
@@ -95,7 +99,7 @@ interface AppState {
   duplicateSessions: (ids: string[]) => Promise<void>
 
   openSessionTab: (session: SessionConfig, fresh?: boolean) => void
-  openLocalTab: () => void
+  openLocalTab: (shell?: LocalShell) => void
   closeTab: (tabId: string) => void
   reconnectTab: (tabId: string) => void
   renameTab: (tabId: string, title: string) => void
@@ -131,6 +135,7 @@ const bootAppearance = readCachedAppearance()
 
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: [],
+  localShells: [],
   hostNotes: {},
   sessionStatus: {},
   termState: {},
@@ -157,6 +162,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ sessions, hostNotes })
   },
 
+  loadLocalShells: async () => {
+    set({ localShells: await window.api.shells.list() })
+  },
+
   loadWindows: async () => {
     if (restoredWindows || get().tabs.length > 0) return
     restoredWindows = true
@@ -167,7 +176,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       const platform = window.api.platform
       const known =
         term.kind === 'local'
-          ? { os: (platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux') as Tab['os'] }
+          ? {
+              os: (platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux') as Tab['os'],
+              shell: term.shell
+            }
           : osIconProps(session?.os)
       return {
         id: term.id,
@@ -186,6 +198,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         kind: term.kind,
         sessionId: term.sessionId ?? undefined,
         title: term.title,
+        shell: term.shell,
         cols: 80,
         rows: 24
       })
@@ -358,7 +371,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       .catch(() => undefined)
   },
 
-  openLocalTab: () => {
+  openLocalTab: (shell = 'powershell') => {
     const count = get().tabs.filter((t) => t.kind === 'local').length
     const platform = window.api.platform
     const tab: Tab = {
@@ -366,10 +379,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionId: null,
       kind: 'local',
       title: `窗口 ${count + 1}`,
-      os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux'
+      os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux',
+      shell
     }
     set({ tabs: [...get().tabs, tab], activeTabId: tab.id })
-    window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, cols: 80, rows: 24 })
+    window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, shell, cols: 80, rows: 24 })
   },
 
   renameTab: (tabId, title) => {

@@ -17,7 +17,7 @@ if (!existsSync(databaseFile) && !existsSync(currentSessions) && existsSync(lega
   copyFileSync(legacySessions, currentSessions)
 }
 import { StorageService } from './services/StorageService'
-import { TerminalService } from './services/TerminalService'
+import { detectLocalShells, TerminalService } from './services/TerminalService'
 import { SftpService } from './services/SftpService'
 import { LocalFsService } from './services/LocalFsService'
 import { ExecService } from './services/ExecService'
@@ -158,6 +158,7 @@ function createWindow(storage: StorageService): void {
   registerIpc(storage, terminal, sftp, mcp, new LocalFsService())
   ipcMain.handle(IPC.sessionDetectOs, (_e, sessionId: string) => exec2!.detectOs(sessionId))
   ipcMain.handle(IPC.sessionSetOs, (_e, sessionId: string, os: string) => storage.setOs(sessionId, os))
+  ipcMain.handle(IPC.shellsList, () => detectLocalShells())
   void mcp.apply(storage.getMcpSettings()).catch((error) => {
     console.error('[TermPilot] MCP start failed:', error)
   })

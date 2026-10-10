@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
+import { Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
@@ -22,7 +22,25 @@ import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { CaptureDialog } from './CaptureDialog'
-import { OsIcon } from './OsIcon'
+import { OsIcon, osIconProps } from './OsIcon'
+import type { LocalShell } from '../../../shared/types'
+
+/** 本机终端三种壳的标签图标。PowerShell 用它的品牌蓝。 */
+function ShellIcon(props: { shell?: LocalShell }) {
+  if (props.shell === 'cmd') return <Terminal className="size-4 shrink-0" strokeWidth={2} />
+  if (props.shell === 'gitbash') return <GitBranch className="size-4 shrink-0" strokeWidth={2} />
+  if (props.shell === 'wsl') return <OsIcon os="linux" />
+  if (props.shell === 'pwsh') return <SquareTerminal className="size-4 shrink-0" strokeWidth={2} style={{ color: '#2c4fdd' }} />
+  return <SquareTerminal className="size-4 shrink-0" strokeWidth={2} style={{ color: '#5391fe' }} />
+}
+
+function shellLabel(shell?: LocalShell): string {
+  if (shell === 'cmd') return 'CMD'
+  if (shell === 'gitbash') return 'Git Bash'
+  if (shell === 'wsl') return 'WSL'
+  if (shell === 'pwsh') return 'PowerShell 7'
+  return 'PowerShell'
+}
 
 const drag = { WebkitAppRegion: 'drag' } as CSSProperties
 const noDrag = { WebkitAppRegion: 'no-drag' } as CSSProperties
@@ -94,6 +112,7 @@ export function TabBar() {
   const reconnectTab = useAppStore((s) => s.reconnectTab)
   const termState = useAppStore((s) => s.termState)
   const openLocalTab = useAppStore((s) => s.openLocalTab)
+  const localShells = useAppStore((s) => s.localShells)
   const openSessionTab = useAppStore((s) => s.openSessionTab)
   const renameTab = useAppStore((s) => s.renameTab)
   const setTabRemark = useAppStore((s) => s.setTabRemark)
@@ -213,7 +232,7 @@ export function TabBar() {
                   {/* 平时是系统图标；悬停标签或标签被选中时变成叉；悬停叉本身时叉变主题强调色并带小方框 */}
                   <span className="flex size-5 shrink-0 items-center justify-center">
                     <span className={cn('items-center justify-center', active ? 'hidden' : 'flex group-hover/tab:hidden')}>
-                      <OsIcon os={t.os} distro={t.distro} />
+                      {t.kind === 'local' ? <ShellIcon shell={t.shell} /> : <OsIcon os={t.os} distro={t.distro} />}
                     </span>
                     <span
                       role="button"
@@ -230,7 +249,9 @@ export function TabBar() {
                       <X strokeWidth={2} />
                     </span>
                   </span>
-                  <span className={cn('min-w-0 truncate', active && 'text-primary')}>{windowLabel(t.title, session?.name)}</span>
+                  <span className={cn('min-w-0 truncate', active && 'text-primary')}>
+                    {windowLabel(t.title, t.kind === 'local' ? shellLabel(t.shell) : session?.name)}
+                  </span>
                 </button>
               </ContextMenuTrigger>
               <ContextMenuContent>
@@ -258,14 +279,16 @@ export function TabBar() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={openLocalTab}>
-              <TerminalSquare />
-              本机终端
-            </DropdownMenuItem>
+            {localShells.map((shell) => (
+              <DropdownMenuItem key={shell.id} onClick={() => openLocalTab(shell.id)}>
+                <ShellIcon shell={shell.id} />
+                {shell.label}
+              </DropdownMenuItem>
+            ))}
             {sessions.length > 0 && <DropdownMenuSeparator />}
             {sessions.map((s) => (
               <DropdownMenuItem key={s.id} onClick={() => openSessionTab(s, true)}>
-                <TerminalSquare />
+                <OsIcon {...osIconProps(s.os)} />
                 {s.name}
               </DropdownMenuItem>
             ))}

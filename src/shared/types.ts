@@ -87,11 +87,23 @@ export interface Tab {
   remark?: string
   /** 对端操作系统，决定标签左边的图标。本机终端按本机系统，SSH 连接后探测一次。 */
   os?: OsKind
+  /** kind = local 时的壳类型，决定标签名字和图标 */
+  shell?: LocalShell
   /** 发行版 id（如 debian），优先于 os 决定标签图标。 */
   distro?: string
 }
 
 /** 创建终端的请求（renderer → main） */
+/** 本机终端的壳类型。 */
+export type LocalShell = 'powershell' | 'pwsh' | 'cmd' | 'gitbash' | 'wsl'
+
+/** 探测到的一个本机壳。 */
+export interface LocalShellInfo {
+  id: LocalShell
+  label: string
+  exe: string
+}
+
 export interface TermCreateOptions {
   /** 终端 id，与标签页 id 一致 */
   termId: string
@@ -100,6 +112,8 @@ export interface TermCreateOptions {
   sessionId?: string
   /** 窗口短标题，例如「窗口 1」 */
   title?: string
+  /** kind = local 时的壳类型，缺省 powershell */
+  shell?: LocalShell
   cols: number
   rows: number
 }
@@ -111,6 +125,8 @@ export interface SavedTerm {
   kind: 'ssh' | 'local'
   title: string
   remark: string
+  /** kind = local 时用的壳，重启后按它恢复 */
+  shell?: LocalShell
 }
 
 /** 终端标题或备注变了（main → renderer） */

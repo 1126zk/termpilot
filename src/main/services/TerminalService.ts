@@ -1,11 +1,13 @@
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { WebContents } from 'electron'
 import { Client, type ClientChannel } from 'ssh2'
 import type { IPty } from 'node-pty'
 import { IPC } from '../../shared/ipc-channels'
-import type { TermCreateOptions, TermDataEvent, TermMetaEvent, TermStatusEvent, SessionConfig } from '../../shared/types'
+import type { TermCreateOptions, TermDataEvent, TermMetaEvent, TermStatusEvent, SessionConfig, LocalShell, LocalShellInfo } from '../../shared/types'
 import { dialSsh, endJump } from '../ssh-config'
 import type { StorageService } from './StorageService'
 import type { SshHold, SshPool } from './SshPool'
@@ -42,6 +44,8 @@ interface TermEntry {
   jump?: Client
   title: string
   remark: string
+  /** kind = local 时的壳类型，重启恢复用 */
+  shell?: LocalShell
   /** 每次拨号加一。旧连接迟到的关闭事件不再拆掉新的。 */
   liveGen: number
 }
@@ -197,13 +201,14 @@ export class TerminalService {
     if (first && text) this.push(termId, Buffer.from(text, 'utf8'))
   }
 
-  saved(): { id: string; sessionId: string | null; kind: 'ssh' | 'local'; title: string; remark: string }[] {
+  saved(): { id: string; sessionId: string | null; kind: 'ssh' | 'local'; title: string; remark: string; shell?: LocalShell }[] {
     return this.storage.listOpenTerms().map((term) => ({
       id: term.id,
       sessionId: term.sessionId,
       kind: term.kind,
       title: term.title,
-      remark: term.remark
+      remark: term.remark,
+      shell: term.shell as LocalShell | undefined
     }))
   }
 
@@ -491,8 +496,7 @@ export class TerminalService {
       )
       return
     }
-    const shell =
-      process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/bash'
+    const shell = localShellExe(opts.shell)
 
     const prior = this.terms.get(opts.termId)
     const entry: TermEntry = prior ?? {
@@ -501,6 +505,7 @@ export class TerminalService {
       kind: 'local',
       title: opts.title?.trim() || '窗口',
       remark: '',
+      shell: opts.shell ?? 'powershell',
       liveGen: 0
     }
     if (!prior) {
@@ -529,8 +534,6 @@ export class TerminalService {
       this.sendStatus(opts.termId, null, 'error', e instanceof Error ? e.message : String(e))
     }
   }
-
-  // ------------------------------------------------------------- events
 
   private sendMeta(term: TermEntry): void {
     const wc = this.getSender()
@@ -593,7 +596,8 @@ export class TerminalService {
       sessionId: term.sessionId,
       kind: term.kind,
       title: term.title,
-      remark: term.remark
+      remark: term.remark,
+      shell: term.shell
     })
   }
 
@@ -733,4 +737,66 @@ function delay(ms: number): Promise<void> {
 function isForwardDenied(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return message.includes('跳板无法转到目标机')
+}
+
+const PWSH_EXE = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+const GIT_BASH_EXE = 'C:\\Program Files\\Git\\bin\\bash.exe'
+const WSL_EXE = 'C:\\Windows\\System32\\wsl.exe'
+
+/** 用 where.exe 在 PATH 里找程序，按路径特征过滤（比如 bash.exe 要 Git 的，不要 WSL 的）。
+ *  where 找到的不查 existsSync：WindowsApps 商店别名是 reparse point，fs 探不到但能启动。 */
+function findExe(name: string, pathHint: RegExp, fallbacks: string[]): string | null {
+  try {
+    const out = execFileSync('where.exe', [name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    for (const line of out.split(/\r?\n/)) {
+      const p = line.trim()
+      if (p && pathHint.test(p)) return p
+    }
+  } catch {
+    /* 没找到就走候选路径 */
+  }
+  for (const candidate of fallbacks) if (existsSync(candidate)) return candidate
+  return null
+}
+
+function gitBashExe(): string | null {
+  return findExe('bash.exe', /git/i, [GIT_BASH_EXE, 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'])
+}
+
+function pwshExe(): string | null {
+  return findExe('pwsh.exe', /pwsh|powershell/i, [PWSH_EXE])
+}
+
+/** 本机终端按壳类型取可执行程序。找不到对应程序时退回 PowerShell。 */
+function localShellExe(shell?: LocalShell): string {
+  if (process.platform !== 'win32') return process.env.SHELL || '/bin/bash'
+  if (shell === 'cmd') return 'cmd.exe'
+  if (shell === 'pwsh') {
+    const exe = pwshExe()
+    if (exe) return exe
+  }
+  if (shell === 'gitbash') {
+    const exe = gitBashExe()
+    if (exe) return exe
+  }
+  if (shell === 'wsl' && existsSync(WSL_EXE)) return WSL_EXE
+  return 'powershell.exe'
+}
+
+/** 探测这台机器上实际存在的本机壳，+ 菜单只展示探测到的。 */
+export function detectLocalShells(): LocalShellInfo[] {
+  if (process.platform !== 'win32') {
+    const exe = process.env.SHELL || '/bin/bash'
+    return [{ id: 'powershell', label: exe.split('/').pop() ?? 'bash', exe }]
+  }
+  const shells: LocalShellInfo[] = [
+    { id: 'powershell', label: 'PowerShell', exe: 'powershell.exe' },
+    { id: 'cmd', label: 'CMD', exe: 'cmd.exe' }
+  ]
+  const pwsh = pwshExe()
+  if (pwsh) shells.push({ id: 'pwsh', label: 'PowerShell 7', exe: pwsh })
+  const gitbash = gitBashExe()
+  if (gitbash) shells.push({ id: 'gitbash', label: 'Git Bash', exe: gitbash })
+  if (existsSync(WSL_EXE)) shells.push({ id: 'wsl', label: 'WSL', exe: WSL_EXE })
+  return shells
 }
