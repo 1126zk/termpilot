@@ -135,7 +135,8 @@ export function TabBar() {
   const [dragOffset, setDragOffset] = useState(0)
   const suppressTabClick = useRef(false)
   const prevLeft = useRef(new Map<string, number>())
-  const tabDragStart = useRef({ pos: 0, layout: 0 })
+  // pos/layout 用于跟手位移（客户端坐标差 − 布局差）；grab/size 用于交换判定（视觉边缘）
+  const tabDragStart = useRef({ pos: 0, layout: 0, grab: 0, size: 0 })
   const pointerX = useRef(0)
   // + 菜单项拖拽排序：顺序存 localStorage
   const [menuOrder, setMenuOrder] = useState<string[]>(readMenuOrder)
@@ -145,7 +146,7 @@ export function TabBar() {
   const suppressMenuSelect = useRef(false)
   const menuContentRef = useRef<HTMLDivElement>(null)
   const prevMenuTop = useRef(new Map<string, number>())
-  const menuDragStart = useRef({ pos: 0, layout: 0 })
+  const menuDragStart = useRef({ pos: 0, layout: 0, grab: 0, size: 0 })
   const pointerY = useRef(0)
 
   const updateMenuOrder = (next: string[]) => {
@@ -180,16 +181,17 @@ export function TabBar() {
     if (dragMenuKey) followMenuPointer(dragMenuKey)
   }, [menuOrder, dragMenuKey])
 
-  /** 指针 x 越过相邻标签中点就交换，返回新顺序；没变返回 null */
+  /** 被拖元素的视觉边缘（容器坐标）越过相邻标签中点就交换，返回新顺序；没变返回 null */
   const tabDropOrder = (clientX: number, dragId: string): string[] | null => {
     const strip = stripRef.current
     if (!strip) return null
     const pointer = clientX - strip.getBoundingClientRect().left + strip.scrollLeft
+    const start = pointer - tabDragStart.current.grab
     const ids = useAppStore.getState().tabs.map((tab) => tab.id)
-    return moveTo(ids, dragId, dropIndex(strip, 'data-tab-id', 'x', pointer, dragId, ids))
+    return moveTo(ids, dragId, dropIndex(strip, 'data-tab-id', 'x', start, start + tabDragStart.current.size, dragId, ids))
   }
 
-  /** 菜单项竖直拖拽：指针 y 对同分区各项中点，实时改顺序 */
+  /** 菜单项竖直拖拽：被拖菜单项的视觉上/下边缘对同分区各项中点，实时改顺序 */
   const menuDropOrder = (clientY: number, dragKey: string): string[] | null => {
     const content = menuContentRef.current
     if (!content) return null
@@ -200,7 +202,12 @@ export function TabBar() {
     const inShells = orderedShells.includes(dragKey)
     const section = inShells ? orderedShells : orderedSessions
     const pointer = clientY - content.getBoundingClientRect().top + content.scrollTop
-    const moved = moveTo(section, dragKey, dropIndex(content, 'data-menu-key', 'y', pointer, dragKey, section))
+    const start = pointer - menuDragStart.current.grab
+    const moved = moveTo(
+      section,
+      dragKey,
+      dropIndex(content, 'data-menu-key', 'y', start, start + menuDragStart.current.size, dragKey, section)
+    )
     if (!moved) return null
     return inShells ? [...moved, ...orderedSessions] : [...orderedShells, ...moved]
   }
@@ -210,10 +217,17 @@ export function TabBar() {
       event,
       axis: 'x',
       onActivate: () => {
-        // 拖拽开始瞬间的布局位。数组实时重排后 offsetLeft 自动变，
-        // translateX = 指针位移 - 布局位移，公式一直成立
-        const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
-        tabDragStart.current = { pos: event.clientX, layout: el?.offsetLeft ?? 0 }
+        // pos/layout 用于跟手（客户端坐标差 − 布局差）；
+        // grab 是抓取点在被拖元素内的偏移（容器坐标），size 是元素宽，用于边缘判定
+        const strip = stripRef.current
+        const el = strip?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
+        const pointer = strip ? event.clientX - strip.getBoundingClientRect().left + strip.scrollLeft : 0
+        tabDragStart.current = {
+          pos: event.clientX,
+          layout: el?.offsetLeft ?? 0,
+          grab: pointer - (el?.offsetLeft ?? 0),
+          size: el?.offsetWidth ?? 0
+        }
         setDragTabId(id)
         setDragOffset(0)
       },
@@ -242,8 +256,15 @@ export function TabBar() {
       event,
       axis: 'y',
       onActivate: () => {
-        const el = menuContentRef.current?.querySelector<HTMLElement>(`[data-menu-key="${key}"]`)
-        menuDragStart.current = { pos: event.clientY, layout: el?.offsetTop ?? 0 }
+        const content = menuContentRef.current
+        const el = content?.querySelector<HTMLElement>(`[data-menu-key="${key}"]`)
+        const pointer = content ? event.clientY - content.getBoundingClientRect().top + content.scrollTop : 0
+        menuDragStart.current = {
+          pos: event.clientY,
+          layout: el?.offsetTop ?? 0,
+          grab: pointer - (el?.offsetTop ?? 0),
+          size: el?.offsetHeight ?? 0
+        }
         setDragMenuKey(key)
         setMenuDragOffset(0)
       },

@@ -60,25 +60,36 @@ export function capturePositions(
   }
 }
 
-/** 指针（容器坐标）越过某项中点就插到它前面；返回在「去掉被拖项的数组」里的插入下标。 */
+/**
+ * 交换判定（Chromium 手感）：用被拖元素的视觉边缘对相邻项中点。
+ * 往前（左/上）拖：被拖元素前缘越过相邻项中点 → 换到它前面；
+ * 往后（右/下）拖：被拖元素后缘越过相邻项中点 → 换到它后面。
+ * start/end 是被拖元素在容器坐标里的前缘/后缘（跟手 transform 下的视觉位，不是布局位）。
+ * 返回在「去掉被拖项的数组」里的插入下标。
+ */
 export function dropIndex(
   container: HTMLElement,
   attr: string,
   axis: FlipAxis,
-  pointer: number,
+  start: number,
+  end: number,
   skipId: string,
   orderedIds: string[]
 ): number {
   const rest = orderedIds.filter((id) => id !== skipId)
-  let insert = rest.length
+  const currentPos = orderedIds.indexOf(skipId)
+  let insert = 0
+  let index = 0
   for (const el of container.querySelectorAll<HTMLElement>(`[${attr}]`)) {
     const id = el.getAttribute(attr)
     // 容器里可能有别的分区的项（菜单的壳区/连接区），不在本区的不参与
     if (!id || id === skipId || !orderedIds.includes(id)) continue
-    if (pointer < posOf(el, axis) + sizeOf(el, axis) / 2) {
-      insert = rest.indexOf(id)
-      break
-    }
+    const mid = posOf(el, axis) + sizeOf(el, axis) / 2
+    // 相邻项在被拖元素前面（左/上侧）→ 用前缘判定；在后面的 → 用后缘判定
+    const beforeDragged = orderedIds.indexOf(id) < currentPos
+    const after = beforeDragged ? start > mid : end > mid
+    if (after) insert = index + 1
+    index++
   }
   return insert
 }
