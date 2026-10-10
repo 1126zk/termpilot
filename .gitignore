@@ -10,3 +10,4 @@ release/
 *.db
 *.db-shm
 *.db-wal
+tmp/
