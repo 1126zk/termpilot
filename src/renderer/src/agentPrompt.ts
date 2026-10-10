@@ -1,9 +1,11 @@
 import type { SessionConfig, Tab } from '../../shared/types'
 
 /** 标签上显示的名字：连接名加上这扇窗口自己的短标题。 */
+/** 标签名：连接名 (窗口序号)，本机终端同理。title 形如「窗口 2」。 */
 export function windowLabel(title: string, connectionName?: string | null): string {
-  if (!connectionName) return title
-  return `${connectionName} · ${title}`
+  const n = /^窗口 (\d+)$/.exec(title)?.[1]
+  if (!n) return title
+  return connectionName ? `${connectionName} (${n})` : `本机终端 (${n})`
 }
 
 /** 右键一条连接。只写这条连接本身的事实。 */

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelRight, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
+import { Camera, ChevronLeft, ChevronRight, GalleryVertical, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Square, TerminalSquare, X } from 'lucide-react'
 import { useSidebar } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
@@ -56,11 +56,15 @@ function WindowControls() {
     <div className="flex shrink-0 items-center gap-0.5 pl-1" style={noDrag}>
       <button
         type="button"
-        className={cn(topBtn, rightPanelOpen && 'bg-accent text-foreground')}
-        title="右侧面板"
+        className={topBtn}
+        title={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
         onClick={toggleRightPanel}
       >
-        <PanelRight className="size-5" strokeWidth={2} />
+        {rightPanelOpen ? (
+          <PanelRightClose className="size-5" strokeWidth={2} />
+        ) : (
+          <PanelRightOpen className="size-5" strokeWidth={2} />
+        )}
       </button>
       <button type="button" className={topBtn} title="最小化" onClick={() => void window.api.win.minimize()}>
         <Minus className="size-5" strokeWidth={2} />
@@ -189,22 +193,14 @@ export function TabBar() {
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
           return (
             <Fragment key={t.id}>
-              {i > 0 && (
-                <div
-                  className={cn(
-                    'h-4 w-px shrink-0 bg-border',
-                    (active || tabs[i - 1].id === activeTabId) && 'opacity-0'
-                  )}
-                />
-              )}
             <ContextMenu>
               <ContextMenuTrigger asChild>
                 <button
                   type="button"
                   data-active={active || undefined}
                   className={cn(
-                    'group/tab flex h-9 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
-                    active && 'bg-accent'
+                    'group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors',
+                    active && 'bg-primary/15 text-primary'
                   )}
                   style={noDrag}
                   title={t.remark?.trim() || undefined}

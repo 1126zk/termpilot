@@ -21,8 +21,8 @@ export function ThemePanel() {
     if (next !== appearance.terminalSize) change({ terminalSize: next })
   }
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="grid gap-4 px-3 py-3">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="grid gap-4 px-3 pt-3">
         <section className="grid gap-1.5">
           <p className="text-xs text-muted-foreground">字体</p>
           <Select value={appearance.terminalFont} onValueChange={(terminalFont) => change({ terminalFont })}>
@@ -68,22 +68,23 @@ export function ThemePanel() {
             </button>
           </div>
         </section>
-
-        <section className="grid gap-1.5">
-          <p className="text-xs text-muted-foreground">主题</p>
-          <div className="grid gap-1.5">
-            {UNIFIED_THEMES.map((item) => (
-              <ThemeCard
-                key={item.id}
-                item={item}
-                selected={appearance.theme === item.id}
-                onSelect={() => change({ theme: item.id })}
-              />
-            ))}
-          </div>
-        </section>
       </div>
-    </ScrollArea>
+
+      {/* 只有主题列表自己滚动，滑块因此细小 */}
+      <p className="px-3 pt-4 pb-1.5 text-xs text-muted-foreground">主题</p>
+      <ScrollArea className="min-h-0 flex-1 px-3 pb-3">
+        <div className="grid gap-1.5">
+          {UNIFIED_THEMES.map((item) => (
+            <ThemeCard
+              key={item.id}
+              item={item}
+              selected={appearance.theme === item.id}
+              onSelect={() => change({ theme: item.id })}
+            />
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
   )
 }
 
