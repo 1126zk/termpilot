@@ -355,13 +355,21 @@ function bindScrollHint(host: HTMLDivElement, term: Terminal): () => void {
     // 拖着滑块按住不动时倒计时被挂起，松手后若条还亮着就重新起 3 秒倒计时
     if (host.classList.contains('term-scrolling')) show()
   }
+  // 鼠标离开终端立即隐藏（拖住滑块时除外）
+  const onLeave = () => {
+    if (holding) return
+    window.clearTimeout(timer)
+    host.classList.remove('term-scrolling')
+  }
   const disposeScroll = term.onScroll(show)
   scrollbar?.addEventListener('pointerdown', onDown)
+  host.addEventListener('pointerleave', onLeave)
   window.addEventListener('pointerup', onUp)
   return () => {
     window.clearTimeout(timer)
     disposeScroll.dispose()
     scrollbar?.removeEventListener('pointerdown', onDown)
+    host.removeEventListener('pointerleave', onLeave)
     window.removeEventListener('pointerup', onUp)
   }
 }

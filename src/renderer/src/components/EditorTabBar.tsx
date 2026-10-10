@@ -74,7 +74,7 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           <div
             key={tab.key}
             title={tab.path}
-            className={`flex h-6 max-w-52 min-w-0 items-center gap-1 rounded-sm pl-2 pr-1 text-[13px] ${
+            className={`flex h-6 max-w-52 min-w-0 items-center gap-1 rounded-sm pl-2 pr-1 text-[14px] ${
               active ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-background/70'
             }`}
           >

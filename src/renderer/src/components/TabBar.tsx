@@ -203,7 +203,7 @@ export function TabBar() {
                   type="button"
                   data-active={active || undefined}
                   className={cn(
-                    'group/tab flex h-9 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent',
+                    'group/tab flex h-9 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
                     active && 'bg-accent'
                   )}
                   style={noDrag}

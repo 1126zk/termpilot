@@ -99,7 +99,7 @@ export function SnippetsPanel() {
                 className="group flex h-8 cursor-pointer items-center rounded-md px-2 hover:bg-foreground/5"
                 onClick={() => sendToActiveTerminal(snippet.command)}
               >
-                <span className="min-w-0 flex-1 truncate text-[13px]">{snippet.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[14px]">{snippet.name}</span>
                 <button
                   type="button"
                   title="编辑"

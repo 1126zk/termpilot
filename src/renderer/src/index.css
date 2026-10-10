@@ -133,10 +133,25 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-    font-size: 13px;
+    font-family: 'UI Latin', 'Microsoft YaHei', system-ui, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 18px;
     user-select: none;
   }
+}
+
+/* 拉丁走系统自带的 Segoe UI Semibold（500 档，最接近 Circular Medium）；
+   中文没有对应字重，仍回退微软雅黑 Regular */
+@font-face {
+  font-family: 'UI Latin';
+  src: local('Segoe UI Semibold');
+  font-weight: 500;
+}
+@font-face {
+  font-family: 'UI Latin';
+  src: local('Segoe UI');
+  font-weight: 400;
 }
 
 /* 输入框不用 shadcn 默认的粗灰描边 + 3px 聚焦环 */
@@ -191,13 +206,13 @@
   width: 4px !important;
   left: 2px !important;
   border-radius: 2px !important;
-  background: rgba(128, 128, 128, 0.5) !important;
+  background: color-mix(in oklch, var(--primary) 55%, transparent) !important;
 }
 .term-scrolling .xterm-scrollable-element > .scrollbar {
-  background: rgba(128, 128, 128, 0.08) !important;
+  background: color-mix(in oklch, var(--primary) 10%, transparent) !important;
   opacity: 1 !important;
   pointer-events: auto !important;
 }
 .term-scrolling .xterm-scrollable-element > .scrollbar .slider:hover {
-  background: rgba(128, 128, 128, 0.8) !important;
+  background: color-mix(in oklch, var(--primary) 85%, transparent) !important;
 }

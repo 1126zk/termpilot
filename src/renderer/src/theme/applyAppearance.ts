@@ -44,7 +44,9 @@ export function applyAppearance(appearance: Appearance, persist = true): Resolve
 
 /** 选中的字体放最前，后面接原来的通用 fallback 链。 */
 export function terminalFontStack(font: string): string {
+  // Termius 的 Source Code Pro 用内嵌的 SauceCodePro Nerd Font Mono 渲染（系统没装也有效）
+  const resolved = font === 'Source Code Pro' ? 'SauceCodePro Nerd Font Mono' : font
   const fallbacks = ['Consolas', 'Cascadia Mono', 'Microsoft YaHei']
-  const chain = [font, ...fallbacks.filter((item) => item !== font), 'monospace']
+  const chain = [resolved, ...fallbacks.filter((item) => item !== resolved), 'monospace']
   return chain.map((item) => (item.includes(' ') ? `"${item}"` : item)).join(', ')
 }

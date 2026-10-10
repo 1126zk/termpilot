@@ -42,7 +42,7 @@ export function AppSidebar() {
           <div className="flex items-center gap-1 border-t px-2 py-2">
             <button
               type="button"
-              className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-[13px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-[14px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
               onClick={() => setSettingsOpen(true)}
             >
               <Settings className="size-4" />
@@ -81,7 +81,7 @@ function ConnectTree() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索连接"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-sidebar-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-[14px] text-sidebar-foreground outline-none placeholder:text-muted-foreground"
           />
         </label>
         <button
@@ -199,7 +199,7 @@ function TreeRow({
       {...rest}
       title={hint || undefined}
       className={cn(
-        'flex h-9 w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-2 text-[13px] hover:bg-sidebar-accent',
+        'flex h-9 w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-2 text-[14px] hover:bg-sidebar-accent',
         active && 'bg-sidebar-accent',
         className
       )}
