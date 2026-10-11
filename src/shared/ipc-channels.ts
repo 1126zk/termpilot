@@ -97,6 +97,7 @@ export const IPC = {
   localfsWrite: 'localfs:write',
   sessionDetectOs: 'session:detect-os',
   sessionSetOs: 'session:set-os',
+  sessionRevealSecret: 'session:reveal-secret',
   shellsList: 'shells:list',
 
   winMinimize: 'win:minimize',

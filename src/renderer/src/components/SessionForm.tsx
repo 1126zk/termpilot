@@ -1,19 +1,12 @@
-import { useEffect, useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowRightToLine, Eye, EyeOff, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAppStore } from '../stores/useAppStore'
-import type { ForwardRule, ForwardType, SessionInput } from '../../../shared/types'
+import type { ForwardRule, ForwardType, SessionConfig, SessionInput } from '../../../shared/types'
 
 const empty = () => ({
   name: '',
@@ -41,22 +34,41 @@ const ruleHint: Record<ForwardType, string> = {
   remote: '访问服务器的远程端口 = 回本机的本地端口'
 }
 
-/** 新建 / 编辑连接。表单控件全部来自 shadcn。认证只用密码。 */
-export function SessionForm() {
+/**
+ * 新建 / 编辑主机，在右侧面板里展示。没有保存按钮：
+ * 改动 600ms 防抖自动入库（字段没齐就静默等着）；字段齐了的第一次保存把
+ * 新建面板切成编辑（editing 换成 {action:'edit'}），之后改动走 update。
+ */
+export function SessionFormPanel() {
   const editing = useAppStore((s) => s.editing)
   const setEditing = useAppStore((s) => s.setEditing)
-  const saveSession = useAppStore((s) => s.saveSession)
+  const loadSessions = useAppStore((s) => s.loadSessions)
+  const openSessionTab = useAppStore((s) => s.openSessionTab)
 
-  const creating = editing?.action === 'create'
+  const creating = editing?.action !== 'edit'
   const session = editing?.action === 'edit' ? editing.session : null
-  const lockedHost = creating && editing.host ? editing.host : ''
 
   const [form, setForm] = useState(empty())
   const [forwards, setForwards] = useState<ForwardDraft[]>([])
-  const [error, setError] = useState('')
+  const [showSecret, setShowSecret] = useState(false)
+  /** 用户改过才自动保存。初始化填充（含 revealSecret 回填）不算脏 */
+  const dirty = useRef(false)
+  /** create 在飞时不要并发再建 */
+  const creatingRef = useRef(false)
+  /** 自动建出来的记录切换成编辑时，跳过那次初始化（表单里已经是这些值） */
+  const skipInit = useRef<string | null>(null)
 
+  // 初始化只在编辑对象的身份（id / 新建）变化时做：sessions 刷新会让 editing.session
+  // 换成新对象，不能因此重跑初始化把用户正在打的字冲掉
+  const editKey = !editing ? null : editing.action === 'edit' ? `edit:${editing.session.id}` : 'create'
   useEffect(() => {
-    if (!editing) return
+    if (!editing || !editKey) return
+    if (skipInit.current === editKey) {
+      skipInit.current = null
+      return
+    }
+    dirty.current = false
+    setShowSecret(false)
     if (editing.action === 'edit') {
       const s = editing.session
       setForm({
@@ -66,6 +78,11 @@ export function SessionForm() {
         username: s.username,
         secret: ''
       })
+      // 编辑时把已存的密码填进密码框，可查看可复制。回填不标脏，不会触发自动保存
+      void window.api.sessions
+        .revealSecret(s.id)
+        .then((secret) => setForm((f) => ({ ...f, secret: secret ?? '' })))
+        .catch(() => undefined)
       setForwards(
         (s.forwards ?? []).map((rule) => ({
           type: rule.type,
@@ -81,31 +98,28 @@ export function SessionForm() {
       })
       setForwards([])
     }
-    setError('')
-  }, [editing])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editKey])
 
-  const set = <K extends keyof ReturnType<typeof empty>>(k: K, v: ReturnType<typeof empty>[K]) =>
+  const set = <K extends keyof ReturnType<typeof empty>>(k: K, v: ReturnType<typeof empty>[K]) => {
+    dirty.current = true
     setForm((f) => ({ ...f, [k]: v }))
+  }
 
-  const setRule = (index: number, patch: Partial<ForwardDraft>) =>
+  const setRule = (index: number, patch: Partial<ForwardDraft>) => {
+    dirty.current = true
     setForwards((list) => list.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
+  }
 
-  /** 全空的规则直接丢弃；非空的校验两个端口。返回 null 表示校验失败，错误已写好。 */
+  /** 全空的规则直接丢弃；任何一条端口不合法就整体跳过这次保存（静默，等用户继续改） */
   const collectForwards = (): ForwardRule[] | null => {
     const rules: ForwardRule[] = []
-    for (let i = 0; i < forwards.length; i++) {
-      const draft = forwards[i]!
+    for (const draft of forwards) {
       if (!draft.localPort.trim() && !draft.remotePort.trim()) continue
       const localPort = Number(draft.localPort)
-      if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
-        setError(`端口映射第 ${i + 1} 条：本地端口需要在 1–65535`)
-        return null
-      }
       const remotePort = Number(draft.remotePort)
-      if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) {
-        setError(`端口映射第 ${i + 1} 条：远程端口需要在 1–65535`)
-        return null
-      }
+      const valid = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535
+      if (!valid(localPort) || !valid(remotePort)) return null
       // 数据模型按监听/目标存：本地转发听本机，远程转发听服务器
       rules.push(
         draft.type === 'local'
@@ -116,26 +130,12 @@ export function SessionForm() {
     return rules
   }
 
-  const submit = async () => {
+  const autosave = async () => {
+    if (!editing) return
     const name = form.name.trim()
-    const host = lockedHost || form.host.trim()
+    const host = form.host.trim()
     const username = form.username.trim()
-    if (!name) {
-      setError('标签不能为空')
-      return
-    }
-    if (!host) {
-      setError('主机不能为空')
-      return
-    }
-    if (!username) {
-      setError('用户名不能为空')
-      return
-    }
-    if (creating && !form.secret) {
-      setError('新建连接需要填写密码')
-      return
-    }
+    if (!name || !host || !username) return
     const rules = collectForwards()
     if (!rules) return
     // 编辑时跳板、备注、sshOptions 传 undefined，保持原值，不清掉老数据
@@ -150,38 +150,62 @@ export function SessionForm() {
       sshOptions: creating ? null : undefined,
       forwards: rules
     }
+    if (session) {
+      dirty.current = false
+      await window.api.sessions.update(session.id, patch).catch(() => undefined)
+      await loadSessions()
+      return
+    }
+    // 新建：密码没填不建记录，等用户继续填
+    if (!form.secret || creatingRef.current) return
+    creatingRef.current = true
     try {
-      await saveSession(creating ? null : session!.id, patch)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const created = (await window.api.sessions.create(patch)) as SessionConfig
+      dirty.current = false
+      // 切成编辑模式。表单里已经是这些值，跳过紧接着的那次初始化
+      skipInit.current = `edit:${created.id}`
+      setEditing({ action: 'edit', session: created })
+      await loadSessions()
+    } catch {
+      /* 建失败就等下一次改动再试 */
+    } finally {
+      creatingRef.current = false
     }
   }
 
-  return (
-    <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {lockedHost ? `在 ${lockedHost} 上新建连接` : creating ? '新建连接' : '编辑连接'}
-          </DialogTitle>
-          <DialogDescription>
-            {lockedHost
-              ? '主机已经确定，只要填写这条连接的账号。'
-              : '本机作为客户端，主动 SSH 到有地址的服务器。'}
-          </DialogDescription>
-        </DialogHeader>
+  // 任何字段改动后 600ms 防抖自动保存；表单再动就重置计时
+  useEffect(() => {
+    if (!dirty.current) return
+    const timer = setTimeout(() => void autosave(), 600)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, forwards])
 
-        <div className="grid gap-3">
-          <div className={lockedHost ? '' : 'grid grid-cols-[1fr_6rem] gap-2'}>
-            {!lockedHost && (
-              <Field label="主机">
-                <Input
-                  value={form.host}
-                  placeholder="IP 或域名"
-                  onChange={(e) => set('host', e.target.value)}
-                />
-              </Field>
-            )}
+  const connect = () => {
+    if (!session) return
+    openSessionTab(session)
+    setEditing(null)
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
+        <p className="text-[13px] font-medium">{creating ? '新建主机' : '主机信息'}</p>
+        <button
+          type="button"
+          title="关闭"
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+          onClick={() => setEditing(null)}
+        >
+          <ArrowRightToLine className="size-4" />
+        </button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="grid gap-3 px-3 py-3">
+          <div className="grid grid-cols-[1fr_6rem] gap-2">
+            <Field label="主机">
+              <Input value={form.host} placeholder="IP 或域名" onChange={(e) => set('host', e.target.value)} />
+            </Field>
             <Field label="端口">
               <Input
                 type="number"
@@ -201,12 +225,21 @@ export function SessionForm() {
             <Input value={form.username} onChange={(e) => set('username', e.target.value)} />
           </Field>
           <Field label="密码">
-            <Input
-              type="password"
-              value={form.secret}
-              placeholder={creating ? '' : '留空则不修改'}
-              onChange={(e) => set('secret', e.target.value)}
-            />
+            <div className="flex gap-1.5">
+              <Input
+                type={showSecret ? 'text' : 'password'}
+                value={form.secret}
+                onChange={(e) => set('secret', e.target.value)}
+              />
+              <button
+                type="button"
+                title={showSecret ? '隐藏密码' : '显示密码'}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+                onClick={() => setShowSecret((v) => !v)}
+              >
+                {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
           </Field>
 
           {forwards.map((rule, index) => (
@@ -244,7 +277,10 @@ export function SessionForm() {
                   size="icon"
                   className="size-7 shrink-0"
                   title="删除这条映射"
-                  onClick={() => setForwards((list) => list.filter((_, i) => i !== index))}
+                  onClick={() => {
+                    dirty.current = true
+                    setForwards((list) => list.filter((_, i) => i !== index))
+                  }}
                 >
                   <X className="size-3.5" />
                 </Button>
@@ -255,23 +291,27 @@ export function SessionForm() {
           <button
             type="button"
             className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-muted text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-            onClick={() => setForwards((list) => [...list, emptyRule()])}
+            onClick={() => {
+              dirty.current = true
+              setForwards((list) => [...list, emptyRule()])
+            }}
           >
             <Plus className="size-3.5" />
             添加端口映射
           </button>
         </div>
-
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setEditing(null)}>
-            取消
-          </Button>
-          <Button onClick={submit}>保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </ScrollArea>
+      <div className="shrink-0 border-t p-3">
+        <button
+          type="button"
+          disabled={!session}
+          className="h-10 w-full rounded-lg bg-primary font-medium text-primary-foreground transition hover:brightness-125 disabled:opacity-40"
+          onClick={connect}
+        >
+          连接
+        </button>
+      </div>
+    </div>
   )
 }
 

@@ -51,14 +51,14 @@ interface AppState {
   tabs: Tab[]
   activeTabId: string | null
 
-  /** 侧边栏整体收纳（收成图标栏） */
-  sidebarCollapsed: boolean
-  /** 右侧文件面板是否打开 */
+  /** 右侧面板是否打开 */
   rightPanelOpen: boolean
+  /** 主机页是否打开。开着终端也能切回主机页，标签压在下面不关。 */
+  hostsOpen: boolean
+  toggleHostsOpen: () => void
+  setHostsOpen: (open: boolean) => void
   /** 右侧面板当前板块 */
   rightPanelPane: RightPanelPane
-  /** 树节点折叠，key 为 forward / local / 分组名 */
-  collapsedGroups: Record<string, boolean>
   search: string
   /** 文件树跟随的会话 */
   selectedSessionId: string | null
@@ -111,10 +111,8 @@ interface AppState {
   onTermStatus: (e: TermStatusEvent) => void
   onTermMeta: (e: { termId: string; title: string; remark: string }) => void
 
-  toggleSidebar: () => void
   toggleRightPanel: () => void
   setRightPanelPane: (pane: RightPanelPane) => void
-  toggleGroup: (group: string) => void
   selectSession: (id: string) => void
   openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean) => void
   closeEditorTab: (key: string) => void
@@ -141,10 +139,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   termState: {},
   tabs: [],
   activeTabId: null,
-  sidebarCollapsed: false,
   rightPanelOpen: false,
+  hostsOpen: false,
   rightPanelPane: 'files',
-  collapsedGroups: {},
   search: '',
   selectedSessionId: null,
   editorTabs: [],
@@ -269,7 +266,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openSessionTab: (session, fresh = false) => {
-    set({ selectedSessionId: session.id })
+    set({ selectedSessionId: session.id, hostsOpen: false })
     if (!fresh) {
       const existing = get().tabs.find((t) => t.sessionId === session.id && t.kind === 'ssh')
       if (existing) {
@@ -324,7 +321,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux',
       shell
     }
-    set({ tabs: [...get().tabs, tab], activeTabId: tab.id })
+    set({ tabs: [...get().tabs, tab], activeTabId: tab.id, hostsOpen: false })
     window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, shell, cols: 80, rows: 24 })
   },
 
@@ -396,7 +393,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       activeTabId: tabId,
       selectedSessionId: tab?.sessionId ?? get().selectedSessionId,
-      activeEditorKey: null
+      activeEditorKey: null,
+      hostsOpen: false
     })
   },
 
@@ -429,11 +427,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
-  toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
+
+  toggleHostsOpen: () => set({ hostsOpen: !get().hostsOpen }),
+  setHostsOpen: (open) => set({ hostsOpen: open }),
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
-  toggleGroup: (group) =>
-    set({ collapsedGroups: { ...get().collapsedGroups, [group]: !get().collapsedGroups[group] } }),
   selectSession: (id) => set({ selectedSessionId: id }),
   openRemoteEditor: (sessionId, file, pin = false) => {
     const key = editorKey(sessionId, file.path)

@@ -532,7 +532,7 @@ export class StorageService {
     return this.getMcpSettings()
   }
 
-  /** 取解密后的凭据，仅供主进程建立 SSH 连接时使用，绝不通过 IPC 返回 */
+  /** 取解密后的凭据。除了建立 SSH 连接，主机信息面板的密码查看也会调用（用户明确要求可见）。 */
   getSecret(id: string): string | null {
     return this.readSecret(id, 'secret_encrypted')
   }

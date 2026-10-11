@@ -1,17 +1,15 @@
 import { useEffect } from 'react'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { AppSidebar } from './components/Sidebar'
+import { cn } from '@/lib/utils'
 import { RightPanel } from './components/RightPanel'
 import { TabBar } from './components/TabBar'
 import { EditorTabBar } from './components/EditorTabBar'
-import { SessionForm } from './components/SessionForm'
 import { SettingsDialog } from './components/SettingsDialog'
 import { McpConfirmDialog } from './components/McpConfirmDialog'
 import { SftpInstallDialog } from './components/SftpInstallDialog'
 import { TerminalView } from './components/TerminalView'
 import { RemoteEditor } from './components/RemoteEditor'
-import { EmptyState } from './components/EmptyState'
+import { HostsPage } from './components/HostsPage'
 import { useAppStore } from './stores/useAppStore'
 import { runCapture } from './terminal/captureView'
 import { terminalPool } from './terminal/TerminalPool'
@@ -91,41 +89,45 @@ export default function App() {
   ])
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const hostsOpen = useAppStore((s) => s.hostsOpen)
   const fileTabs = activeTab
     ? editorTabs.filter((t) => t.sessionId === activeTab.sessionId)
     : []
   const currentFile = fileTabs.find((t) => t.key === remoteEditor) ?? null
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
+  const editing = useAppStore((s) => s.editing)
 
   return (
     <TooltipProvider>
-      <SidebarProvider className="h-svh min-h-0 flex-col">
+      <div className="flex h-svh min-h-0 flex-col">
         <TabBar />
-        <div className="flex min-h-0 flex-1">
-          <AppSidebar />
-          <SidebarInset className="min-h-0 overflow-hidden">
+        <div className="relative flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {fileTabs.length > 0 && <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />}
             <div className="flex min-h-0 flex-1 flex-col">
               {currentFile ? (
                 <RemoteEditor key={currentFile.key} tab={currentFile} />
-              ) : activeTab ? (
-                <TerminalView key={activeTab.id} termId={activeTab.id} />
+              ) : hostsOpen || !activeTab ? (
+                <HostsPage />
               ) : (
-                <EmptyState />
+                <TerminalView key={activeTab.id} termId={activeTab.id} />
               )}
             </div>
-          </SidebarInset>
-          {rightPanelOpen && (
-            <div className="flex shrink-0 flex-col py-2 pr-2">
-              <RightPanel />
-            </div>
-          )}
+          </div>
+          {/* 右侧面板悬浮在内容上，从右侧滑入滑出 */}
+          <div
+            className={cn(
+              'absolute inset-y-0 right-0 z-20 flex shrink-0 flex-col py-2 pr-2 transition-transform duration-200 ease-out',
+              rightPanelOpen || editing ? 'translate-x-0' : 'pointer-events-none translate-x-full'
+            )}
+          >
+            <RightPanel />
+          </div>
         </div>
-        <SessionForm />
         <SettingsDialog />
         <McpConfirmDialog />
         <SftpInstallDialog />
-      </SidebarProvider>
+      </div>
     </TooltipProvider>
   )
 }

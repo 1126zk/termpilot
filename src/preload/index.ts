@@ -44,6 +44,7 @@ const api = {
     delete: (id: string) => ipcRenderer.invoke(IPC.sessionDelete, id),
     duplicate: (id: string) => ipcRenderer.invoke(IPC.sessionDuplicate, id) as Promise<SessionConfig | null>,
     detectOs: (id: string) => ipcRenderer.invoke(IPC.sessionDetectOs, id) as Promise<OsInfo>,
+    revealSecret: (id: string) => ipcRenderer.invoke(IPC.sessionRevealSecret, id) as Promise<string | null>,
     setOs: (id: string, os: string) => ipcRenderer.invoke(IPC.sessionSetOs, id, os),    onChanged: (cb: (sessions: SessionConfig[]) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, sessions: SessionConfig[]) => cb(sessions)
       ipcRenderer.on(IPC.sessionChanged, listener)

@@ -5,6 +5,7 @@ import { FileTree } from './FileTree'
 import { SnippetsPanel } from './SnippetsPanel'
 import { HistoryPanel } from './HistoryPanel'
 import { ThemePanel } from './ThemePanel'
+import { SessionFormPanel } from './SessionForm'
 
 const panes: { id: RightPanelPane; title: string; icon: typeof Folder }[] = [
   { id: 'files', title: '文件', icon: Folder },
@@ -13,13 +14,22 @@ const panes: { id: RightPanelPane; title: string; icon: typeof Folder }[] = [
   { id: 'theme', title: '主题', icon: Palette }
 ]
 
-/** 右侧面板：顶部图标行切换四个板块，风格和顶栏按钮一致。 */
+/** 右侧面板：顶部图标行切换四个板块，风格和顶栏按钮一致。新建/编辑主机时整块换成表单。 */
 export function RightPanel() {
   const pane = useAppStore((s) => s.rightPanelPane)
   const setPane = useAppStore((s) => s.setRightPanelPane)
+  const editing = useAppStore((s) => s.editing)
+
+  if (editing) {
+    return (
+      <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
+        <SessionFormPanel />
+      </div>
+    )
+  }
 
   return (
-    <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card text-sidebar-foreground">
+    <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
       <div className="flex shrink-0 items-center px-2 py-1.5">
         {panes.map((item) => (
           <button

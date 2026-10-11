@@ -1,7 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
-import { useSidebar } from '@/components/ui/sidebar'
+import { Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Settings, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +64,7 @@ function WindowControls() {
   const [maximized, setMaximized] = useState(false)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
+  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
 
   useEffect(() => {
     void window.api.win.isMaximized().then(setMaximized)
@@ -73,6 +73,9 @@ function WindowControls() {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
+      <button type="button" className={topBtn} title="设置" onClick={() => setSettingsOpen(true)}>
+        <Settings className="size-4" strokeWidth={2} />
+      </button>
       <button
         type="button"
         className={topBtn}
@@ -116,6 +119,8 @@ export function TabBar() {
   const localShells = useAppStore((s) => s.localShells)
   const openSessionTab = useAppStore((s) => s.openSessionTab)
   const reorderTabs = useAppStore((s) => s.reorderTabs)
+  const hostsOpen = useAppStore((s) => s.hostsOpen)
+  const toggleHostsOpen = useAppStore((s) => s.toggleHostsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
   const setTabRemark = useAppStore((s) => s.setTabRemark)
   const setNotice = useAppStore((s) => s.setNotice)
@@ -124,7 +129,6 @@ export function TabBar() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [remarkingId, setRemarkingId] = useState<string | null>(null)
   const stripRef = useRef<HTMLDivElement>(null)
-  const { toggleSidebar } = useSidebar()
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(false)
@@ -355,7 +359,13 @@ export function TabBar() {
         if (window.api.platform === 'win32' && e.target === e.currentTarget) void window.api.win.toggleMaximize()
       }}
     >
-      <button type="button" className={topBtn} style={noDrag} title="收纳侧边栏" onClick={toggleSidebar}>
+      <button
+        type="button"
+        className={cn(topBtn, hostsOpen && 'bg-accent text-foreground')}
+        style={noDrag}
+        title="主机"
+        onClick={toggleHostsOpen}
+      >
         <Server className="size-4" strokeWidth={2} />
       </button>
       {overflowing && (
