@@ -16,7 +16,7 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
-import { copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
+import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 import { useAppStore } from '../stores/useAppStore'
@@ -454,9 +454,14 @@ export function TabBar() {
               </ContextMenuTrigger>
               <ContextMenuContent>
                 <ContextMenuItem
-                  onClick={() => void copyAgentPrompt(termAgentPrompt(t, session), setNotice)}
+                  onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}
                 >
-                  复制为 Agent 提示词
+                  复制 Agent 提示词
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onClick={() => void copyAgentPrompt(termAgentPrompt(t, session), setNotice, '终端信息')}
+                >
+                  复制终端信息
                 </ContextMenuItem>
                 <ContextMenuItem onClick={() => openAfterMenu(() => setRenamingId(t.id))}>重命名</ContextMenuItem>
                 <ContextMenuItem onClick={() => openAfterMenu(() => setRemarkingId(t.id))}>备注</ContextMenuItem>

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { followAppTheme } from './window-chrome'
 import { unifiedTheme } from '../shared/types'
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // 固定到 %APPDATA%\TermPilot。必须在 ready 之前设置，
@@ -25,6 +25,16 @@ import { SshPool } from './services/SshPool'
 import { McpService } from './services/McpService'
 import { registerIpc } from './ipc'
 import { installCli } from './install-cli'
+import skillMd from '../../skills/termpilot/SKILL.md?raw'
+
+/** 把给 Agent 的使用说明写到 userData/SKILL.md，提示词指到本机，不走网络拉取。每次启动覆盖，更新随新版发布。 */
+function installSkill(): void {
+  try {
+    writeFileSync(join(app.getPath('userData'), 'SKILL.md'), skillMd)
+  } catch (error) {
+    console.error('[TermPilot] 写入 SKILL.md 失败:', error)
+  }
+}
 import { IPC } from '../shared/ipc-channels'
 
 let mainWindow: BrowserWindow | null = null
@@ -197,6 +207,7 @@ if (!single) {
     storage = sessions
     sessions.setLaunch(process.execPath, app.isPackaged ? [] : [app.getAppPath()])
     installCli({ app: process.execPath, args: app.isPackaged ? [] : [app.getAppPath()] })
+    installSkill()
     createWindow(sessions)
 
     app.on('activate', () => {

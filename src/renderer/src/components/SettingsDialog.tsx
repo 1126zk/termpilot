@@ -1,26 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Blocks, Check, Copy, RefreshCw, ScrollText, Server, X } from 'lucide-react'
+import { Check, Copy, RefreshCw, ScrollText, Server, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import {
-  MCP_DEFAULT_PORT,
-  MCP_HOST,
-  type AgentId,
-  type AgentTarget,
-  type McpAuditEntry,
-  type McpSettingsInput
-} from '../../../shared/types'
+import { MCP_DEFAULT_PORT, MCP_HOST, type McpAuditEntry, type McpSettingsInput } from '../../../shared/types'
 import { useAppStore } from '../stores/useAppStore'
 
-type Pane = 'mcp' | 'agents' | 'audit'
+type Pane = 'mcp' | 'audit'
 
 const panes: { id: Pane; label: string; icon: typeof Server }[] = [
   { id: 'mcp', label: 'MCP 服务', icon: Server },
-  { id: 'agents', label: 'Agent 接入', icon: Blocks },
   { id: 'audit', label: '调用记录', icon: ScrollText }
 ]
 
@@ -31,7 +23,7 @@ const empty = (): McpSettingsInput => ({
   confirmDangerous: true
 })
 
-/** 设置：左侧栏目，右侧是当前项。Agent 接入直接写各家的用户级配置。 */
+/** 设置：左侧栏目，右侧是当前项。 */
 export function SettingsDialog() {
   const open = useAppStore((s) => s.settingsOpen)
   const setOpen = useAppStore((s) => s.setSettingsOpen)
@@ -48,9 +40,6 @@ export function SettingsDialog() {
   const [copied, setCopied] = useState<'endpoint' | 'token' | null>(null)
   const [showToken, setShowToken] = useState(false)
   const [audit, setAudit] = useState<McpAuditEntry[]>([])
-  const [agents, setAgents] = useState<AgentTarget[]>([])
-  const [busy, setBusy] = useState<AgentId | 'all' | null>(null)
-  const [wrote, setWrote] = useState<string>('')
   const [themeError, setThemeError] = useState('')
 
   useEffect(() => {
@@ -58,12 +47,10 @@ export function SettingsDialog() {
     setError('')
     setCopied(null)
     setShowToken(false)
-    setWrote('')
     setThemeError('')
     setPane('mcp')
     void loadMcp().catch((e) => setError(e instanceof Error ? e.message : String(e)))
     void window.api.mcp.audit().then(setAudit).catch(() => setAudit([]))
-    void window.api.mcp.agents().then(setAgents).catch(() => setAgents([]))
   }, [open, loadMcp])
 
   useEffect(() => {
@@ -126,41 +113,6 @@ export function SettingsDialog() {
     }
   }
 
-  const refreshAgents = async () => {
-    setAgents(await window.api.mcp.agents())
-  }
-
-  const writeOne = async (id: AgentId) => {
-    setBusy(id)
-    setWrote('')
-    try {
-      if (!(await persist())) return
-      const updated = await window.api.mcp.applyAgent(id)
-      await refreshAgents()
-      setWrote(`已写入 ${updated.file}`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const writeAll = async () => {
-    setBusy('all')
-    setWrote('')
-    try {
-      if (!(await persist())) return
-      for (const agent of agents) await window.api.mcp.applyAgent(agent.id)
-      await refreshAgents()
-      setWrote('四个 Agent 的配置都已写入')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      await refreshAgents().catch(() => undefined)
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -182,7 +134,6 @@ export function SettingsDialog() {
                 onClick={() => {
                   setPane(item.id)
                   setError('')
-                  setWrote('')
                   setThemeError('')
                 }}
               >
@@ -315,47 +266,6 @@ export function SettingsDialog() {
                 <div className="flex justify-end">
                   <Button onClick={() => void persist()}>保存</Button>
                 </div>
-              </section>
-            )}
-
-            {pane === 'agents' && (
-              <section className="grid gap-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-medium">Agent 接入</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      写入前会先保存当前设置。只改各配置里的 termpilot 一条。桌面版和命令行经常不是同一个文件，写完后重新打开对应程序。不要写进连接器目录，重启会被盖掉。
-                    </p>
-                  </div>
-                  <Button size="sm" disabled={busy !== null || agents.length === 0} onClick={() => void writeAll()}>
-                    {busy === 'all' ? '写入中…' : '全部写入'}
-                  </Button>
-                </div>
-                <Card>
-                  {agents.map((agent) => (
-                    <Row
-                      key={agent.id}
-                      title={agent.name}
-                      detail={agent.present ? agent.file : `${agent.file}（还没有这个文件，写入时会创建）`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">
-                          {agent.configured ? '已接入' : '未写入'}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy !== null}
-                          onClick={() => void writeOne(agent.id)}
-                        >
-                          {busy === agent.id ? '写入中…' : agent.configured ? '更新' : '写入'}
-                        </Button>
-                      </div>
-                    </Row>
-                  ))}
-                </Card>
-                {wrote && <p className="text-xs text-muted-foreground">{wrote}</p>}
-                {error && <p className="text-xs text-destructive">{error}</p>}
               </section>
             )}
 

@@ -52,8 +52,6 @@ export const IPC = {
   /** main → renderer，写入了新的历史指令 */
   historyChanged: 'history:changed',
 
-  mcpAgents: 'mcp:agents',
-  mcpApplyAgent: 'mcp:apply-agent',
   mcpAudit: 'mcp:audit',
   mcpGet: 'mcp:get',
   mcpSave: 'mcp:save',

@@ -238,7 +238,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setNotice: (notice) => {
     if (noticeTimer) clearTimeout(noticeTimer)
     set({ notice })
-    if (notice) noticeTimer = setTimeout(() => set({ notice: null }), 12000)
+    if (notice) noticeTimer = setTimeout(() => set({ notice: null }), 2000)
   },
 
   saveSession: async (id, input) => {

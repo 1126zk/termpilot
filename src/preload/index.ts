@@ -4,8 +4,6 @@ import type {
   CaptureRect,
   CaptureReply,
   CaptureRun,
-  AgentId,
-  AgentTarget,
   McpAuditEntry,
   McpConfirmRequest,
   McpOpenTab,
@@ -200,8 +198,6 @@ const api = {
   mcp: {
     get: () => ipcRenderer.invoke(IPC.mcpGet),
     audit: () => ipcRenderer.invoke(IPC.mcpAudit) as Promise<McpAuditEntry[]>,
-    agents: () => ipcRenderer.invoke(IPC.mcpAgents) as Promise<AgentTarget[]>,
-    applyAgent: (id: AgentId) => ipcRenderer.invoke(IPC.mcpApplyAgent, id) as Promise<AgentTarget>,
     save: (input: McpSettingsInput) => ipcRenderer.invoke(IPC.mcpSave, input),
     state: () => ipcRenderer.invoke(IPC.mcpState) as Promise<McpRuntime>,
     bound: (termId: string) => ipcRenderer.send(IPC.mcpBound, termId),

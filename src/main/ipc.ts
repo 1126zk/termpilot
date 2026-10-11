@@ -6,7 +6,6 @@ import { IPC } from '../shared/ipc-channels'
 import {
   MCP_HOST,
   unifiedTheme,
-  type AgentId,
   type CaptureRect,
   type CaptureReply,
   type TermLinesReply,
@@ -22,7 +21,6 @@ import type { TerminalService } from './services/TerminalService'
 import type { McpService } from './services/McpService'
 import type { SftpService } from './services/SftpService'
 import type { LocalFsService } from './services/LocalFsService'
-import { listAgentTargets, writeAgentTarget } from './services/AgentConfigService'
 import { paintFromContents } from './window-chrome'
 
 /** 注册主进程 IPC handler（白名单，渲染进程只能调这些） */
@@ -175,16 +173,6 @@ export function registerIpc(
   ipcMain.handle(IPC.mcpGet, () => storage.getMcpSettings())
 
   ipcMain.handle(IPC.mcpAudit, () => storage.listAudit())
-
-  ipcMain.handle(IPC.mcpAgents, () => {
-    const settings = storage.getMcpSettings()
-    return listAgentTargets(`http://${MCP_HOST}:${settings.port}/mcp`)
-  })
-
-  ipcMain.handle(IPC.mcpApplyAgent, (_e, id: AgentId) => {
-    const settings = storage.getMcpSettings()
-    return writeAgentTarget(id, `http://${MCP_HOST}:${settings.port}/mcp`, settings.token)
-  })
 
   ipcMain.handle(IPC.mcpSave, async (_e, input: McpSettingsInput) => {
     const settings = storage.saveMcpSettings(input)

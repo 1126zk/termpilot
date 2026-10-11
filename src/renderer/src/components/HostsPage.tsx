@@ -8,7 +8,7 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { useAppStore } from '../stores/useAppStore'
-import { connectionAgentPrompt, copyAgentPrompt } from '../agentPrompt'
+import { agentOnboardPrompt, copyAgentPrompt } from '../agentPrompt'
 import { hostKeyOf } from '../../../shared/host-key'
 import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 import { OsIcon, osIconProps } from './OsIcon'
@@ -126,8 +126,8 @@ function HostCard(props: { session: SessionConfig }) {
           <ContextMenuItem onClick={() => openAfterMenu(() => setEditingRemark(true))}>备注</ContextMenuItem>
           <ContextMenuItem onClick={() => setEditing({ action: 'edit', session })}>编辑</ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => void copyAgentPrompt(connectionAgentPrompt(session), setNotice)}>
-            复制为 Agent 提示词
+          <ContextMenuItem onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}>
+            复制 Agent 提示词
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onClick={() => deleteSession(session.id)}>

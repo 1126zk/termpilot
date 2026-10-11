@@ -203,19 +203,6 @@ export interface McpAuditEntry {
   detail: string
 }
 
-export type AgentId = 'claude' | 'kimi' | 'codex' | 'cursor' | 'workbuddy' | 'codebuddy'
-
-/** 一键写入时能改到的本机 Agent 配置 */
-export interface AgentTarget {
-  id: AgentId
-  name: string
-  file: string
-  /** 配置文件已经存在 */
-  present: boolean
-  /** 里面已经有 termpilot 这一条 */
-  configured: boolean
-}
-
 /** 危险命令确认 */
 export interface McpConfirmRequest {
   id: string

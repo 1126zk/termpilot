@@ -6,6 +6,7 @@ import { TabBar } from './components/TabBar'
 import { EditorTabBar } from './components/EditorTabBar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { McpConfirmDialog } from './components/McpConfirmDialog'
+import { NoticeToast } from './components/NoticeToast'
 import { SftpInstallDialog } from './components/SftpInstallDialog'
 import { TerminalView } from './components/TerminalView'
 import { RemoteEditor } from './components/RemoteEditor'
@@ -127,6 +128,7 @@ export default function App() {
         <SettingsDialog />
         <McpConfirmDialog />
         <SftpInstallDialog />
+        <NoticeToast />
       </div>
     </TooltipProvider>
   )
