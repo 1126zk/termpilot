@@ -71,7 +71,7 @@ export function HistoryPanel() {
                 key={item.id}
                 role="button"
                 title="点击填入当前终端，自己按回车执行"
-                className="cursor-pointer rounded-md px-2 py-1 font-mono text-xs break-all hover:bg-foreground/5"
+                className="cursor-pointer rounded-md px-2 py-1 font-mono text-xs break-all text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
                 onClick={() => sendToActiveTerminal(item.command, false)}
               >
                 {item.command}
