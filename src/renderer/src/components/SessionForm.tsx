@@ -185,7 +185,8 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
 
   const connect = () => {
     if (!session) return
-    openSessionTab(session)
+    // 每次都新开一扇终端，不复用已打开的
+    openSessionTab(session, true)
     setEditing(null)
   }
 

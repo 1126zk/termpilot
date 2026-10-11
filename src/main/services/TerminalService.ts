@@ -44,8 +44,6 @@ interface TermEntry {
   jump?: Client
   title: string
   remark: string
-  /** kind = local 时的壳类型，重启恢复用 */
-  shell?: LocalShell
   /** 每次拨号加一。旧连接迟到的关闭事件不再拆掉新的。 */
   liveGen: number
 }
@@ -328,7 +326,7 @@ export class TerminalService {
     return { output, exitCode, finished }
   }
 
-  /** 退出时断开。窗口编号和备注留着，输出不写入磁盘。 */
+  /** 退出时全部断开并清空，不持久化。 */
   disposeAll(): void {
     this.parking = true
     for (const term of this.terms.values()) this.releaseLive(term)
@@ -376,7 +374,7 @@ export class TerminalService {
         this.openJumpShell(entry, opts, session, secret, jumpSecret, gen)
         return
       }
-      this.sendStatus(opts.termId, session.id, 'error', error instanceof Error ? error.message : String(error))
+      this.sendStatus(opts.termId, session.id, 'error', friendlyConnectError(error))
     }
   }
 
@@ -387,7 +385,7 @@ export class TerminalService {
     hold.client.on('error', (err) => {
       if (!this.alive(entry, gen)) return
       this.releaseLive(entry)
-      this.sendStatus(opts.termId, sessionId, 'error', err.message)
+      this.sendStatus(opts.termId, sessionId, 'error', friendlyConnectError(err))
     })
     hold.client.on('close', () => {
       if (!this.alive(entry, gen)) return
@@ -435,7 +433,7 @@ export class TerminalService {
       .on('error', (err) => {
         if (!this.alive(entry, gen)) return
         this.releaseLive(entry)
-        this.sendStatus(opts.termId, session.id, 'error', err.message)
+        this.sendStatus(opts.termId, session.id, 'error', friendlyConnectError(err))
       })
       .on('close', () => {
         if (!this.alive(entry, gen)) return
@@ -462,7 +460,7 @@ export class TerminalService {
     } catch (e) {
       if (!this.alive(entry, gen)) return
       this.releaseLive(entry)
-      this.sendStatus(opts.termId, session.id, 'error', e instanceof Error ? e.message : String(e))
+      this.sendStatus(opts.termId, session.id, 'error', friendlyConnectError(e))
     }
   }
 
@@ -487,7 +485,6 @@ export class TerminalService {
       kind: 'local',
       title: opts.title?.trim() || '窗口',
       remark: '',
-      shell: opts.shell ?? 'powershell',
       liveGen: 0
     }
     if (!prior) {
@@ -694,6 +691,18 @@ function parsePromptCwd(prompt: string): string | null {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** ssh2/网络的英文错误翻成用户能看懂的中文，认不出来的保持原文。 */
+function friendlyConnectError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('All configured authentication methods failed')) return '认证失败：用户名或密码不对'
+  if (/ENOTFOUND|EAI_AGAIN/.test(message)) return '找不到主机：检查地址或网络'
+  if (/ECONNREFUSED/.test(message)) return '连接被拒绝：目标端口没有开放'
+  if (/ETIMEDOUT|Timed out while waiting for handshake/.test(message)) return '连接超时'
+  if (/EHOSTUNREACH|ENETUNREACH/.test(message)) return '主机不可达：检查网络'
+  if (message.includes('Connection lost before handshake')) return '握手前连接中断'
+  return message
 }
 
 function isForwardDenied(error: unknown): boolean {
