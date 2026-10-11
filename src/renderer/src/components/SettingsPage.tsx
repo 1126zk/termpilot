@@ -114,16 +114,14 @@ export function SettingsPage() {
   return (
     <div className="flex min-h-0 flex-1">
       <nav className="flex w-44 shrink-0 flex-col gap-1 border-r border-foreground/10 p-3">
-        <div className="px-2 py-1.5 text-sm font-medium">设置</div>
+        <div className="px-2 py-1.5 text-sm font-medium text-muted-foreground">设置</div>
         {panes.map((item) => (
           <button
             key={item.id}
             type="button"
             className={cn(
-              'flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
-              pane === item.id
-                ? 'bg-muted-foreground/10 text-foreground'
-                : 'text-muted-foreground hover:bg-muted-foreground/10'
+              'flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground',
+              pane === item.id ? 'bg-muted-foreground/10' : 'hover:bg-muted-foreground/10'
             )}
             onClick={() => {
               setPane(item.id)
@@ -142,7 +140,7 @@ export function SettingsPage() {
             {pane === 'mcp' && (
               <section className="grid gap-4">
                 <div>
-                  <h2 className="text-base font-medium">MCP 服务</h2>
+                  <h2 className="text-base font-medium text-muted-foreground">MCP 服务</h2>
                   <p className="mt-1 text-xs text-muted-foreground">
                     只监听 {MCP_HOST}，Agent 必须带 Bearer 令牌。
                     {runtime.running
@@ -259,7 +257,7 @@ export function SettingsPage() {
             {pane === 'audit' && (
               <section className="grid gap-4">
                 <div>
-                  <h2 className="text-base font-medium">调用记录</h2>
+                  <h2 className="text-base font-medium text-muted-foreground">调用记录</h2>
                   <p className="mt-1 text-xs text-muted-foreground">最近的 MCP 工具调用，失败的会标出来。</p>
                 </div>
                 <div className="max-h-[28rem] overflow-auto rounded-xl border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
@@ -287,7 +285,7 @@ function Row(props: { title: React.ReactNode; detail: string; children: React.Re
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <div className="min-w-0">
-        <div className="text-sm">{props.title}</div>
+        <div className="text-sm text-muted-foreground">{props.title}</div>
         <div className="truncate text-xs text-muted-foreground" title={props.detail}>
           {props.detail}
         </div>
