@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { Braces, Folder, History, Palette } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore, type RightPanelPane } from '../stores/useAppStore'
@@ -15,15 +16,24 @@ const panes: { id: RightPanelPane; title: string; icon: typeof Folder }[] = [
 ]
 
 /** 右侧面板：顶部图标行切换四个板块，风格和顶栏按钮一致。新建/编辑主机时整块换成表单。 */
-export function RightPanel() {
+export function RightPanel(props: { open: boolean }) {
   const pane = useAppStore((s) => s.rightPanelPane)
   const setPane = useAppStore((s) => s.setRightPanelPane)
   const editing = useAppStore((s) => s.editing)
+  // 收起动画期间冻结开着时的内容：表单关就留住表单，文件面板关就留住文件面板，
+  // 否则滑回的 200ms 里内容会闪成另一种
+  const lastEditing = useRef(editing)
+  if (editing) lastEditing.current = editing
+  const wasForm = useRef(Boolean(editing))
+  if (props.open) wasForm.current = Boolean(editing)
+  const formState = (props.open ? Boolean(editing) : wasForm.current)
+    ? (editing ?? lastEditing.current)
+    : null
 
-  if (editing) {
+  if (formState) {
     return (
       <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
-        <SessionFormPanel />
+        <SessionFormPanel frozen={formState} />
       </div>
     )
   }

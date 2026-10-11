@@ -128,6 +128,8 @@ interface AppState {
   ) => void
 }
 
+export type EditingState = AppState['editing']
+
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 const bootAppearance = readCachedAppearance()
 
@@ -266,7 +268,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openSessionTab: (session, fresh = false) => {
-    set({ selectedSessionId: session.id, hostsOpen: false, settingsOpen: false })
+    set({
+      selectedSessionId: session.id,
+      hostsOpen: false,
+      settingsOpen: false,
+      editing: null,
+      ...(get().editing ? { rightPanelOpen: false } : {})
+    })
     if (!fresh) {
       const existing = get().tabs.find((t) => t.sessionId === session.id && t.kind === 'ssh')
       if (existing) {
@@ -321,7 +329,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux',
       shell
     }
-    set({ tabs: [...get().tabs, tab], activeTabId: tab.id, hostsOpen: false, settingsOpen: false })
+    set({
+      tabs: [...get().tabs, tab],
+      activeTabId: tab.id,
+      hostsOpen: false,
+      settingsOpen: false,
+      editing: null,
+      ...(get().editing ? { rightPanelOpen: false } : {})
+    })
     window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, shell, cols: 80, rows: 24 })
   },
 
@@ -395,7 +410,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedSessionId: tab?.sessionId ?? get().selectedSessionId,
       activeEditorKey: null,
       hostsOpen: false,
-      settingsOpen: false
+      settingsOpen: false,
+      editing: null,
+      // 从主机编辑面板切走时整个面板一起收；终端之间切换不动面板开关
+      ...(get().editing ? { rightPanelOpen: false } : {})
     })
   },
 
@@ -428,7 +446,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
-  toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
+  // 面板内容硬性互斥：开文件面板就关掉编辑表单
+  toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen, editing: null }),
 
   toggleHostsOpen: () =>
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
@@ -482,5 +501,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       editorTabs: get().editorTabs.map((t) => (t.key === key && t.preview ? { ...t, preview: false } : t))
     }),
   setSearch: (v) => set({ search: v }),
-  setEditing: (v) => set({ editing: v })
+  // 面板内容硬性互斥：打开编辑表单就关掉文件面板
+  setEditing: (v) => set(v ? { editing: v, rightPanelOpen: false } : { editing: null })
 }))

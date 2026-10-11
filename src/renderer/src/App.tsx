@@ -98,12 +98,13 @@ export default function App() {
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const editing = useAppStore((s) => s.editing)
+  const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !settingsOpen && activeTab))
 
   return (
     <TooltipProvider>
       <div className="flex h-svh min-h-0 flex-col">
         <TabBar />
-        <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {fileTabs.length > 0 && <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />}
             <div className="flex min-h-0 flex-1 flex-col">
@@ -118,14 +119,16 @@ export default function App() {
               )}
             </div>
           </div>
-          {/* 右侧面板悬浮在内容上，从右侧滑入滑出 */}
+          {/* 面板挤占布局不盖内容，宽度从 0 平滑展开到满宽。编辑表单任何页面都能弹；文件面板只属于终端页 */}
           <div
             className={cn(
-              'absolute inset-y-0 right-0 z-20 flex shrink-0 flex-col py-2 pr-2 transition-transform duration-200 ease-out',
-              rightPanelOpen || editing ? 'translate-x-0' : 'pointer-events-none translate-x-full'
+              'flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width] duration-200 ease-out',
+              panelOpen ? 'w-[328px]' : 'pointer-events-none w-0'
             )}
           >
-            <RightPanel />
+            <div className="flex min-h-0 w-[328px] flex-1 flex-col py-2 pr-2">
+              <RightPanel open={panelOpen} />
+            </div>
           </div>
         </div>
         <McpConfirmDialog />

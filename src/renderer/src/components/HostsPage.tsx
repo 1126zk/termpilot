@@ -8,6 +8,7 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { useAppStore } from '../stores/useAppStore'
+import { cn } from '@/lib/utils'
 import { agentOnboardPrompt, copyAgentPrompt } from '../agentPrompt'
 import { hostKeyOf } from '../../../shared/host-key'
 import { OsIcon, osIconProps } from './OsIcon'
@@ -34,7 +35,7 @@ export function HostsPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-5">
+      <div className="flex w-full flex-col gap-3 py-5 pr-6 pl-25">
         <div className="flex items-center gap-1.5">
           <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg bg-muted px-3 text-muted-foreground">
             <Search className="size-4 shrink-0" />
@@ -61,7 +62,7 @@ export function HostsPage() {
             {kw ? '没有匹配的主机' : '还没有主机，点上面的 + 新建'}
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div className="grid max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
             {filtered.map((session) => (
               <HostCard key={session.id} session={session} />
             ))}
@@ -104,15 +105,18 @@ function HostCard(props: { session: SessionConfig }) {
         <ContextMenuTrigger asChild>
           <div
             role="button"
-            className="group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted-foreground/10"
+            className={cn(
+              'group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg bg-muted-foreground/10 px-4 py-3.5 text-left transition-colors hover:bg-muted-foreground/15',
+              editing?.action === 'edit' && editing.session.id === session.id && 'ring-2 ring-primary/50'
+            )}
             onClick={open}
             onDoubleClick={openFresh}
           >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary [&_svg]:size-4.5">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted-foreground/15 text-muted-foreground [&_svg]:size-5">
               <OsIcon {...osIconProps(session.os)} />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[14px] font-semibold">{session.name}</span>
+              <span className="block truncate text-[14px] font-semibold text-muted-foreground">{session.name}</span>
               <span className="block truncate text-xs text-muted-foreground">ssh, {session.username}</span>
             </span>
           </div>

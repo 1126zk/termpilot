@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useAppStore } from '../stores/useAppStore'
+import { useAppStore, type EditingState } from '../stores/useAppStore'
 import type { ForwardRule, ForwardType, SessionConfig, SessionInput } from '../../../shared/types'
 
 const empty = () => ({
@@ -39,8 +39,10 @@ const ruleHint: Record<ForwardType, string> = {
  * 改动 600ms 防抖自动入库（字段没齐就静默等着）；字段齐了的第一次保存把
  * 新建面板切成编辑（editing 换成 {action:'edit'}），之后改动走 update。
  */
-export function SessionFormPanel() {
-  const editing = useAppStore((s) => s.editing)
+export function SessionFormPanel(props: { frozen?: EditingState }) {
+  const liveEditing = useAppStore((s) => s.editing)
+  // 面板收起动画期间 store 已清空，用冻结的最后一份表单把内容撑到动画结束
+  const editing = liveEditing ?? props.frozen ?? null
   const setEditing = useAppStore((s) => s.setEditing)
   const loadSessions = useAppStore((s) => s.loadSessions)
   const openSessionTab = useAppStore((s) => s.openSessionTab)
@@ -190,7 +192,7 @@ export function SessionFormPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
-        <p className="text-[13px] font-medium">{creating ? '新建主机' : '主机信息'}</p>
+        <p className="text-[13px] font-medium text-muted-foreground">{creating ? '新建主机' : '主机信息'}</p>
         <button
           type="button"
           title="关闭"
