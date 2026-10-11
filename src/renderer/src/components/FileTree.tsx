@@ -11,7 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { openAfterMenu, PanelDialog } from './PanelDialog'
-import type { RemoteFile, SftpTransferEvent } from '../../../shared/types'
+import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
 
@@ -28,11 +28,10 @@ type FsBackend = {
 }
 
 /** 跟随当前活动终端窗口：SSH 窗口显示服务器文件，本地终端显示本机文件。 */
-export function FileTree() {
-  const tabs = useAppStore((s) => s.tabs)
-  const activeTabId = useAppStore((s) => s.activeTabId)
-
-  const tab = tabs.find((t) => t.id === activeTabId)
+export function FileTree(props: { tab: Tab | null }) {
+  // 每个终端标签挂一棵自己的树（RightPanel 按标签各挂一个实例，切标签只是显隐），
+  // 状态（当前目录、展开、选中）互不干扰
+  const tab = props.tab
   const local = tab?.kind === 'local'
   const sessionId = local ? null : tab?.sessionId ?? null
   const backendKey = local ? 'local' : sessionId
@@ -114,29 +113,17 @@ export function FileTree() {
       setOpen({ [res.path]: true })
       setSelected(res.path)
       setError('')
-      writeRoot(backendKey, res.path)
     },
     [fs, backendKey]
   )
 
   const loadRoot = useCallback(
-    async (path: string, fallback = false) => {
+    async (path: string) => {
       setBusy(true)
       setError('')
       try {
         await showRoot(path)
       } catch (e) {
-        if (fallback && path !== '.') {
-          try {
-            await showRoot('.')
-            setError('上次打开的目录打不开，已回到登录目录')
-            return
-          } catch (again) {
-            setEntries([])
-            setError(sftpMessage(again))
-            return
-          }
-        }
         setError(sftpMessage(e))
       } finally {
         setBusy(false)
@@ -156,8 +143,7 @@ export function FileTree() {
     setMaking(false)
     setRenaming(null)
     if (!backendKey) return
-    const saved = readRoot(backendKey)
-    void loadRoot(saved || '.', Boolean(saved))
+    void loadRoot('.')
   }, [backendKey, loadRoot])
 
   const listInto = useCallback(
@@ -543,12 +529,12 @@ export function FileTree() {
           variant="ghost"
           size="icon-sm"
           title="同步到终端当前目录"
-          disabled={busy || !activeTabId}
+          disabled={busy || !tab}
           onClick={() => {
             void (async () => {
-              if (!activeTabId) return
+              if (!tab) return
               try {
-                const dir = await window.api.term.cwd(activeTabId)
+                const dir = await window.api.term.cwd(tab.id)
                 if (!dir) {
                   setNotice('识别不到终端当前目录')
                   return
@@ -783,33 +769,7 @@ function Hint(props: { text: string }) {
   return <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">{props.text}</p>
 }
 
-const ROOTS_KEY = 'termpilot.fileRoots'
 const HIDDEN_KEY = 'termpilot.showHidden'
-
-function readRoot(key: string): string {
-  try {
-    const raw = localStorage.getItem(ROOTS_KEY)
-    if (!raw) return ''
-    const saved = JSON.parse(raw) as Record<string, unknown>
-    return typeof saved[key] === 'string' ? saved[key] : ''
-  } catch {
-    return ''
-  }
-}
-
-function writeRoot(key: string, path: string): void {
-  const saved = (() => {
-    try {
-      const raw = localStorage.getItem(ROOTS_KEY)
-      const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
-      return parsed && typeof parsed === 'object' ? parsed : {}
-    } catch {
-      return {}
-    }
-  })()
-  saved[key] = path
-  localStorage.setItem(ROOTS_KEY, JSON.stringify(saved))
-}
 
 const NO_SFTP = '这台机器没有 SFTP'
 

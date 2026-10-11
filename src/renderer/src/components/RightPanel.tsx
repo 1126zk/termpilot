@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Braces, Folder, History, Palette } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore, type RightPanelPane } from '../stores/useAppStore'
@@ -60,10 +60,37 @@ export function RightPanel(props: { open: boolean }) {
           </button>
         ))}
       </div>
-      {pane === 'files' && <FileTree />}
+      {pane === 'files' && <FileTrees />}
       {pane === 'snippets' && <SnippetsPanel />}
       {pane === 'history' && <HistoryPanel />}
       {pane === 'theme' && <ThemePanel />}
     </div>
+  )
+}
+
+/**
+ * 每个终端标签一棵文件树，切标签只显隐不卸载，各自保住当前目录和展开状态。
+ * 懒挂载：标签第一次在这个面板里被看到时才建实例，避免开 N 个终端就发 N 次列目录请求。
+ */
+function FileTrees() {
+  const tabs = useAppStore((s) => s.tabs)
+  const activeTabId = useAppStore((s) => s.activeTabId)
+  const [visited, setVisited] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!activeTabId) return
+    setVisited((v) => (v.includes(activeTabId) ? v : [...v, activeTabId]))
+  }, [activeTabId])
+
+  const trees = tabs.filter((t) => visited.includes(t.id))
+  if (trees.length === 0) return <FileTree tab={null} />
+  return (
+    <>
+      {trees.map((t) => (
+        <div key={t.id} className={t.id === activeTabId ? 'contents' : 'hidden'}>
+          <FileTree tab={t} />
+        </div>
+      ))}
+    </>
   )
 }
