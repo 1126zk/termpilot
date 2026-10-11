@@ -59,8 +59,8 @@ function RestoreIcon() {
 const topBtn =
   'flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
-/** 自绘窗口控制按钮：右侧面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。 */
-function WindowControls() {
+/** 自绘窗口控制按钮：最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。面板按钮只在终端页出现。 */
+function WindowControls(props: { terminalActive: boolean }) {
   const [maximized, setMaximized] = useState(false)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
@@ -72,18 +72,20 @@ function WindowControls() {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
-      <button
-        type="button"
-        className={topBtn}
-        title={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
-        onClick={toggleRightPanel}
-      >
-        {rightPanelOpen ? (
-          <PanelRightClose className="size-4" strokeWidth={2} />
-        ) : (
-          <PanelRightOpen className="size-4" strokeWidth={2} />
-        )}
-      </button>
+      {props.terminalActive && (
+        <button
+          type="button"
+          className={topBtn}
+          title={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
+          onClick={toggleRightPanel}
+        >
+          {rightPanelOpen ? (
+            <PanelRightClose className="size-4" strokeWidth={2} />
+          ) : (
+            <PanelRightOpen className="size-4" strokeWidth={2} />
+          )}
+        </button>
+      )}
       <button type="button" className={topBtn} title="最小化" onClick={() => void window.api.win.minimize()}>
         <Minus className="size-4" strokeWidth={2} />
       </button>
@@ -116,6 +118,9 @@ export function TabBar() {
   const openSessionTab = useAppStore((s) => s.openSessionTab)
   const reorderTabs = useAppStore((s) => s.reorderTabs)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
+  const settingsOpen = useAppStore((s) => s.settingsOpen)
+  // 截图和面板按钮只为终端服务，不在终端页就不出现
+  const terminalActive = Boolean(activeTabId) && !hostsOpen && !settingsOpen
   const setHostsOpen = useAppStore((s) => s.setHostsOpen)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
@@ -354,7 +359,13 @@ export function TabBar() {
         if (window.api.platform === 'win32' && e.target === e.currentTarget) void window.api.win.toggleMaximize()
       }}
     >
-      <button type="button" className={topBtn} style={noDrag} title="设置" onClick={() => setSettingsOpen(true)}>
+      <button
+        type="button"
+        className={cn(topBtn, settingsOpen && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary')}
+        style={noDrag}
+        title="设置"
+        onClick={() => setSettingsOpen(true)}
+      >
         <Menu className="size-4" strokeWidth={2} />
       </button>
       {overflowing && (
@@ -382,7 +393,7 @@ export function TabBar() {
           type="button"
           className={cn(
             'flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
-            hostsOpen && 'bg-primary/15 text-primary hover:bg-primary/15'
+            (hostsOpen || !activeTabId) && !settingsOpen && 'bg-primary/15 text-primary hover:bg-primary/15'
           )}
           style={noDrag}
           onClick={() => setHostsOpen(true)}
@@ -391,7 +402,7 @@ export function TabBar() {
           Host
         </button>
         {tabs.map((t, i) => {
-          const active = t.id === activeTabId && !hostsOpen
+          const active = t.id === activeTabId && !hostsOpen && !settingsOpen
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
           return (
             <Fragment key={t.id}>
@@ -549,27 +560,29 @@ export function TabBar() {
           <ChevronRight className="size-4" strokeWidth={2} />
         </button>
       )}
-      <button
-        type="button"
-        className={topBtn}
-        style={noDrag}
-        title="截取当前终端画面"
-        disabled={!activeTabId}
-        onClick={() => shoot('viewport')}
-      >
-        <Camera className="size-4" strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={topBtn}
-        style={noDrag}
-        title="截取滚动缓冲"
-        disabled={!activeTabId}
-        onClick={() => shoot('scrollback')}
-      >
-        <GalleryVertical className="size-4" strokeWidth={2} />
-      </button>
-      {window.api.platform === 'win32' && <WindowControls />}
+      {terminalActive && (
+        <>
+          <button
+            type="button"
+            className={topBtn}
+            style={noDrag}
+            title="截取当前终端画面"
+            onClick={() => shoot('viewport')}
+          >
+            <Camera className="size-4" strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            className={topBtn}
+            style={noDrag}
+            title="截取滚动缓冲"
+            onClick={() => shoot('scrollback')}
+          >
+            <GalleryVertical className="size-4" strokeWidth={2} />
+          </button>
+        </>
+      )}
+      {window.api.platform === 'win32' && <WindowControls terminalActive={terminalActive} />}
     </div>
     <RemarkDialog
       open={renamingId !== null}

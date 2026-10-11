@@ -233,7 +233,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setSettingsOpen: (open) => set(open ? { settingsOpen: true, hostsOpen: false, rightPanelOpen: false } : { settingsOpen: false }),
 
   setNotice: (notice) => {
     if (noticeTimer) clearTimeout(noticeTimer)
@@ -266,7 +266,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openSessionTab: (session, fresh = false) => {
-    set({ selectedSessionId: session.id, hostsOpen: false })
+    set({ selectedSessionId: session.id, hostsOpen: false, settingsOpen: false })
     if (!fresh) {
       const existing = get().tabs.find((t) => t.sessionId === session.id && t.kind === 'ssh')
       if (existing) {
@@ -321,7 +321,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux',
       shell
     }
-    set({ tabs: [...get().tabs, tab], activeTabId: tab.id, hostsOpen: false })
+    set({ tabs: [...get().tabs, tab], activeTabId: tab.id, hostsOpen: false, settingsOpen: false })
     window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, shell, cols: 80, rows: 24 })
   },
 
@@ -394,7 +394,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeTabId: tabId,
       selectedSessionId: tab?.sessionId ?? get().selectedSessionId,
       activeEditorKey: null,
-      hostsOpen: false
+      hostsOpen: false,
+      settingsOpen: false
     })
   },
 
@@ -429,8 +430,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
 
-  toggleHostsOpen: () => set({ hostsOpen: !get().hostsOpen }),
-  setHostsOpen: (open) => set({ hostsOpen: open }),
+  toggleHostsOpen: () =>
+    get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
+  setHostsOpen: (open) => set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false }),
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
   selectSession: (id) => set({ selectedSessionId: id }),
   openRemoteEditor: (sessionId, file, pin = false) => {
