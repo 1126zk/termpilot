@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRightToLine, Eye, EyeOff, Plus, X } from 'lucide-react'
+import { ArrowRightToLine, Eye, EyeOff, Globe, KeyRound, Plus, Tag, User, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 import { useAppStore, type EditingState } from '../stores/useAppStore'
 import type { ForwardRule, ForwardType, SessionConfig, SessionInput } from '../../../shared/types'
 
@@ -203,46 +203,54 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
         </button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="grid gap-3 px-3 py-3">
-          <div className="grid grid-cols-[1fr_6rem] gap-2">
-            <Field label="主机">
-              <Input value={form.host} placeholder="IP 或域名" onChange={(e) => set('host', e.target.value)} />
-            </Field>
-            <Field label="端口">
-              <Input
-                type="number"
-                value={form.port}
-                onChange={(e) => set('port', Number(e.target.value) || 22)}
-              />
-            </Field>
-          </div>
-          <Field label="标签">
-            <Input
-              value={form.name}
-              placeholder="给这条连接取的名字"
-              onChange={(e) => set('name', e.target.value)}
+        <div className="grid gap-4 px-3 py-4">
+          <div className="grid grid-cols-[1fr_6rem] gap-2.5">
+            <IconInput
+              icon={<Globe />}
+              value={form.host}
+              placeholder="IP 或主机名"
+              onChange={(e) => set('host', e.target.value)}
             />
-          </Field>
-          <Field label="用户名">
-            <Input value={form.username} onChange={(e) => set('username', e.target.value)} />
-          </Field>
-          <Field label="密码">
-            <div className="flex gap-1.5">
-              <Input
-                type={showSecret ? 'text' : 'password'}
-                value={form.secret}
-                onChange={(e) => set('secret', e.target.value)}
-              />
-              <button
-                type="button"
-                title={showSecret ? '隐藏密码' : '显示密码'}
-                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
-                onClick={() => setShowSecret((v) => !v)}
-              >
-                {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
-            </div>
-          </Field>
+            <Input
+              className="h-10"
+              type="number"
+              placeholder="22"
+              value={form.port}
+              onChange={(e) => set('port', Number(e.target.value) || 22)}
+            />
+          </div>
+          <IconInput
+            icon={<Tag />}
+            value={form.name}
+            placeholder="标签"
+            onChange={(e) => set('name', e.target.value)}
+          />
+          <IconInput
+            icon={<User />}
+            value={form.username}
+            placeholder="用户名"
+            onChange={(e) => set('username', e.target.value)}
+          />
+          <div className="relative">
+            <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
+              <KeyRound />
+            </span>
+            <Input
+              className="h-10 pr-9 pl-8"
+              type={showSecret ? 'text' : 'password'}
+              value={form.secret}
+              placeholder="密码"
+              onChange={(e) => set('secret', e.target.value)}
+            />
+            <button
+              type="button"
+              title={showSecret ? '隐藏密码' : '显示密码'}
+              className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+              onClick={() => setShowSecret((v) => !v)}
+            >
+              {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
 
           {forwards.map((rule, index) => (
             <div key={index} className="grid gap-1">
@@ -277,7 +285,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-7 shrink-0"
+                  className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
                   title="删除这条映射"
                   onClick={() => {
                     dirty.current = true
@@ -317,11 +325,15 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
   )
 }
 
-function Field(props: { label: string; children: React.ReactNode }) {
+/** 输入框内嵌图标：图标在左，placeholder 是字段名，不再要上面的文字标签 */
+function IconInput(props: React.ComponentProps<typeof Input> & { icon: React.ReactNode }) {
+  const { icon, className, ...rest } = props
   return (
-    <Label className="grid gap-1 text-xs text-muted-foreground">
-      {props.label}
-      {props.children}
-    </Label>
+    <div className="relative">
+      <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
+        {icon}
+      </span>
+      <Input className={cn('h-10 pl-8', className)} {...rest} />
+    </div>
   )
 }
