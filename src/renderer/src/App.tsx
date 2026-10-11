@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { RightPanel } from './components/RightPanel'
 import { TabBar } from './components/TabBar'
 import { EditorTabBar } from './components/EditorTabBar'
-import { SettingsDialog } from './components/SettingsDialog'
+import { SettingsPage } from './components/SettingsPage'
 import { McpConfirmDialog } from './components/McpConfirmDialog'
 import { NoticeToast } from './components/NoticeToast'
 import { SftpInstallDialog } from './components/SftpInstallDialog'
@@ -96,6 +96,7 @@ export default function App() {
     : []
   const currentFile = fileTabs.find((t) => t.key === remoteEditor) ?? null
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
+  const settingsOpen = useAppStore((s) => s.settingsOpen)
   const editing = useAppStore((s) => s.editing)
 
   return (
@@ -106,7 +107,9 @@ export default function App() {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {fileTabs.length > 0 && <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />}
             <div className="flex min-h-0 flex-1 flex-col">
-              {currentFile ? (
+              {settingsOpen ? (
+                <SettingsPage />
+              ) : currentFile ? (
                 <RemoteEditor key={currentFile.key} tab={currentFile} />
               ) : hostsOpen || !activeTab ? (
                 <HostsPage />
@@ -125,7 +128,6 @@ export default function App() {
             <RightPanel />
           </div>
         </div>
-        <SettingsDialog />
         <McpConfirmDialog />
         <SftpInstallDialog />
         <NoticeToast />

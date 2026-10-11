@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Info, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Settings, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,7 +64,6 @@ function WindowControls() {
   const [maximized, setMaximized] = useState(false)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
-  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
 
   useEffect(() => {
     void window.api.win.isMaximized().then(setMaximized)
@@ -73,9 +72,6 @@ function WindowControls() {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
-      <button type="button" className={topBtn} title="设置" onClick={() => setSettingsOpen(true)}>
-        <Settings className="size-4" strokeWidth={2} />
-      </button>
       <button
         type="button"
         className={topBtn}
@@ -120,7 +116,8 @@ export function TabBar() {
   const openSessionTab = useAppStore((s) => s.openSessionTab)
   const reorderTabs = useAppStore((s) => s.reorderTabs)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
-  const toggleHostsOpen = useAppStore((s) => s.toggleHostsOpen)
+  const setHostsOpen = useAppStore((s) => s.setHostsOpen)
+  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
   const setNotice = useAppStore((s) => s.setNotice)
   const [shot, setShot] = useState<CaptureDone | null>(null)
@@ -357,14 +354,8 @@ export function TabBar() {
         if (window.api.platform === 'win32' && e.target === e.currentTarget) void window.api.win.toggleMaximize()
       }}
     >
-      <button
-        type="button"
-        className={cn(topBtn, hostsOpen && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary')}
-        style={noDrag}
-        title="主机"
-        onClick={toggleHostsOpen}
-      >
-        <Server className="size-4" strokeWidth={2} />
+      <button type="button" className={topBtn} style={noDrag} title="设置" onClick={() => setSettingsOpen(true)}>
+        <Menu className="size-4" strokeWidth={2} />
       </button>
       {overflowing && (
         <button type="button" className={topBtn} style={noDrag} disabled={!canLeft} onClick={() => scrollStrip(-1)}>
@@ -386,6 +377,19 @@ export function TabBar() {
         }}
         className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
+        {/* 主机标签：固定在标签条最前，和其他标签同一套三档背景，没有右键 */}
+        <button
+          type="button"
+          className={cn(
+            'flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
+            hostsOpen && 'bg-primary/15 text-primary hover:bg-primary/15'
+          )}
+          style={noDrag}
+          onClick={() => setHostsOpen(true)}
+        >
+          <Server className="size-4 shrink-0" strokeWidth={2} />
+          Host
+        </button>
         {tabs.map((t, i) => {
           const active = t.id === activeTabId && !hostsOpen
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
