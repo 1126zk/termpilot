@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Pencil, Plus, Search } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Plus, Search } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -77,15 +77,28 @@ function HostCard(props: { session: SessionConfig }) {
   const session = props.session
   const openSessionTab = useAppStore((s) => s.openSessionTab)
   const selectSession = useAppStore((s) => s.selectSession)
+  const editing = useAppStore((s) => s.editing)
   const setEditing = useAppStore((s) => s.setEditing)
   const deleteSession = useAppStore((s) => s.deleteSession)
   const setSessionRemark = useAppStore((s) => s.setSessionRemark)
   const setNotice = useAppStore((s) => s.setNotice)
   const [editingRemark, setEditingRemark] = useState(false)
+  const clickTimer = useRef<number>(0)
 
+  // 单击 = 主机信息面板滑出/滑回；双击 = 新开一扇终端（每次都新开）
   const open = () => {
+    window.clearTimeout(clickTimer.current)
+    clickTimer.current = window.setTimeout(() => {
+      selectSession(session.id)
+      if (editing?.action === 'edit' && editing.session.id === session.id) setEditing(null)
+      else setEditing({ action: 'edit', session })
+    }, 250)
+  }
+
+  const openFresh = () => {
+    window.clearTimeout(clickTimer.current)
     selectSession(session.id)
-    openSessionTab(session)
+    openSessionTab(session, true)
   }
 
   return (
@@ -96,6 +109,7 @@ function HostCard(props: { session: SessionConfig }) {
             role="button"
             className="group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted-foreground/10"
             onClick={open}
+            onDoubleClick={openFresh}
           >
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary [&_svg]:size-4.5">
               <OsIcon {...osIconProps(session.os)} />
@@ -104,17 +118,6 @@ function HostCard(props: { session: SessionConfig }) {
               <span className="block truncate text-[14px] font-semibold">{session.name}</span>
               <span className="block truncate text-xs text-muted-foreground">ssh, {session.username}</span>
             </span>
-            <button
-              type="button"
-              title={`编辑「${session.name}」`}
-              className="invisible flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground group-hover:visible hover:bg-muted-foreground/10 hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation()
-                setEditing({ action: 'edit', session })
-              }}
-            >
-              <Pencil className="size-3.5" />
-            </button>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
