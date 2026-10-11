@@ -10,7 +10,6 @@ import {
   type McpSettings,
   type McpSettingsInput,
   type SessionConfig,
-  type SessionInput,
   type SessionStatus,
   type Tab,
   type TermStatusEvent
@@ -60,10 +59,7 @@ interface AppState {
   /** 右侧面板当前板块 */
   rightPanelPane: RightPanelPane
   search: string
-  /** 文件树跟随的会话 */
-  selectedSessionId: string | null
-  /** 当前连接或本机下打开的文件。和会话标签分开，按机器保留。 */
-  editorTabs: EditorTab[]
+  /** 当前连接或本机下打开的文件。和会话标签分开，按机器保留。 */editorTabs: EditorTab[]
   /** 正在看的文件。null 表示回到这台机器的终端。 */
   activeEditorKey: string | null
 
@@ -93,17 +89,13 @@ interface AppState {
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setNotice: (notice: string | null) => void
-  saveSession: (id: string | null, input: SessionInput) => Promise<void>
   deleteSession: (id: string) => Promise<void>
-  duplicateSessions: (ids: string[]) => Promise<void>
 
   openSessionTab: (session: SessionConfig, fresh?: boolean) => void
   openLocalTab: (shell?: LocalShell) => void
   closeTab: (tabId: string) => void
   reconnectTab: (tabId: string) => void
   renameTab: (tabId: string, title: string) => void
-  setTabRemark: (tabId: string, remark: string) => void
-  setSessionRemark: (session: SessionConfig, remark: string) => Promise<void>
   setActiveTab: (tabId: string) => void
   /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面） */
   reorderTabs: (ids: string[]) => void
@@ -113,7 +105,6 @@ interface AppState {
 
   toggleRightPanel: () => void
   setRightPanelPane: (pane: RightPanelPane) => void
-  selectSession: (id: string) => void
   openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean) => void
   closeEditorTab: (key: string) => void
   activateEditorTab: (key: string) => void
@@ -133,6 +124,19 @@ export type EditingState = AppState['editing']
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 const bootAppearance = readCachedAppearance()
 
+/**
+ * 面板内容硬性互斥：打开/切换终端时关掉编辑表单；
+ * 从主机编辑面板切走时整个右侧面板一起收，终端之间切换不动面板开关。
+ */
+function closeOverlaysPatch(get: () => AppState): Partial<AppState> {
+  return { editing: null, ...(get().editing ? { rightPanelOpen: false } : {}) }
+}
+
+/** 标签/备注文本清洗：压缩空白、去头尾、截断。 */
+function cleanLabel(text: string, max: number): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: [],
   localShells: [],
@@ -145,7 +149,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   hostsOpen: false,
   rightPanelPane: 'files',
   search: '',
-  selectedSessionId: null,
   editorTabs: [],
   activeEditorKey: null,
   editing: null,
@@ -205,7 +208,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     terminalPool.ensure(tab.termId)
     window.api.mcp.bound(tab.termId)
     if (get().tabs.some((item) => item.id === tab.termId)) {
-      set({ activeTabId: tab.termId, selectedSessionId: tab.sessionId })
+      set({ activeTabId: tab.termId })
       return
     }
     set({
@@ -213,8 +216,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...get().tabs,
         { id: tab.termId, sessionId: tab.sessionId, kind: tab.kind, title: tab.title }
       ],
-      activeTabId: tab.termId,
-      selectedSessionId: tab.sessionId ?? get().selectedSessionId
+      activeTabId: tab.termId
     })
   },
 
@@ -225,11 +227,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   onSessionsChanged: (sessions) => {
     const ids = new Set(sessions.map((session) => session.id))
-    const selected = get().selectedSessionId
-    set({
-      sessions,
-      selectedSessionId: selected && ids.has(selected) ? selected : null
-    })
+    set({ sessions })
     for (const tab of get().tabs) {
       if (tab.sessionId && !ids.has(tab.sessionId)) get().closeTab(tab.id)
     }
@@ -243,16 +241,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (notice) noticeTimer = setTimeout(() => set({ notice: null }), 2000)
   },
 
-  saveSession: async (id, input) => {
-    if (id) {
-      await window.api.sessions.update(id, input)
-    } else {
-      await window.api.sessions.create(input)
-    }
-    await get().loadSessions()
-    set({ editing: null })
-  },
-
   deleteSession: async (id) => {
     await window.api.sessions.delete(id)
     // 关掉该会话已打开的标签
@@ -262,18 +250,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadSessions()
   },
 
-  duplicateSessions: async (ids) => {
-    for (const id of ids) await window.api.sessions.duplicate(id)
-    await get().loadSessions()
-  },
-
   openSessionTab: (session, fresh = false) => {
     set({
-      selectedSessionId: session.id,
       hostsOpen: false,
       settingsOpen: false,
-      editing: null,
-      ...(get().editing ? { rightPanelOpen: false } : {})
+      ...closeOverlaysPatch(get)
     })
     if (!fresh) {
       const existing = get().tabs.find((t) => t.sessionId === session.id && t.kind === 'ssh')
@@ -334,41 +315,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeTabId: tab.id,
       hostsOpen: false,
       settingsOpen: false,
-      editing: null,
-      ...(get().editing ? { rightPanelOpen: false } : {})
+      ...closeOverlaysPatch(get)
     })
     window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, shell, cols: 80, rows: 24 })
   },
 
   renameTab: (tabId, title) => {
-    const name = title.replace(/\s+/g, ' ').trim().slice(0, 80)
+    const name = cleanLabel(title, 80)
     if (!name) return
     set({ tabs: get().tabs.map((tab) => (tab.id === tabId ? { ...tab, title: name } : tab)) })
     window.api.term.label(tabId, { title: name })
-  },
-
-  setTabRemark: (tabId, remark) => {
-    const text = remark.replace(/\s+/g, ' ').trim().slice(0, 200)
-    set({ tabs: get().tabs.map((tab) => (tab.id === tabId ? { ...tab, remark: text } : tab)) })
-    window.api.term.label(tabId, { remark: text })
-  },
-
-  setSessionRemark: async (session, remark) => {
-    const text = remark.replace(/\s+/g, ' ').trim().slice(0, 200)
-    if (text === (session.remark ?? '').trim()) return
-    await window.api.sessions.update(session.id, {
-      name: session.name,
-      group: session.group,
-      host: session.host,
-      port: session.port,
-      username: session.username,
-      remark: text,
-      jumpHost: session.jumpHost ?? '',
-      jumpPort: session.jumpPort,
-      jumpUsername: session.jumpUsername,
-      sshOptions: session.sshOptions
-    })
-    await get().loadSessions()
   },
 
   reconnectTab: (tabId) => {
@@ -378,7 +334,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (status === 'connected' || status === 'connecting') return
     set({
       activeTabId: tabId,
-      selectedSessionId: tab.sessionId ?? get().selectedSessionId,
       activeEditorKey: null
     })
     window.api.term.create({
@@ -407,13 +362,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId)
     set({
       activeTabId: tabId,
-      selectedSessionId: tab?.sessionId ?? get().selectedSessionId,
       activeEditorKey: null,
       hostsOpen: false,
       settingsOpen: false,
-      editing: null,
-      // 从主机编辑面板切走时整个面板一起收；终端之间切换不动面板开关
-      ...(get().editing ? { rightPanelOpen: false } : {})
+      ...closeOverlaysPatch(get)
     })
   },
 
@@ -453,7 +405,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
   setHostsOpen: (open) => set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false }),
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
-  selectSession: (id) => set({ selectedSessionId: id }),
   openRemoteEditor: (sessionId, file, pin = false) => {
     const key = editorKey(sessionId, file.path)
     const tabs = get().editorTabs

@@ -11,8 +11,8 @@
     "typecheck": "tsc --noEmit",
     "dist": "npm run cli:build && electron-vite build && electron-builder --publish never",
     "dist:win": "npm run cli:build && electron-vite build && electron-builder --win --publish never",
-    "dist:mac": "npm run cli:build && electron-vite build && electron-builder --mac --publish never",
-    "dist:linux": "npm run cli:build && electron-vite build && electron-builder --linux --publish never",
+    "dist:mac": "node scripts/build-cli.mjs darwin && electron-vite build && electron-builder --mac --publish never",
+    "dist:linux": "node scripts/build-cli.mjs linux && electron-vite build && electron-builder --linux --publish never",
     "cli:build": "node scripts/build-cli.mjs"
   },
   "dependencies": {

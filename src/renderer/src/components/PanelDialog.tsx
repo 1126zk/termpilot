@@ -1,10 +1,35 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 /** 右键菜单关掉之后再打开，避免弹层立刻被收掉。 */
 export function openAfterMenu(open: () => void): void {
   window.setTimeout(open, 0)
+}
+
+/**
+ * 右键菜单里打开弹层/原地重命名的配套：菜单项 onClick 调 openFromMenu，
+ * ContextMenuContent 的 onCloseAutoFocus 挂 keepFocusOnClose —— 菜单关闭时阻止 Radix
+ * 把焦点还给列表项，否则紧接着打开的输入框会被顶得失焦。文件树的弹层和标签栏的
+ * 原地重命名共用这一套。
+ */
+export function useMenuAction(): {
+  keepFocusOnClose: (e: Event) => void
+  openFromMenu: (open: () => void) => void
+} {
+  const afterMenu = useRef(false)
+  return {
+    keepFocusOnClose: (e) => {
+      if (afterMenu.current) {
+        afterMenu.current = false
+        e.preventDefault()
+      }
+    },
+    openFromMenu: (open) => {
+      afterMenu.current = true
+      openAfterMenu(open)
+    }
+  }
 }
 
 /**

@@ -2545,17 +2545,6 @@ export function unifiedTheme(id: string): UnifiedTheme {
   return UNIFIED_THEMES.find((item) => item.id === mapped) ?? UNIFIED_THEMES[0]!
 }
 
-/** 老库按 app + 终端配色存的，映射到统一主题 id。 */
-function legacyThemeId(app: unknown, terminal: unknown): string {
-  if (app === 'light' && terminal === 'light') return 'light'
-  if (typeof terminal === 'string') {
-    if (UNIFIED_THEMES.some((item) => item.terminal === terminal)) return terminal
-    const mapped = LEGACY_THEME_IDS[terminal]
-    if (mapped) return mapped
-  }
-  return 'termius-dark'
-}
-
 export interface Appearance {
   /** 统一主题 id（UNIFIED_THEMES），整套界面 + 终端配色一起换 */
   theme: string
@@ -2585,11 +2574,9 @@ export const DEFAULT_APPEARANCE: Appearance = {
 
 export function parseAppearance(input: unknown): Appearance {
   const row = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
-  // 新库直接存 theme id（废弃 id 在统一主题函数里映射，不认识的回退深色）；老库按 app + terminal 组合映射
+  // 存的是统一主题 id（废弃 id 在统一主题函数里映射，不认识的回退深色）
   const theme =
-    typeof row.theme === 'string' && row.theme
-      ? unifiedTheme(row.theme).id
-      : legacyThemeId(row.app === 'system' ? 'dark' : row.app, row.terminal)
+    typeof row.theme === 'string' && row.theme ? unifiedTheme(row.theme).id : DEFAULT_APPEARANCE.theme
   const terminalFont =
     typeof row.terminalFont === 'string' && row.terminalFont.trim()
       ? row.terminalFont.trim()

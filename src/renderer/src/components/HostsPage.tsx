@@ -76,7 +76,6 @@ export function HostsPage() {
 function HostCard(props: { session: SessionConfig }) {
   const session = props.session
   const openSessionTab = useAppStore((s) => s.openSessionTab)
-  const selectSession = useAppStore((s) => s.selectSession)
   const editing = useAppStore((s) => s.editing)
   const setEditing = useAppStore((s) => s.setEditing)
   const deleteSession = useAppStore((s) => s.deleteSession)
@@ -87,7 +86,6 @@ function HostCard(props: { session: SessionConfig }) {
   const open = () => {
     window.clearTimeout(clickTimer.current)
     clickTimer.current = window.setTimeout(() => {
-      selectSession(session.id)
       if (editing?.action === 'edit' && editing.session.id === session.id) setEditing(null)
       else setEditing({ action: 'edit', session })
     }, 250)
@@ -95,7 +93,6 @@ function HostCard(props: { session: SessionConfig }) {
 
   const openFresh = () => {
     window.clearTimeout(clickTimer.current)
-    selectSession(session.id)
     openSessionTab(session, true)
   }
 

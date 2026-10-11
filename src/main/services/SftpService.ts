@@ -5,6 +5,7 @@ import type { Readable, Writable } from 'node:stream'
 import { app, dialog, type WebContents } from 'electron'
 import { Client, type OpenMode, type SFTPWrapper } from 'ssh2'
 import { IPC } from '../../shared/ipc-channels'
+import { assertEditSize, assertTextBuffer, compareRemoteFiles } from '../../shared/file-listing'
 import type { RemoteFile, SftpInstallEvent, SftpTransferEvent } from '../../shared/types'
 import type { StorageService } from './StorageService'
 import type { SshHold, SshPool } from './SshPool'
@@ -759,11 +760,7 @@ function readdir(sftp: SFTPWrapper, dir: string): Promise<RemoteFile[]> {
             mtime: (item.attrs.mtime ?? 0) * 1000
           }
         })
-      entries.sort((a, b) => {
-        if (a.kind === 'dir' && b.kind !== 'dir') return -1
-        if (a.kind !== 'dir' && b.kind === 'dir') return 1
-        return a.name.localeCompare(b.name)
-      })
+      entries.sort(compareRemoteFiles)
       resolve(entries)
     })
   })
@@ -798,15 +795,14 @@ function call(run: (cb: (err: Error | undefined | null) => void) => void): Promi
 
 /** 几个 GB 的文件不走 SFTP。源码和普通文件停在 512MB 以内。 */
 const MAX_TRANSFER_BYTES = 512 * 1024 * 1024
-const MAX_EDIT_BYTES = 1_500_000
 const CHUNK = 32 * 1024
 const loginDirs = new WeakMap<SFTPWrapper, Promise<string>>()
 
 async function readTextAt(sftp: SFTPWrapper, path: string): Promise<string> {
   const size = await statSize(sftp, path)
-  if (size > MAX_EDIT_BYTES) throw new Error('文件超过 1.5MB，不在编辑器里打开')
+  assertEditSize(size)
   const buf = await readAll(sftp, path)
-  if (buf.includes(0)) throw new Error('这是二进制文件，不能用文本编辑器打开')
+  assertTextBuffer(buf)
   return buf.toString('utf8')
 }
 

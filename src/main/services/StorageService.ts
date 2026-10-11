@@ -1,5 +1,5 @@
 import { app, safeStorage } from 'electron'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite'
@@ -34,7 +34,6 @@ import {
 /**
  * 会话存储：userData/termpilot.db（Node 内置 SQLite，WAL）+ safeStorage。
  * 密码只以密文写入 secret_encrypted，明文只活在单次连接的内存里。
- * 旧的 sessions.json 在第一次打开数据库时导入，然后改名为 sessions.json.migrated。
  */
 export class StorageService {
   private db: DatabaseSync
@@ -53,20 +52,27 @@ export class StorageService {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
+        public_id TEXT,
         name TEXT NOT NULL,
         group_name TEXT NOT NULL DEFAULT '',
-        mode TEXT NOT NULL DEFAULT 'forward',
         host TEXT NOT NULL DEFAULT '',
         port INTEGER NOT NULL DEFAULT 22,
         username TEXT NOT NULL DEFAULT '',
-        auth_type TEXT NOT NULL,
-        key_path TEXT,
         remark TEXT,
         secret_encrypted TEXT,
+        jump_host TEXT,
+        jump_port INTEGER,
+        jump_username TEXT,
+        jump_secret_encrypted TEXT,
+        ssh_options TEXT,
+        config_host TEXT,
+        forwards TEXT,
+        os TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
     `)
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id)')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS mcp_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -79,29 +85,12 @@ export class StorageService {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS appearance (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        app_theme TEXT NOT NULL DEFAULT 'dark',
-        terminal_theme TEXT NOT NULL DEFAULT 'dark'
+        theme TEXT,
+        terminal_font TEXT,
+        terminal_size INTEGER,
+        experimental_screenshot INTEGER NOT NULL DEFAULT 0
       )
     `)
-    this.ensureColumn('appearance', 'experimental_screenshot', 'INTEGER NOT NULL DEFAULT 0')
-    this.ensureColumn('appearance', 'terminal_font', 'TEXT')
-    this.ensureColumn('appearance', 'terminal_size', 'INTEGER')
-    this.ensureColumn('appearance', 'theme', 'TEXT')
-    this.ensureColumn('history', 'term_id', 'TEXT')
-    this.ensureColumn('sessions', 'jump_host', 'TEXT')
-    this.ensureColumn('sessions', 'jump_port', 'INTEGER')
-    this.ensureColumn('sessions', 'jump_username', 'TEXT')
-    this.ensureColumn('sessions', 'jump_secret_encrypted', 'TEXT')
-    this.ensureColumn('sessions', 'ssh_options', 'TEXT')
-    this.ensureColumn('sessions', 'public_id', 'TEXT')
-    this.ensureColumn('sessions', 'config_host', 'TEXT')
-    this.ensureColumn('sessions', 'forwards', 'TEXT')
-    this.ensureColumn('sessions', 'os', 'TEXT')
-    // 窗口持久化已移除：老库里的 open_terms 整个清掉，启动永远是空白
-    this.db.exec('DROP TABLE IF EXISTS open_terms')
-    this.dropRemovedKinds()
-    this.backfillPublicIds()
-    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id)')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS host_notes (
         host_key TEXT PRIMARY KEY,
@@ -128,6 +117,7 @@ export class StorageService {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        term_id TEXT,
         command TEXT NOT NULL,
         at INTEGER NOT NULL
       )
@@ -135,31 +125,7 @@ export class StorageService {
     this.db.exec(
       'CREATE UNIQUE INDEX IF NOT EXISTS sessions_config_host ON sessions(config_host) WHERE config_host IS NOT NULL'
     )
-    this.importLegacyJson(join(dir, 'sessions.json'))
-    this.dropKeyAuth()
     this.importSshConfig()
-  }
-
-  /** 私钥认证已移除。老库里的私钥会话转成密码登录；原来存的是私钥口令，不能当密码用，清掉让用户重填。 */
-  private dropKeyAuth(): void {
-    this.db.exec("UPDATE sessions SET auth_type = 'password', key_path = NULL, secret_encrypted = NULL WHERE auth_type = 'key'")
-  }
-
-  private backfillPublicIds(): void {
-    const rows = this.db.prepare('SELECT id, public_id FROM sessions').all()
-    const used = new Set<string>()
-    for (const row of rows) {
-      const existing = optionalText(row.public_id)
-      if (existing) used.add(existing)
-    }
-    const assign = this.db.prepare('UPDATE sessions SET public_id = ? WHERE id = ?')
-    for (const row of rows) {
-      if (optionalText(row.public_id)) continue
-      let publicId = `conn-${text(row.id).replace(/-/g, '').slice(0, 8)}`
-      while (!/^conn-[0-9a-f]{8}$/i.test(publicId) || used.has(publicId)) publicId = newConnId()
-      used.add(publicId)
-      assign.run(publicId, text(row.id))
-    }
   }
 
   private allocatePublicId(): string {
@@ -168,25 +134,6 @@ export class StorageService {
       const taken = this.db.prepare('SELECT 1 FROM sessions WHERE public_id = ?').get(publicId)
       if (!taken) return publicId
     }
-  }
-
-  private ensureColumn(table: string, column: string, definition: string): void {
-    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all()
-    if (rows.some((row) => row.name === column)) return
-    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
-  }
-
-  /** 旧库可能留下 Telnet / 串口 / 反向监听会话，这些功能已移除，连同打开的窗口一起清掉。新库没有那些列，直接跳过。 */
-  private dropRemovedKinds(): void {
-    const columns = new Set(this.db.prepare('PRAGMA table_info(sessions)').all().map((row) => row.name))
-    const where = [
-      columns.has('mode') ? "mode = 'reverse'" : '',
-      columns.has('protocol') ? "protocol IS NOT NULL AND protocol != 'ssh'" : ''
-    ]
-      .filter(Boolean)
-      .join(' OR ')
-    if (!where) return
-    this.db.exec(`DELETE FROM sessions WHERE ${where}`)
   }
 
   close(): void {
@@ -238,10 +185,10 @@ export class StorageService {
     this.db
       .prepare(
         `INSERT INTO sessions (
-          id, public_id, name, group_name, mode, host, port, username, auth_type,
-          key_path, remark, secret_encrypted, created_at, updated_at,
+          id, public_id, name, group_name, host, port, username,
+          remark, secret_encrypted, created_at, updated_at,
           jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
-        ) VALUES (?, ?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -251,8 +198,6 @@ export class StorageService {
         input.host,
         input.port,
         input.username,
-        'password',
-        null,
         input.remark ?? null,
         this.encryptSecret(input.secret) ?? null,
         now,
@@ -294,7 +239,7 @@ export class StorageService {
       .prepare(
         `UPDATE sessions SET
           name = ?, group_name = ?, host = ?, port = ?, username = ?,
-          auth_type = ?, key_path = ?, remark = ?,
+          remark = ?,
           secret_encrypted = ?, updated_at = ?,
           jump_host = ?, jump_port = ?, jump_username = ?, jump_secret_encrypted = ?,
           ssh_options = ?, forwards = ?
@@ -306,8 +251,6 @@ export class StorageService {
         patch.host,
         patch.port,
         patch.username,
-        'password',
-        null,
         patch.remark ?? null,
         secret,
         Date.now(),
@@ -346,10 +289,10 @@ export class StorageService {
     this.db
       .prepare(
         `INSERT INTO sessions (
-          id, public_id, name, group_name, mode, host, port, username, auth_type,
-          key_path, remark, secret_encrypted, created_at, updated_at,
+          id, public_id, name, group_name, host, port, username,
+          remark, secret_encrypted, created_at, updated_at,
           jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
-        ) VALUES (?, ?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         newId,
@@ -359,8 +302,6 @@ export class StorageService {
         text(row.host),
         integer(row.port, 22),
         text(row.username),
-        'password',
-        null,
         optionalText(row.remark) ?? null,
         typeof row.secret_encrypted === 'string' ? row.secret_encrypted : null,
         now,
@@ -426,19 +367,14 @@ export class StorageService {
   }
 
   getAppearance(): Appearance {
-    this.db
-      .prepare(`INSERT OR IGNORE INTO appearance (id, app_theme, terminal_theme) VALUES (1, 'dark', 'dark')`)
-      .run()
+    this.db.prepare(`INSERT OR IGNORE INTO appearance (id) VALUES (1)`).run()
     const row = this.db
       .prepare(
-        'SELECT app_theme, terminal_theme, theme, terminal_font, terminal_size, experimental_screenshot FROM appearance WHERE id = 1'
+        'SELECT theme, terminal_font, terminal_size, experimental_screenshot FROM appearance WHERE id = 1'
       )
       .get()
     return parseAppearance({
       theme: row ? optionalText(row.theme) : undefined,
-      // 老库没有 theme 列的值，按 app + terminal 组合映射；system 按深色
-      app: row ? optionalText(row.app_theme) : undefined,
-      terminal: row ? optionalText(row.terminal_theme) : undefined,
       terminalFont: row ? optionalText(row.terminal_font) : undefined,
       terminalSize: row ? optionalInteger(row.terminal_size) : undefined,
       experimentalScreenshot: flag(row?.experimental_screenshot ?? 0)
@@ -720,57 +656,6 @@ export class StorageService {
     let n = 2
     while (taken.has(`${base} ${n}`)) n += 1
     return `${base} ${n}`
-  }
-
-  private importLegacyJson(file: string): void {
-    if (!existsSync(file)) return
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(readFileSync(file, 'utf-8'))
-      if (!Array.isArray(parsed)) throw new Error('sessions.json 不是数组')
-    } catch {
-      renameSync(file, `${file}.bak`)
-      return
-    }
-
-    const insert = this.db.prepare(
-      `INSERT OR IGNORE INTO sessions (
-        id, name, group_name, mode, host, port, username, auth_type,
-        key_path, remark, secret_encrypted, created_at, updated_at
-      ) VALUES (?, ?, ?, 'forward', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    this.db.exec('BEGIN')
-    try {
-      for (const item of parsed) {
-        if (!item || typeof item !== 'object') continue
-        const row = item as Record<string, unknown>
-        if (typeof row.id !== 'string' || row.id.length === 0) continue
-        // 旧 JSON 里的反向监听配置不再支持，跳过
-        if (row.mode === 'reverse') continue
-        const now = Date.now()
-        // 私钥认证已移除：私钥会话转成密码登录，私钥口令不能当密码用，清掉让用户重填
-        const wasKey = row.authType === 'key'
-        insert.run(
-          row.id,
-          typeof row.name === 'string' ? row.name : '未命名',
-          typeof row.group === 'string' ? row.group : '',
-          typeof row.host === 'string' ? row.host : '',
-          typeof row.port === 'number' ? row.port : 22,
-          typeof row.username === 'string' ? row.username : '',
-          'password',
-          null,
-          typeof row.remark === 'string' ? row.remark : null,
-          !wasKey && typeof row.secretEncrypted === 'string' ? row.secretEncrypted : null,
-          typeof row.createdAt === 'number' ? row.createdAt : now,
-          typeof row.updatedAt === 'number' ? row.updatedAt : now
-        )
-      }
-      this.db.exec('COMMIT')
-    } catch (error) {
-      this.db.exec('ROLLBACK')
-      throw error
-    }
-    renameSync(file, `${file}.migrated`)
   }
 
   private copyName(name: string): string {

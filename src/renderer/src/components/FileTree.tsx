@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,7 +10,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
-import { openAfterMenu, PanelDialog } from './PanelDialog'
+import { PanelDialog, useMenuAction } from './PanelDialog'
 import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
@@ -27,10 +27,12 @@ type FsBackend = {
   downloadDir: (file: RemoteFile) => Promise<boolean>
 }
 
-/** 跟随当前活动终端窗口：SSH 窗口显示服务器文件，本地终端显示本机文件。 */
+/**
+ * 一个终端标签一棵文件树：组件收 tab prop，RightPanel 按标签各挂一个实例，
+ * 切标签只是显隐，状态（当前目录、展开、选中）互不干扰。
+ * SSH 窗口显示服务器文件，本地终端显示本机文件。
+ */
 export function FileTree(props: { tab: Tab | null }) {
-  // 每个终端标签挂一棵自己的树（RightPanel 按标签各挂一个实例，切标签只是显隐），
-  // 状态（当前目录、展开、选中）互不干扰
   const tab = props.tab
   const local = tab?.kind === 'local'
   const sessionId = local ? null : tab?.sessionId ?? null
@@ -50,7 +52,7 @@ export function FileTree(props: { tab: Tab | null }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<RemoteFile | null>(null)
   // 右键选了重命名/新建文件夹后，菜单关闭时阻止 Radix 把焦点还给列表项，否则弹层的输入框会被顶得失焦
-  const panelDialogAfterMenu = useRef(false)
+  const panelMenu = useMenuAction()
   const [renameError, setRenameError] = useState('')
   const [dropDir, setDropDir] = useState<string | null>(null)
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
@@ -181,8 +183,7 @@ export function FileTree(props: { tab: Tab | null }) {
 
   const ensureOpen = async (path: string) => {
     setOpen((s) => ({ ...s, [path]: true }))
-    if (path === root) await listInto(path)
-    else await listInto(path)
+    await listInto(path)
   }
 
   if (!fs) {
@@ -394,12 +395,7 @@ export function FileTree(props: { tab: Tab | null }) {
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent
-                onCloseAutoFocus={(e) => {
-                  if (panelDialogAfterMenu.current) {
-                    panelDialogAfterMenu.current = false
-                    e.preventDefault()
-                  }
-                }}
+                onCloseAutoFocus={panelMenu.keepFocusOnClose}
               >
                 {item.kind === 'dir' && (
                   <ContextMenuItem onClick={() => void loadRoot(item.path)}>
@@ -409,8 +405,7 @@ export function FileTree(props: { tab: Tab | null }) {
                 {item.kind === 'dir' && (
                   <ContextMenuItem
                     onClick={() => {
-                      panelDialogAfterMenu.current = true
-                      openAfterMenu(() => {
+                      panelMenu.openFromMenu(() => {
                         setFolderError('')
                         setMkdirTarget(item.path)
                         setMaking(true)
@@ -439,8 +434,7 @@ export function FileTree(props: { tab: Tab | null }) {
                 )}
                 <ContextMenuItem
                   onClick={() => {
-                    panelDialogAfterMenu.current = true
-                    openAfterMenu(() => {
+                    panelMenu.openFromMenu(() => {
                       setRenameError('')
                       setRenaming(item)
                     })
@@ -609,12 +603,7 @@ export function FileTree(props: { tab: Tab | null }) {
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent
-                  onCloseAutoFocus={(e) => {
-                    if (panelDialogAfterMenu.current) {
-                      panelDialogAfterMenu.current = false
-                      e.preventDefault()
-                    }
-                  }}
+                  onCloseAutoFocus={panelMenu.keepFocusOnClose}
                 >
                   {parentDir(root) && (
                     <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
@@ -623,8 +612,7 @@ export function FileTree(props: { tab: Tab | null }) {
                   )}
                   <ContextMenuItem
                     onClick={() => {
-                      panelDialogAfterMenu.current = true
-                      openAfterMenu(() => {
+                      panelMenu.openFromMenu(() => {
                         setFolderError('')
                         setMkdirTarget(root)
                         setMaking(true)

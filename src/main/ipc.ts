@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { IPC } from '../shared/ipc-channels'
 import {
-  MCP_HOST,
   unifiedTheme,
   type CaptureRect,
   type CaptureReply,

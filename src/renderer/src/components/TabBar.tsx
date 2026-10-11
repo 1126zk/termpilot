@@ -18,7 +18,7 @@ import {
 import { cn } from '@/lib/utils'
 import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
-import { openAfterMenu } from './PanelDialog'
+import { useMenuAction } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { CaptureDialog } from './CaptureDialog'
@@ -129,7 +129,7 @@ export function TabBar() {
   const [shotError, setShotError] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   // 右键选重命名后，菜单关闭时阻止 Radix 把焦点还给标签按钮，否则原地输入框会被顶得失焦
-  const renameAfterMenu = useRef(false)
+  const renameMenu = useMenuAction()
   const stripRef = useRef<HTMLDivElement>(null)
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
@@ -403,7 +403,7 @@ export function TabBar() {
           <Server className="size-4 shrink-0" strokeWidth={2} />
           Host
         </button>
-        {tabs.map((t, i) => {
+        {tabs.map((t) => {
           const active = t.id === activeTabId && !hostsOpen && !settingsOpen
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
           return (
@@ -477,12 +477,7 @@ export function TabBar() {
                 </button>
               </ContextMenuTrigger>
               <ContextMenuContent
-                onCloseAutoFocus={(e) => {
-                  if (renameAfterMenu.current) {
-                    renameAfterMenu.current = false
-                    e.preventDefault()
-                  }
-                }}
+                onCloseAutoFocus={renameMenu.keepFocusOnClose}
               >
                 <ContextMenuItem
                   onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}
@@ -497,10 +492,7 @@ export function TabBar() {
                   复制终端信息
                 </ContextMenuItem>
                 <ContextMenuItem
-                  onClick={() => {
-                    renameAfterMenu.current = true
-                    openAfterMenu(() => setRenamingId(t.id))
-                  }}
+                  onClick={() => renameMenu.openFromMenu(() => setRenamingId(t.id))}
                 >
                   <Pencil />
                   重命名
@@ -621,7 +613,7 @@ export function TabBar() {
 
 /**
  * 标签原地改名：透明输入框、进入时全选。右键菜单路径已在菜单关闭时阻止 Radix 归还焦点
- * （见 renameAfterMenu），所以这里挂载时一次聚焦全选即可；退出靠 Enter 保存 / Esc 取消 / 点别处保存。
+ * （见 useMenuAction），所以这里挂载时一次聚焦全选即可；退出靠 Enter 保存 / Esc 取消 / 点别处保存。
  */
 function InlineRename(props: { tabId: string; initial: string; done: () => void }) {
   const renameTab = useAppStore((s) => s.renameTab)

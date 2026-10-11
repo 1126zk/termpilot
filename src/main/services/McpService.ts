@@ -34,10 +34,6 @@ type SessionPatch = {
   port?: number
   username?: string
   secret?: string
-  jumpHost?: string
-  jumpPort?: number
-  jumpUsername?: string
-  jumpSecret?: string
   group?: string
   remark?: string
 }
@@ -60,7 +56,7 @@ export class McpService {
     private storage: StorageService,
     private terminal: TerminalService,
     private sftp: SftpService,
-    private exec2: ExecService,
+    private exec: ExecService,
     private getSender: () => WebContents | null
   ) {}
 
@@ -284,7 +280,7 @@ export class McpService {
         const found = this.findSession(need(raw, 'connection'))
         const command = need(raw, 'command')
         await this.guard(command)
-        const run = await this.exec2.exec(found.id, {
+        const run = await this.exec.exec(found.id, {
           command,
           session: textArg(raw, 'session'),
           prelude: textArg(raw, 'prelude'),
@@ -519,10 +515,11 @@ export class McpService {
       username: (patch.username ?? current?.username ?? '').trim(),
       remark: patch.remark ?? current?.remark,
       secret: patch.secret ? patch.secret : undefined,
-      jumpHost: patch.jumpHost !== undefined ? patch.jumpHost.trim() : (current?.jumpHost ?? ''),
-      jumpPort: patch.jumpPort ?? current?.jumpPort ?? 22,
-      jumpUsername: patch.jumpUsername !== undefined ? patch.jumpUsername.trim() : (current?.jumpUsername ?? ''),
-      jumpSecret: patch.jumpSecret
+      // MCP 不支持改跳板配置，沿用现有值
+      jumpHost: current?.jumpHost ?? '',
+      jumpPort: current?.jumpPort ?? 22,
+      jumpUsername: current?.jumpUsername ?? '',
+      jumpSecret: undefined
     }
     if (!input.name) throw new Error('名称不能为空')
     if (!input.host || !input.username) throw new Error('主机和用户名不能为空')

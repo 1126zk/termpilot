@@ -1,6 +1,6 @@
 import type { CaptureRect, CaptureRun } from '../../../shared/types'
 import { useAppStore } from '../stores/useAppStore'
-import { terminalPool, type TermLook } from './TerminalPool'
+import { terminalPool } from './TerminalPool'
 
 const MAX_PAGES = 20
 const MAX_STITCH_HEIGHT = 16000
@@ -148,7 +148,7 @@ async function replayCanvases(
     if (pngs.length > 0 && performance.now() >= deadline) break
     const chunkEnd = Math.min(capped, covered + pageRows)
     pngs.push(
-      await paintRange(look, termId, covered, chunkEnd, rect.width / look.cols, rect.height / look.rows)
+      await paintRange(termId, covered, chunkEnd, rect.width / look.cols, rect.height / look.rows)
     )
     covered = chunkEnd
   }
@@ -157,7 +157,6 @@ async function replayCanvases(
 }
 
 async function paintRange(
-  _look: TermLook,
   termId: string,
   start: number,
   end: number,
@@ -352,5 +351,3 @@ function loadImage(pngBase64: string): Promise<HTMLImageElement> {
     image.src = `data:image/png;base64,${pngBase64}`
   })
 }
-
-export type { CaptureRect }

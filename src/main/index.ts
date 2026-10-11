@@ -41,7 +41,7 @@ let mainWindow: BrowserWindow | null = null
 let storage: StorageService | null = null
 let terminal: TerminalService | null = null
 let sftp: SftpService | null = null
-let exec2: ExecService | null = null
+let execService: ExecService | null = null
 let mcp: McpService | null = null
 
 // Windows 上 Chromium 的 Fluent 滚动条会无视 ::-webkit-scrollbar 自定义样式，
@@ -163,10 +163,10 @@ function createWindow(storage: StorageService): void {
   const sshPool = new SshPool()
   terminal = new TerminalService(storage, sender, sshPool)
   sftp = new SftpService(storage, sender, sshPool)
-  exec2 = new ExecService(storage, sshPool)
-  mcp = new McpService(storage, terminal, sftp, exec2, sender)
+  execService = new ExecService(storage, sshPool)
+  mcp = new McpService(storage, terminal, sftp, execService, sender)
   registerIpc(storage, terminal, sftp, mcp, new LocalFsService())
-  ipcMain.handle(IPC.sessionDetectOs, (_e, sessionId: string) => exec2!.detectOs(sessionId))
+  ipcMain.handle(IPC.sessionDetectOs, (_e, sessionId: string) => execService!.detectOs(sessionId))
   ipcMain.handle(IPC.sessionSetOs, (_e, sessionId: string, os: string) => storage.setOs(sessionId, os))
   ipcMain.handle(IPC.sessionRevealSecret, (_e, sessionId: string) => storage.getSecret(sessionId))
   ipcMain.handle(IPC.shellsList, () => detectLocalShells())

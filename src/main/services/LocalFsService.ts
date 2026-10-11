@@ -2,6 +2,7 @@ import { copyFile, cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } 
 import { homedir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
 import { dialog } from 'electron'
+import { assertEditSize, assertTextBuffer, compareRemoteFiles } from '../../shared/file-listing'
 import type { RemoteFile } from '../../shared/types'
 
 /** 本地文件浏览。IPC 边界统一用正斜杠路径（Windows 形如 C:/Users/...），进主进程先转 native。 */
@@ -34,11 +35,7 @@ export class LocalFsService {
       }
       entries.push({ name: item.name, path: this.toPosix(full), kind, size, mtime })
     }
-    entries.sort((a, b) => {
-      if (a.kind === 'dir' && b.kind !== 'dir') return -1
-      if (a.kind !== 'dir' && b.kind === 'dir') return 1
-      return a.name.localeCompare(b.name)
-    })
+    entries.sort(compareRemoteFiles)
     return { path: this.toPosix(target), entries }
   }
 
@@ -58,9 +55,9 @@ export class LocalFsService {
   async readText(path: string): Promise<string> {
     const target = this.toNative(path)
     const stats = await lstat(target)
-    if (stats.size > MAX_EDIT_BYTES) throw new Error('文件超过 1.5MB，不在编辑器里打开')
+    assertEditSize(stats.size)
     const buf = await readFile(target)
-    if (buf.includes(0)) throw new Error('这是二进制文件，不能用文本编辑器打开')
+    assertTextBuffer(buf)
     return buf.toString('utf8')
   }
 
@@ -140,5 +137,3 @@ export class LocalFsService {
     return true
   }
 }
-
-const MAX_EDIT_BYTES = 1_500_000

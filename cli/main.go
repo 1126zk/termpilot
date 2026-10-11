@@ -387,7 +387,6 @@ func post(cfg *endpoint, body map[string]any) (result, error) {
 	if err != nil {
 		return result{}, err
 	}
-	req.Host = net.JoinHostPort(cfg.Host, cfg.Port)
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+cfg.Token)
 	client := &http.Client{Timeout: 130 * time.Second, Transport: &http.Transport{Proxy: nil}}

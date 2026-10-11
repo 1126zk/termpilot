@@ -73,7 +73,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: 'term_exec',
     description:
-      '执行命令的默认工具（原 term_exec2）。在独立 exec 通道上跑，不占终端画面，可以并发，也不需要先开终端。返回 JSON：stdout 和 stderr 分流返回，都是原始字节流（不折行、无回显、无 ANSI）；exitCode 来自协议事件；另有 duration（秒）、timedOut、truncated。命令原样交给远端 bash（没有则 sh）执行，多行、heredoc、引号都支持，不要自己转义。session 填同一个名字时，cd 和 export 跨调用承接（存在远端 ~/.cache/termpilot/exec/ 下）；不填则每次全新环境。prelude 在每次执行前注入固定的 source/export。交互式操作、TUI、要看终端画面或截图时用 term_pty。',
+      '执行命令的默认工具。在独立 exec 通道上跑，不占终端画面，可以并发，也不需要先开终端。返回 JSON：stdout 和 stderr 分流返回，都是原始字节流（不折行、无回显、无 ANSI）；exitCode 来自协议事件；另有 duration（秒）、timedOut、truncated。命令原样交给远端 bash（没有则 sh）执行，多行、heredoc、引号都支持，不要自己转义。session 填同一个名字时，cd 和 export 跨调用承接（存在远端 ~/.cache/termpilot/exec/ 下）；不填则每次全新环境。prelude 在每次执行前注入固定的 source/export。交互式操作、TUI、要看终端画面或截图时用 term_pty。',
     input: {
       connection: connId,
       command: z.string().describe('要执行的命令，原样嵌入远端脚本，不需要转义'),
@@ -98,7 +98,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: 'term_pty',
     description:
-      '把命令打进这扇已经打开的终端（原 term_exec）。等它跑完（提示符回到画面）后，只返回这次新出现的内容；POSIX shell 还会带回退出码。输出是终端渲染结果：有回显、按窗口宽度折行、可能带颜色，不要拿去给程序解析——解析用 term_exec。到 timeout 还没跑完，就先把已经回来的内容交出去，命令还在远端跑。菜单、安装向导和 TUI 还在跑时不要用它，改用 term_write。停掉前台命令用 term_write，keys 填 ["ctrl-c"]。',
+      '把命令打进这扇已经打开的终端。等它跑完（提示符回到画面）后，只返回这次新出现的内容；POSIX shell 还会带回退出码。输出是终端渲染结果：有回显、按窗口宽度折行、可能带颜色，不要拿去给程序解析——解析用 term_exec。到 timeout 还没跑完，就先把已经回来的内容交出去，命令还在远端跑。菜单、安装向导和 TUI 还在跑时不要用它，改用 term_write。停掉前台命令用 term_write，keys 填 ["ctrl-c"]。',
     input: {
       termId,
       command: z.string().describe('要执行的命令。末尾没有换行时会自动补上'),
