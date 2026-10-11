@@ -658,9 +658,10 @@ function ptyChannel(proc: IPty): TerminalChannel {
   }
 }
 
-/** 画面最后一个非空行，去掉 ANSI。提示符就长这样。 */
+/** 画面最后一个非空行，去掉 ANSI（CSI 和 OSC）。提示符就长这样。 */
 function lastScreenLine(raw: string): string {
   const lines = raw
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\r/g, '\n')
     .split('\n')
@@ -679,19 +680,16 @@ function isPromptAgain(last: string, before: string): boolean {
 
 /**
  * 从提示符里抠当前目录。认识 PowerShell 的 `PS C:\path>`，以及 POSIX 默认形态的
- * `user@host:~/x$`、`[user@host /var/log]#`、`user@host ~>`。SFTP 不认 ~，换成相对登录目录的写法。
- * 自定义提示符（starship、两行提示符等）认不出来，返回 null。
+ * `user@host:~/x$`、`[user@host /var/log]#`、`user@host ~>`。
+ * `~` 原样返回，由 SFTP 层展开成登录目录。自定义提示符（starship、两行提示符等）认不出来，返回 null。
  */
 function parsePromptCwd(prompt: string): string | null {
   if (!prompt || prompt.length > 300) return null
   const ps = /PS\s+([A-Za-z]:[\\/][^>]*?)(?:>|$)/.exec(prompt)
   if (ps) return ps[1].trim()
-  const posix = /\[?\S+@\S+?[:\s](~[^\]$#%❯»>\s]*|\/[^\]$#%❯»>]*)\]?[$#%❯»>]\s*$/.exec(prompt)
+  const posix = /\[?\S+@\S+?[:\s](~[^\]$#%❯»>\s\u0000-\u001f]*|\/[^\]$#%❯»>\u0000-\u001f]*)\]?[$#%❯»>]\s*$/.exec(prompt)
   if (!posix) return null
-  const path = posix[1].trim()
-  if (path === '~') return '.'
-  if (path.startsWith('~/')) return `.${path.slice(1)}`
-  return path
+  return posix[1].trim()
 }
 
 function delay(ms: number): Promise<void> {

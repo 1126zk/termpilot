@@ -905,6 +905,18 @@ function closeFile(sftp: SFTPWrapper, handle: Buffer): Promise<void> {
 }
 
 async function using<T>(sftp: SFTPWrapper, path: string, run: (path: string) => Promise<T>): Promise<T> {
+  // shell 提示符里抠出来的路径常带 ~，SFTP 协议不认，展开成登录目录的绝对路径
+  if (path === '~' || path.startsWith('~/')) {
+    const home = await loginDir(sftp).catch(() => '')
+    const expanded = home.startsWith('/') ? home.replace(/\/+$/, '') + path.slice(1) : path
+    try {
+      return await run(expanded)
+    } catch (error) {
+      const alt = await loginRelative(sftp, expanded)
+      if (!alt || !noSuchFile(error)) throw error
+      return await run(alt)
+    }
+  }
   try {
     return await run(path)
   } catch (error) {
