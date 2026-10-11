@@ -15,7 +15,7 @@ export function openAfterMenu(open: () => void): void {
   window.setTimeout(open, 0)
 }
 
-/** 备注和重命名都走弹窗，不在树或标签上原地改。 */
+/** 文件树的备注走弹窗；终端标签的重命名在标签上原地改，不用这个。 */
 export function RemarkDialog(props: {
   open: boolean
   title: string

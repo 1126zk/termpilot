@@ -18,7 +18,7 @@ import {
 import { cn } from '@/lib/utils'
 import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
-import { openAfterMenu, RemarkDialog } from './RemarkDialog'
+import { openAfterMenu } from './RemarkDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { CaptureDialog } from './CaptureDialog'
@@ -128,6 +128,8 @@ export function TabBar() {
   const [shot, setShot] = useState<CaptureDone | null>(null)
   const [shotError, setShotError] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  // 右键选重命名后，菜单关闭时阻止 Radix 把焦点还给标签按钮，否则原地输入框会被顶得失焦
+  const renameAfterMenu = useRef(false)
   const stripRef = useRef<HTMLDivElement>(null)
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
@@ -415,7 +417,8 @@ export function TabBar() {
                   className={cn(
                     'group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
                     active && 'bg-primary/15 text-primary hover:bg-primary/15',
-                    dragTabId === t.id && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
+                    dragTabId === t.id && 'relative z-10 shadow-lg ring-1 ring-foreground/30',
+                    renamingId === t.id && 'max-w-none'
                   )}
                   style={
                     dragTabId === t.id
@@ -460,12 +463,27 @@ export function TabBar() {
                       <X strokeWidth={2} />
                     </span>
                   </span>
-                  <span className={cn('min-w-0 truncate', active && 'text-primary')}>
-                    {windowLabel(t.title, t.kind === 'local' ? shellLabel(t.shell) : session?.name)}
-                  </span>
+                  {renamingId === t.id ? (
+                    <InlineRename
+                      tabId={t.id}
+                      initial={windowLabel(t.title, t.kind === 'local' ? shellLabel(t.shell) : session?.name)}
+                      done={() => setRenamingId(null)}
+                    />
+                  ) : (
+                    <span className={cn('min-w-0 truncate', active && 'text-primary')}>
+                      {windowLabel(t.title, t.kind === 'local' ? shellLabel(t.shell) : session?.name)}
+                    </span>
+                  )}
                 </button>
               </ContextMenuTrigger>
-              <ContextMenuContent>
+              <ContextMenuContent
+                onCloseAutoFocus={(e) => {
+                  if (renameAfterMenu.current) {
+                    renameAfterMenu.current = false
+                    e.preventDefault()
+                  }
+                }}
+              >
                 <ContextMenuItem
                   onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}
                 >
@@ -478,7 +496,12 @@ export function TabBar() {
                   <Info />
                   复制终端信息
                 </ContextMenuItem>
-                <ContextMenuItem onClick={() => openAfterMenu(() => setRenamingId(t.id))}>
+                <ContextMenuItem
+                  onClick={() => {
+                    renameAfterMenu.current = true
+                    openAfterMenu(() => setRenamingId(t.id))
+                  }}
+                >
                   <Pencil />
                   重命名
                 </ContextMenuItem>
@@ -584,18 +607,6 @@ export function TabBar() {
       )}
       {window.api.platform === 'win32' && <WindowControls terminalActive={terminalActive} />}
     </div>
-    <RemarkDialog
-      open={renamingId !== null}
-      title="重命名"
-      description={`给「${tabs.find((tab) => tab.id === renamingId)?.title ?? ''}」换个名字。`}
-      initial={tabs.find((tab) => tab.id === renamingId)?.title ?? ''}
-      placeholder="窗口名称"
-      onOpenChange={(open) => !open && setRenamingId(null)}
-      onSave={(value) => {
-        if (renamingId) renameTab(renamingId, value)
-        setRenamingId(null)
-      }}
-    />
     <CaptureDialog
       shot={shot}
       error={shotError}
@@ -605,6 +616,54 @@ export function TabBar() {
       }}
     />
     </>
+  )
+}
+
+/**
+ * 标签原地改名：透明输入框、进入时全选。右键菜单路径已在菜单关闭时阻止 Radix 归还焦点
+ * （见 renameAfterMenu），所以这里挂载时一次聚焦全选即可；退出靠 Enter 保存 / Esc 取消 / 点别处保存。
+ */
+function InlineRename(props: { tabId: string; initial: string; done: () => void }) {
+  const renameTab = useAppStore((s) => s.renameTab)
+  const ref = useRef<HTMLInputElement>(null)
+  const latest = useRef(props)
+  latest.current = props
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const mountedAt = Date.now()
+    el.focus()
+    el.select()
+    const onPointerDown = (e: PointerEvent) => {
+      if (el.contains(e.target as Node)) return
+      // 挂载后 250ms 内的 pointerdown 是打开菜单那次手势的残留，不算"点别处"
+      if (Date.now() - mountedAt < 250) return
+      renameTab(latest.current.tabId, el.value)
+      latest.current.done()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, [renameTab])
+
+  return (
+    <input
+      ref={ref}
+      className="min-w-0 flex-1 bg-transparent px-0 outline-none selection:bg-primary/25 selection:text-primary"
+      defaultValue={props.initial}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          renameTab(props.tabId, e.currentTarget.value)
+          props.done()
+        }
+        if (e.key === 'Escape') props.done()
+      }}
+    />
   )
 }
 
