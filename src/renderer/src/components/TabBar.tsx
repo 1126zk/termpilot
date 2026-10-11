@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Minus, PanelRightClose, PanelRightOpen, Plus, Server, Settings, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Info, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Settings, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,12 +122,10 @@ export function TabBar() {
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const toggleHostsOpen = useAppStore((s) => s.toggleHostsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
-  const setTabRemark = useAppStore((s) => s.setTabRemark)
   const setNotice = useAppStore((s) => s.setNotice)
   const [shot, setShot] = useState<CaptureDone | null>(null)
   const [shotError, setShotError] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [remarkingId, setRemarkingId] = useState<string | null>(null)
   const stripRef = useRef<HTMLDivElement>(null)
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
@@ -456,20 +454,30 @@ export function TabBar() {
                 <ContextMenuItem
                   onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}
                 >
+                  <Bot />
                   复制 Agent 提示词
                 </ContextMenuItem>
                 <ContextMenuItem
                   onClick={() => void copyAgentPrompt(termAgentPrompt(t, session), setNotice, '终端信息')}
                 >
+                  <Info />
                   复制终端信息
                 </ContextMenuItem>
-                <ContextMenuItem onClick={() => openAfterMenu(() => setRenamingId(t.id))}>重命名</ContextMenuItem>
-                <ContextMenuItem onClick={() => openAfterMenu(() => setRemarkingId(t.id))}>备注</ContextMenuItem>
+                <ContextMenuItem onClick={() => openAfterMenu(() => setRenamingId(t.id))}>
+                  <Pencil />
+                  重命名
+                </ContextMenuItem>
                 {(termState[t.id]?.status === 'disconnected' || termState[t.id]?.status === 'error') ? (
-                  <ContextMenuItem onClick={() => reconnectTab(t.id)}>重新连接</ContextMenuItem>
+                  <ContextMenuItem onClick={() => reconnectTab(t.id)}>
+                    <RefreshCw />
+                    重新连接
+                  </ContextMenuItem>
                 ) : null}
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => closeTab(t.id)}>关闭</ContextMenuItem>
+                <ContextMenuItem onClick={() => closeTab(t.id)}>
+                  <X />
+                  关闭
+                </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>
             </Fragment>
@@ -569,18 +577,6 @@ export function TabBar() {
       onSave={(value) => {
         if (renamingId) renameTab(renamingId, value)
         setRenamingId(null)
-      }}
-    />
-    <RemarkDialog
-      open={remarkingId !== null}
-      title="备注"
-      description={`给「${tabs.find((tab) => tab.id === remarkingId)?.title ?? ''}」写一句，方便以后认出它。留空就是清掉。`}
-      initial={tabs.find((tab) => tab.id === remarkingId)?.remark ?? ''}
-      placeholder="这扇窗口在做什么"
-      onOpenChange={(open) => !open && setRemarkingId(null)}
-      onSave={(value) => {
-        if (remarkingId) setTabRemark(remarkingId, value)
-        setRemarkingId(null)
       }}
     />
     <CaptureDialog

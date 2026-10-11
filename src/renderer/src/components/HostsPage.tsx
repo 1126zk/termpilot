@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { useRef } from 'react'
+import { Bot, Plus, Search, Trash2 } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,7 +10,6 @@ import {
 import { useAppStore } from '../stores/useAppStore'
 import { agentOnboardPrompt, copyAgentPrompt } from '../agentPrompt'
 import { hostKeyOf } from '../../../shared/host-key'
-import { openAfterMenu, RemarkDialog } from './RemarkDialog'
 import { OsIcon, osIconProps } from './OsIcon'
 import type { SessionConfig } from '../../../shared/types'
 
@@ -80,9 +79,7 @@ function HostCard(props: { session: SessionConfig }) {
   const editing = useAppStore((s) => s.editing)
   const setEditing = useAppStore((s) => s.setEditing)
   const deleteSession = useAppStore((s) => s.deleteSession)
-  const setSessionRemark = useAppStore((s) => s.setSessionRemark)
   const setNotice = useAppStore((s) => s.setNotice)
-  const [editingRemark, setEditingRemark] = useState(false)
   const clickTimer = useRef<number>(0)
 
   // 单击 = 主机信息面板滑出/滑回；双击 = 新开一扇终端（每次都新开）
@@ -121,32 +118,17 @@ function HostCard(props: { session: SessionConfig }) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={open}>打开</ContextMenuItem>
-          <ContextMenuItem onClick={() => openSessionTab(session, true)}>新开一扇终端</ContextMenuItem>
-          <ContextMenuItem onClick={() => openAfterMenu(() => setEditingRemark(true))}>备注</ContextMenuItem>
-          <ContextMenuItem onClick={() => setEditing({ action: 'edit', session })}>编辑</ContextMenuItem>
-          <ContextMenuSeparator />
           <ContextMenuItem onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}>
+            <Bot />
             复制 Agent 提示词
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onClick={() => deleteSession(session.id)}>
+          <ContextMenuItem onClick={() => deleteSession(session.id)}>
+            <Trash2 />
             删除
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      <RemarkDialog
-        open={editingRemark}
-        title="备注"
-        description={`给「${session.name}」写一句，方便以后认出它。留空就是清掉。`}
-        initial={session.remark?.trim() ?? ''}
-        placeholder="这条连接是干什么的"
-        onOpenChange={setEditingRemark}
-        onSave={(value) => {
-          setEditingRemark(false)
-          void setSessionRemark(session, value)
-        }}
-      />
     </div>
   )
 }
