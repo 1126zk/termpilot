@@ -361,7 +361,7 @@ export function TabBar() {
     >
       <button
         type="button"
-        className={cn(topBtn, hostsOpen && 'bg-accent text-foreground')}
+        className={cn(topBtn, hostsOpen && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary')}
         style={noDrag}
         title="主机"
         onClick={toggleHostsOpen}
@@ -389,7 +389,7 @@ export function TabBar() {
         className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map((t, i) => {
-          const active = t.id === activeTabId
+          const active = t.id === activeTabId && !hostsOpen
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
           return (
             <Fragment key={t.id}>
