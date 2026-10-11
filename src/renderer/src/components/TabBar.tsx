@@ -18,7 +18,7 @@ import {
 import { cn } from '@/lib/utils'
 import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
-import { openAfterMenu } from './RemarkDialog'
+import { openAfterMenu } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { CaptureDialog } from './CaptureDialog'

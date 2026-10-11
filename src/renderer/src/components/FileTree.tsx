@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,7 +10,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
-import { openAfterMenu, RemarkDialog } from './RemarkDialog'
+import { openAfterMenu, PanelDialog } from './PanelDialog'
 import type { RemoteFile, SftpTransferEvent } from '../../../shared/types'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
@@ -50,6 +50,8 @@ export function FileTree() {
   const [folderError, setFolderError] = useState('')
   const [draft, setDraft] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<RemoteFile | null>(null)
+  // 右键选了重命名/新建文件夹后，菜单关闭时阻止 Radix 把焦点还给列表项，否则弹层的输入框会被顶得失焦
+  const panelDialogAfterMenu = useRef(false)
   const [renameError, setRenameError] = useState('')
   const [dropDir, setDropDir] = useState<string | null>(null)
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
@@ -404,7 +406,14 @@ export function FileTree() {
                   <span className="min-w-0 flex-1 truncate pl-1">{item.name}</span>
                 </div>
               </ContextMenuTrigger>
-              <ContextMenuContent>
+              <ContextMenuContent
+                onCloseAutoFocus={(e) => {
+                  if (panelDialogAfterMenu.current) {
+                    panelDialogAfterMenu.current = false
+                    e.preventDefault()
+                  }
+                }}
+              >
                 {item.kind === 'dir' && (
                   <ContextMenuItem onClick={() => void loadRoot(item.path)}>
                     <FolderInput /> 打开此目录
@@ -412,13 +421,14 @@ export function FileTree() {
                 )}
                 {item.kind === 'dir' && (
                   <ContextMenuItem
-                    onClick={() =>
+                    onClick={() => {
+                      panelDialogAfterMenu.current = true
                       openAfterMenu(() => {
                         setFolderError('')
                         setMkdirTarget(item.path)
                         setMaking(true)
                       })
-                    }
+                    }}
                   >
                     <FolderPlus /> 新建文件夹
                   </ContextMenuItem>
@@ -441,12 +451,13 @@ export function FileTree() {
                   </ContextMenuItem>
                 )}
                 <ContextMenuItem
-                  onClick={() =>
+                  onClick={() => {
+                    panelDialogAfterMenu.current = true
                     openAfterMenu(() => {
                       setRenameError('')
                       setRenaming(item)
                     })
-                  }
+                  }}
                 >
                   <Pencil /> 重命名
                 </ContextMenuItem>
@@ -493,7 +504,7 @@ export function FileTree() {
   const rootName = baseName(root)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 pr-1 pb-1">
         <input
           className="h-8 min-w-0 flex-1 rounded bg-foreground/5 px-2 text-sm outline-none focus:bg-foreground/10"
@@ -585,20 +596,28 @@ export function FileTree() {
                     <span className="min-w-0 flex-1 truncate pl-1">{rootName}</span>
                   </div>
                 </ContextMenuTrigger>
-                <ContextMenuContent>
+                <ContextMenuContent
+                  onCloseAutoFocus={(e) => {
+                    if (panelDialogAfterMenu.current) {
+                      panelDialogAfterMenu.current = false
+                      e.preventDefault()
+                    }
+                  }}
+                >
                   {parentDir(root) && (
                     <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
                       打开上级目录
                     </ContextMenuItem>
                   )}
                   <ContextMenuItem
-                    onClick={() =>
+                    onClick={() => {
+                      panelDialogAfterMenu.current = true
                       openAfterMenu(() => {
                         setFolderError('')
                         setMkdirTarget(root)
                         setMaking(true)
                       })
-                    }
+                    }}
                   >
                     <FolderPlus /> 新建文件夹
                   </ContextMenuItem>
@@ -675,33 +694,27 @@ export function FileTree() {
           })}
         </div>
       )}
-      <RemarkDialog
+      <PanelDialog
         open={renaming !== null}
         title="重命名"
-        description={renaming ? `给「${renaming.name}」换个名字。` : ''}
         initial={renaming?.name ?? ''}
         placeholder="新的名称"
         error={renameError}
-        onOpenChange={(open) => {
-          if (!open) {
-            setRenaming(null)
-            setRenameError('')
-          }
+        onClose={() => {
+          setRenaming(null)
+          setRenameError('')
         }}
         onSave={(value) => void commitRename(value)}
       />
-      <RemarkDialog
+      <PanelDialog
         open={making}
         title="新建文件夹"
-        description="在当前目录新建一个文件夹。"
         initial=""
         placeholder="文件夹名"
         error={folderError}
-        onOpenChange={(open) => {
-          if (!open) {
-            setMaking(false)
-            setFolderError('')
-          }
+        onClose={() => {
+          setMaking(false)
+          setFolderError('')
         }}
         onSave={(value) => void mkdir(value)}
       />

@@ -1,0 +1,96 @@
+import { useState } from 'react'
+import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+
+/** 右键菜单关掉之后再打开，避免弹层立刻被收掉。 */
+export function openAfterMenu(open: () => void): void {
+  window.setTimeout(open, 0)
+}
+
+/**
+ * 面板局部弹层：只盖住右侧面板，不锁全屏、不抢焦点，终端主界面照常可用。
+ * 文件树的重命名 / 新建文件夹用它；终端标签的重命名在标签上原地改，不走弹层。
+ */
+export function PanelDialog(props: {
+  open: boolean
+  title: string
+  initial: string
+  placeholder: string
+  error?: string
+  onClose: () => void
+  onSave: (value: string) => void
+}) {
+  if (!props.open) return null
+  return (
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 p-3"
+      onClick={props.onClose}
+    >
+      <PanelForm
+        key={props.initial}
+        title={props.title}
+        initial={props.initial}
+        placeholder={props.placeholder}
+        error={props.error}
+        onClose={props.onClose}
+        onSave={props.onSave}
+      />
+    </div>
+  )
+}
+
+function PanelForm(props: {
+  title: string
+  initial: string
+  placeholder: string
+  error?: string
+  onClose: () => void
+  onSave: (value: string) => void
+}) {
+  const [value, setValue] = useState(props.initial)
+
+  const save = () => props.onSave(value)
+
+  return (
+    <div
+      className="h-fit w-full rounded-xl border bg-card shadow-lg shadow-black/30"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between rounded-t-xl border-b bg-muted-foreground/10 px-3 py-2">
+        <p className="text-[13px] font-medium text-muted-foreground">{props.title}</p>
+        <button
+          type="button"
+          title="关闭"
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+          onClick={props.onClose}
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      <div className="grid gap-3 p-3">
+        {/* 不用共享 Input：弹窗的输入框只要描边不要填充底，自带样式避免覆盖顺序问题 */}
+        <input
+          autoFocus
+          className="h-10 w-full rounded-lg border border-muted-foreground/25 bg-transparent px-2.5 text-sm text-muted-foreground transition-colors outline-none selection:bg-primary/25 selection:text-primary placeholder:text-muted-foreground/60 focus-visible:border-ring"
+          spellCheck={false}
+          autoComplete="off"
+          value={value}
+          placeholder={props.placeholder}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              save()
+            }
+            if (e.key === 'Escape') props.onClose()
+          }}
+        />
+        {props.error ? <p className="text-xs text-destructive">{props.error}</p> : null}
+        <div className="flex justify-end">
+          <Button onClick={save}>保存</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
