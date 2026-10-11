@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Search } from 'lucide-react'
+import { Play, Search, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { sendToActiveTerminal } from './SnippetsPanel'
@@ -71,10 +71,32 @@ export function HistoryPanel() {
                 key={item.id}
                 role="button"
                 title="点击填入当前终端，自己按回车执行"
-                className="cursor-pointer rounded-md px-2 py-1 font-mono text-xs break-all text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+                className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 font-mono text-xs break-all text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
                 onClick={() => sendToActiveTerminal(item.command, false)}
               >
-                {item.command}
+                <span className="min-w-0 flex-1 truncate">{item.command}</span>
+                <button
+                  type="button"
+                  title="填入终端（自己回车执行）"
+                  className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    sendToActiveTerminal(item.command, false)
+                  }}
+                >
+                  <SquareTerminal className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  title="直接执行"
+                  className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    sendToActiveTerminal(item.command, true)
+                  }}
+                >
+                  <Play className="size-4" />
+                </button>
               </div>
             ))}
           </div>
