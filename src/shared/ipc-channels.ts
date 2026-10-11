@@ -17,6 +17,8 @@ export const IPC = {
   termClose: 'term:close',
   /** renderer → main，窗口短标题变了 */
   termLabel: 'term:label',
+  /** renderer → main，从屏幕提示符解析终端当前目录 */
+  termCwd: 'term:cwd',
   /** main → renderer，助手改了终端备注 */
   termMeta: 'term:meta',
   /** main → renderer 事件 */

@@ -32,14 +32,14 @@ export function RightPanel(props: { open: boolean }) {
 
   if (formState) {
     return (
-      <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
+      <div className="flex min-h-0 w-full flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
         <SessionFormPanel frozen={formState} />
       </div>
     )
   }
 
   return (
-    <div className="flex min-h-0 w-80 flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
+    <div className="flex min-h-0 w-full flex-1 shrink-0 flex-col overflow-hidden rounded-xl bg-card shadow-lg shadow-black/30 text-sidebar-foreground">
       <div className="flex shrink-0 items-center px-2 py-1.5">
         {panes.map((item) => (
           <button

@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -57,6 +57,7 @@ export function FileTree() {
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
+  const setNotice = useAppStore((s) => s.setNotice)
 
   const toggleHidden = () =>
     setShowHidden((v) => {
@@ -536,6 +537,31 @@ export function FileTree() {
           onClick={() => void loadRoot(parentDir(root)!)}
         >
           <ArrowUp />
+        </Button>
+        {/* 文件树跳到当前终端所在的目录：从屏幕提示符解析，认不出就提示 */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title="同步到终端当前目录"
+          disabled={busy || !activeTabId}
+          onClick={() => {
+            void (async () => {
+              if (!activeTabId) return
+              try {
+                const dir = await window.api.term.cwd(activeTabId)
+                if (!dir) {
+                  setNotice('识别不到终端当前目录')
+                  return
+                }
+                setDraft(null)
+                await loadRoot(dir)
+              } catch {
+                setNotice('识别不到终端当前目录，重启应用后再试')
+              }
+            })()
+          }}
+        >
+          <FolderSync />
         </Button>
         <Button variant="ghost" size="icon-sm" title="刷新" disabled={busy} onClick={() => void refresh()}>
           <RefreshCw />

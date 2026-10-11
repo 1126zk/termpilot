@@ -123,10 +123,10 @@ export default function App() {
           <div
             className={cn(
               'flex min-h-0 shrink-0 flex-col overflow-hidden transition-[width] duration-200 ease-out',
-              panelOpen ? 'w-[328px]' : 'pointer-events-none w-0'
+              panelOpen ? 'w-[400px]' : 'pointer-events-none w-0'
             )}
           >
-            <div className="flex min-h-0 w-[328px] flex-1 flex-col py-2 pr-2">
+            <div className="flex min-h-0 w-[400px] flex-1 flex-col py-2 pr-2">
               <RightPanel open={panelOpen} />
             </div>
           </div>

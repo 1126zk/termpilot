@@ -267,6 +267,12 @@ export class TerminalService {
     return (this.output.get(termId) ?? '').slice(-maxChars)
   }
 
+  /** 从屏幕最后的提示符里解析终端当前目录，解析不到返回 null。不往终端里打字。 */
+  cwdOf(termId: string): string | null {
+    if (!this.terms.has(termId)) return null
+    return parsePromptCwd(lastScreenLine(this.readTail(termId, 4000)))
+  }
+
   /**
    * 等命令跑完再返回。完成信号是提示符：发命令前记下当时提示符的长相，
    * 等输出安静下来，最后一行又变回提示符就是跑完了。POSIX shell 还会顺手
@@ -669,6 +675,23 @@ function isPromptAgain(last: string, before: string): boolean {
   const tail = before.match(/[$#>%❯»]\s*$/)?.[0]?.trim()
   if (tail && last.endsWith(tail)) return true
   return /[$#>%❯»]\s*$/.test(last)
+}
+
+/**
+ * 从提示符里抠当前目录。认识 PowerShell 的 `PS C:\path>`，以及 POSIX 默认形态的
+ * `user@host:~/x$`、`[user@host /var/log]#`、`user@host ~>`。SFTP 不认 ~，换成相对登录目录的写法。
+ * 自定义提示符（starship、两行提示符等）认不出来，返回 null。
+ */
+function parsePromptCwd(prompt: string): string | null {
+  if (!prompt || prompt.length > 300) return null
+  const ps = /PS\s+([A-Za-z]:[\\/][^>]*?)(?:>|$)/.exec(prompt)
+  if (ps) return ps[1].trim()
+  const posix = /\[?\S+@\S+?[:\s](~[^\]$#%❯»>\s]*|\/[^\]$#%❯»>]*)\]?[$#%❯»>]\s*$/.exec(prompt)
+  if (!posix) return null
+  const path = posix[1].trim()
+  if (path === '~') return '.'
+  if (path.startsWith('~/')) return `.${path.slice(1)}`
+  return path
 }
 
 function delay(ms: number): Promise<void> {

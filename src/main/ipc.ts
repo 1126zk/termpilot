@@ -75,6 +75,10 @@ export function registerIpc(
     })
   })
 
+  ipcMain.handle(IPC.termCwd, (_e, termId: string) =>
+    typeof termId === 'string' ? terminal.cwdOf(termId) : null
+  )
+
   ipcMain.on(IPC.termClose, (_e, termId: string) => {
     terminal.close(termId)
   })

@@ -68,6 +68,8 @@ const api = {
     close: (termId: string) => ipcRenderer.send(IPC.termClose, termId),
     label: (termId: string, patch: { title?: string; remark?: string }) =>
       ipcRenderer.send(IPC.termLabel, termId, patch),
+    /** 从屏幕提示符解析终端当前目录，认不出提示符返回 null */
+    cwd: (termId: string) => ipcRenderer.invoke(IPC.termCwd, termId) as Promise<string | null>,
     onMeta: (cb: (e: TermMetaEvent) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, event: TermMetaEvent) => cb(event)
       ipcRenderer.on(IPC.termMeta, listener)
