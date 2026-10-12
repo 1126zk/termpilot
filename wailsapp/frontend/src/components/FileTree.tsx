@@ -1,0 +1,723 @@
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { useAppStore } from '../stores/useAppStore'
+import { FileIcon } from './FileIcon'
+import { PanelDialog, useMenuAction } from './PanelDialog'
+import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
+
+type DirListing = { entries: RemoteFile[]; error?: string }
+
+type FsBackend = {
+  list: (dir: string) => Promise<{ path: string; entries: RemoteFile[] }>
+  mkdir: (dir: string, name: string) => Promise<void>
+  remove: (path: string, kind: RemoteFile['kind']) => Promise<void>
+  rename: (from: string, to: string) => Promise<void>
+  upload: (dir: string) => Promise<number>
+  uploadDir: (dir: string) => Promise<number>
+  download: (file: RemoteFile) => Promise<boolean>
+  downloadDir: (file: RemoteFile) => Promise<boolean>
+}
+
+/**
+ * 一个终端标签一棵文件树：组件收 tab prop，RightPanel 按标签各挂一个实例，
+ * 切标签只是显隐，状态（当前目录、展开、选中）互不干扰。
+ * SSH 窗口显示服务器文件，本地终端显示本机文件。
+ */
+export function FileTree(props: { tab: Tab | null }) {
+  const tab = props.tab
+  const local = tab?.kind === 'local'
+  const sessionId = local ? null : tab?.sessionId ?? null
+  const backendKey = local ? 'local' : sessionId
+
+  const [root, setRoot] = useState('.')
+  const [entries, setEntries] = useState<RemoteFile[]>([])
+  const [cache, setCache] = useState<Record<string, DirListing>>({})
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [loading, setLoading] = useState<Record<string, boolean>>({})
+  const [selected, setSelected] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [making, setMaking] = useState(false)
+  const [mkdirTarget, setMkdirTarget] = useState<string | null>(null)
+  const [folderError, setFolderError] = useState('')
+  const [draft, setDraft] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<RemoteFile | null>(null)
+  // 右键选了重命名/新建文件夹后，菜单关闭时阻止 Radix 把焦点还给列表项，否则弹层的输入框会被顶得失焦
+  const panelMenu = useMenuAction()
+  const [renameError, setRenameError] = useState('')
+  const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
+  const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
+  const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
+  const setNotice = useAppStore((s) => s.setNotice)
+
+  const toggleHidden = () =>
+    setShowHidden((v) => {
+      localStorage.setItem(HIDDEN_KEY, v ? '0' : '1')
+      return !v
+    })
+
+  const visible = (items: RemoteFile[]) =>
+    showHidden ? items : items.filter((i) => !i.name.startsWith('.'))
+
+  // 统一文件后端：本地终端走 localfs，SSH 窗口走绑了 sessionId 的 sftp
+  const fs = useMemo<FsBackend | null>(() => {
+    if (local) return window.api.localfs
+    if (!sessionId) return null
+    const id = sessionId
+    const sftp = window.api.sftp
+    return {
+      list: (dir) => sftp.list(id, dir),
+      mkdir: (dir, name) => sftp.mkdir(id, dir, name),
+      remove: (path, kind) => sftp.remove(id, path, kind),
+      rename: (from, to) => sftp.rename(id, from, to),
+      upload: (dir) => sftp.upload(id, dir),
+      uploadDir: (dir) => sftp.uploadDir(id, dir),
+      download: (file) => sftp.download(id, file),
+      downloadDir: (file) => sftp.downloadDir(id, file)
+    }
+  }, [local, sessionId])
+
+  // 底部传输区：按事件 id 更新；成功的留十秒，失败的不自动消失，只能点 × 关闭
+  useEffect(() => {
+    return window.api.sftp.onTransfer((event) => {
+      setTransfers((list) => {
+        const index = list.findIndex((t) => t.id === event.id)
+        if (index < 0) return [...list, event]
+        const next = [...list]
+        next[index] = event
+        return next
+      })
+      if (event.done && !event.error) {
+        setTimeout(() => setTransfers((list) => list.filter((t) => t.id !== event.id)), 10000)
+      }
+    })
+  }, [])
+
+  const showRoot = useCallback(
+    async (path: string) => {
+      if (!fs || !backendKey) return
+      const requested = path.trim().replaceAll('\\', '/') || '.'
+      const res = await fs.list(requested)
+      setRoot(res.path)
+      setEntries(sortEntries(res.entries))
+      setCache({})
+      setOpen({ [res.path]: true })
+      setSelected(res.path)
+      setError('')
+    },
+    [fs, backendKey]
+  )
+
+  const loadRoot = useCallback(
+    async (path: string) => {
+      setBusy(true)
+      setError('')
+      try {
+        await showRoot(path)
+      } catch (e) {
+        setError(sftpMessage(e))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [showRoot]
+  )
+
+  useEffect(() => {
+    setRoot('.')
+    setEntries([])
+    setCache({})
+    setOpen({})
+    setSelected(null)
+    setError('')
+    setDraft(null)
+    setMaking(false)
+    setRenaming(null)
+    if (!backendKey) return
+    void loadRoot('.')
+  }, [backendKey, loadRoot])
+
+  const listInto = useCallback(
+    async (path: string) => {
+      if (!fs) return
+      setLoading((s) => ({ ...s, [path]: true }))
+      try {
+        const res = await fs.list(path)
+        const sorted = sortEntries(res.entries)
+        if (path === root) {
+          setRoot(res.path)
+          setEntries(sorted)
+        } else {
+          setCache((s) => ({ ...s, [path]: { entries: sorted } }))
+        }
+      } catch (e) {
+        const message = sftpMessage(e)
+        if (path === root) setError(message)
+        else setCache((s) => ({ ...s, [path]: { entries: [], error: message } }))
+      } finally {
+        setLoading((s) => ({ ...s, [path]: false }))
+      }
+    },
+    [fs, root]
+  )
+
+  const toggle = async (path: string) => {
+    if (open[path]) {
+      setOpen((s) => ({ ...s, [path]: false }))
+      return
+    }
+    setOpen((s) => ({ ...s, [path]: true }))
+    if (path !== root && !cache[path]) await listInto(path)
+  }
+
+  const ensureOpen = async (path: string) => {
+    setOpen((s) => ({ ...s, [path]: true }))
+    await listInto(path)
+  }
+
+  if (!fs) {
+    return <Hint text="打开一个终端窗口，这里显示那台机器的文件。" />
+  }
+
+  const unsupported = !local && error === NO_SFTP
+
+  const commitRename = async (raw: string) => {
+    if (!renaming) return
+    const name = raw.trim()
+    if (!name || name.includes('/') || name.includes('\\')) {
+      setRenameError('名称不能为空，也不能包含斜杠')
+      return
+    }
+    if (name === renaming.name) {
+      setRenaming(null)
+      setRenameError('')
+      return
+    }
+    const slash = renaming.path.lastIndexOf('/')
+    const to = slash < 0 ? name : slash === 0 ? `/${name}` : `${renaming.path.slice(0, slash)}/${name}`
+    const parent = parentDir(renaming.path) ?? root
+    try {
+      await fs.rename(renaming.path, to)
+      setRenaming(null)
+      setRenameError('')
+      await listInto(parent)
+    } catch (e) {
+      setRenameError(sftpMessage(e))
+    }
+  }
+
+  const remove = async (item: RemoteFile) => {
+    const message =
+      item.kind === 'dir' ? `删除目录 ${item.name} 及其中的文件？` : `删除 ${item.name}？`
+    if (!confirm(message)) return
+    try {
+      await fs.remove(item.path, item.kind)
+      await listInto(parentDir(item.path) ?? root)
+    } catch (e) {
+      setError(sftpMessage(e))
+    }
+  }
+
+  const uploadFilesInto = async (dir: string) => {
+    setBusy(true)
+    try {
+      await fs.upload(dir)
+      await ensureOpen(dir)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const uploadDirInto = async (dir: string) => {
+    setBusy(true)
+    try {
+      await fs.uploadDir(dir)
+      await ensureOpen(dir)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const download = async (item: RemoteFile) => {
+    try {
+      await fs.download(item)
+    } catch (e) {
+      setError(sftpMessage(e))
+    }
+  }
+
+  const downloadDir = async (item: RemoteFile) => {
+    try {
+      await fs.downloadDir(item)
+    } catch (e) {
+      setError(sftpMessage(e))
+    }
+  }
+
+  const mkdir = async (raw: string) => {
+    const name = raw.trim()
+    if (!name || name.includes('/') || name.includes('\\')) {
+      setFolderError('名称不能为空，也不能包含斜杠')
+      return
+    }
+    const dest = mkdirTarget ?? root
+    try {
+      await fs.mkdir(dest, name)
+      setMaking(false)
+      setFolderError('')
+      await ensureOpen(dest)
+    } catch (e) {
+      setFolderError(sftpMessage(e))
+    }
+  }
+
+  const refresh = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await fs.list(root)
+      setRoot(res.path)
+      setEntries(sortEntries(res.entries))
+      const paths = Object.keys(open).filter((p) => open[p] && p !== root && p !== res.path)
+      const next: Record<string, DirListing> = {}
+      await Promise.all(
+        paths.map(async (p) => {
+          try {
+            const child = await fs.list(p)
+            next[p] = { entries: sortEntries(child.entries) }
+          } catch (e) {
+            next[p] = { entries: [], error: sftpMessage(e) }
+          }
+        })
+      )
+      setCache(next)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const renderNodes = (items: RemoteFile[], depth: number) =>
+    visible(items).map((item) => {
+      const isDir = item.kind === 'dir'
+      const expanded = isDir && !!open[item.path]
+      const listing = cache[item.path]
+      return (
+        <Fragment key={item.path}>
+          <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div
+                  role="treeitem"
+                  aria-expanded={isDir ? expanded : undefined}
+                  aria-selected={selected === item.path}
+                  title={
+                    item.kind === 'dir'
+                      ? item.path
+                      : `${item.name}  ${formatSize(item.size)}`
+                  }
+                  className={`flex h-7 w-full cursor-pointer items-center pr-2 text-left text-sm select-none hover:bg-foreground/5 ${
+                    selected === item.path ? 'bg-foreground/10' : ''
+                  }`}
+                  style={{ paddingLeft: depth * TREE_INDENT }}
+                  onContextMenu={() => setSelected(item.path)}
+                  onClick={() => {
+                    setSelected(item.path)
+                    if (isDir) {
+                      void toggle(item.path)
+                    } else {
+                      openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, false)
+                    }
+                  }}
+                  onDoubleClick={() => {
+                    if (!isDir) {
+                      openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)
+                    }
+                  }}
+                >
+                  <FileIcon name={item.name} kind={item.kind} open={expanded} />
+                  <span className="min-w-0 flex-1 truncate pl-1">{item.name}</span>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent
+                onCloseAutoFocus={panelMenu.keepFocusOnClose}
+              >
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => void loadRoot(item.path)}>
+                    <FolderInput /> 打开此目录
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem
+                    onClick={() => {
+                      panelMenu.openFromMenu(() => {
+                        setFolderError('')
+                        setMkdirTarget(item.path)
+                        setMaking(true)
+                      })
+                    }}
+                  >
+                    <FolderPlus /> 新建文件夹
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => void uploadFilesInto(item.path)}>
+                    <Upload /> 上传文件
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => void uploadDirInto(item.path)}>
+                    <FolderUp /> 上传文件夹
+                  </ContextMenuItem>
+                )}
+                {item.kind !== 'dir' && (
+                  <ContextMenuItem
+                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)}
+                  >
+                    编辑
+                  </ContextMenuItem>
+                )}
+                <ContextMenuItem
+                  onClick={() => {
+                    panelMenu.openFromMenu(() => {
+                      setRenameError('')
+                      setRenaming(item)
+                    })
+                  }}
+                >
+                  <Pencil /> 重命名
+                </ContextMenuItem>
+                {item.kind !== 'dir' && (
+                  <ContextMenuItem onClick={() => download(item)}>
+                    <Download /> 下载
+                  </ContextMenuItem>
+                )}
+                {item.kind === 'dir' && (
+                  <ContextMenuItem onClick={() => downloadDir(item)}>
+                    <Download /> 下载
+                  </ContextMenuItem>
+                )}
+                <ContextMenuItem variant="destructive" onClick={() => remove(item)}>
+                  <Trash2 /> 删除
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          {expanded && (
+            <div>
+              {loading[item.path] && !listing && (
+                <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
+                  正在加载
+                </p>
+              )}
+              {listing?.error && (
+                <p className="text-[11px] text-destructive" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
+                  {listing.error}
+                </p>
+              )}
+              {listing && visible(listing.entries).length === 0 && !listing.error && (
+                <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
+                  空目录
+                </p>
+              )}
+              {listing && renderNodes(listing.entries, depth + 1)}
+            </div>
+          )}
+        </Fragment>
+      )
+    })
+
+  const rootOpen = !!open[root]
+  const rootName = baseName(root)
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 pr-1 pb-1">
+        <input
+          className="h-8 min-w-0 flex-1 rounded bg-foreground/5 px-2 text-sm outline-none focus:bg-foreground/10"
+          value={draft ?? (root === '.' ? '' : root)}
+          placeholder={local ? 'C:\\Users\\...' : '/root 或 /home'}
+          title={root === '.' ? '' : root}
+          spellCheck={false}
+          onFocus={() => setDraft(root === '.' ? '' : root)}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const path = e.currentTarget.value.trim()
+              setDraft(null)
+              if (path) void loadRoot(path)
+            } else if (e.key === 'Escape') {
+              setDraft(null)
+            }
+          }}
+          onBlur={() => setDraft(null)}
+        />
+        <Button variant="ghost" size="icon-sm" title="回到家目录" disabled={busy} onClick={() => void loadRoot('.')}>
+          <Home />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title="回到上级目录"
+          disabled={busy || !parentDir(root)}
+          onClick={() => void loadRoot(parentDir(root)!)}
+        >
+          <ArrowUp />
+        </Button>
+        {/* 文件树跳到当前终端所在的目录：从屏幕提示符解析，认不出就提示 */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title="同步到终端当前目录"
+          disabled={busy || !tab}
+          onClick={() => {
+            void (async () => {
+              if (!tab) return
+              try {
+                const dir = await window.api.term.cwd(tab.id)
+                if (!dir) {
+                  setNotice('识别不到终端当前目录')
+                  return
+                }
+                setDraft(null)
+                await loadRoot(dir)
+              } catch {
+                setNotice('识别不到终端当前目录，重启应用后再试')
+              }
+            })()
+          }}
+        >
+          <FolderSync />
+        </Button>
+        <Button variant="ghost" size="icon-sm" title="刷新" disabled={busy} onClick={() => void refresh()}>
+          <RefreshCw />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title={showHidden ? '隐藏以 . 开头的文件' : '显示隐藏文件'}
+          onClick={toggleHidden}
+        >
+          {showHidden ? <Eye /> : <EyeOff />}
+        </Button>
+      </div>
+      {unsupported ? (
+        <Hint text="内置 SFTP 没有用起来，机器上原来的文件通道也打不开。改 sshd 需要 root 或免密 sudo。" />
+      ) : (
+        <>
+          {!local && busy && entries.length === 0 && !error && (
+            <Hint text="正在通过当前 SSH 连接准备 SFTP，不会另开端口。" />
+          )}
+          {error && <p className="px-3 pb-1 text-[11px] text-destructive">{error}</p>}
+          {!(busy && entries.length === 0 && root === '.') && !(error && entries.length === 0 && root === '.') && (
+          <ScrollArea className="min-h-0 flex-1">
+            <div
+              role="tree"
+              className="pb-2"
+            >
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div
+                    role="treeitem"
+                    aria-expanded={rootOpen}
+                    aria-selected={selected === root}
+                    title={root}
+                    className={`flex h-7 w-full cursor-pointer items-center pr-2 text-sm select-none hover:bg-foreground/5 ${
+                      selected === root ? 'bg-foreground/10' : ''
+                    }`}
+                    style={{ paddingLeft: 0 }}
+                    onContextMenu={() => setSelected(root)}
+                    onClick={() => {
+                      setSelected(root)
+                      void toggle(root)
+                    }}
+                  >
+                    <FileIcon name={rootName} kind="dir" open={rootOpen} />
+                    <span className="min-w-0 flex-1 truncate pl-1">{rootName}</span>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent
+                  onCloseAutoFocus={panelMenu.keepFocusOnClose}
+                >
+                  {parentDir(root) && (
+                    <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
+                      打开上级目录
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuItem
+                    onClick={() => {
+                      panelMenu.openFromMenu(() => {
+                        setFolderError('')
+                        setMkdirTarget(root)
+                        setMaking(true)
+                      })
+                    }}
+                  >
+                    <FolderPlus /> 新建文件夹
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => void uploadFilesInto(root)}>
+                    <Upload /> 上传文件
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => void uploadDirInto(root)}>
+                    <FolderUp /> 上传文件夹
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() =>
+                      downloadDir({ name: rootName, path: root, kind: 'dir', size: 0, mtime: 0 })
+                    }
+                  >
+                    <Download /> 下载
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+              {rootOpen && (
+                <>
+                  {visible(entries).length === 0 && !busy && !error && (
+                    <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: TREE_INDENT }}>
+                      空目录
+                    </p>
+                  )}
+                  {renderNodes(entries, 1)}
+                </>
+              )}
+            </div>
+          </ScrollArea>
+          )}
+        </>
+      )}
+      {transfers.length > 0 && (
+        <div className="shrink-0 border-t px-3 py-1">
+          {transfers.map((t) => {
+            const percent = t.done && !t.error ? 100 : t.total > 0 ? Math.min(100, Math.round((t.transferred / t.total) * 100)) : 0
+            return (
+              <div key={t.id} className="grid gap-0.5 py-0.5 text-xs text-muted-foreground">
+                <div className="flex items-start gap-1.5">
+                  {t.direction === 'up' ? (
+                    <Upload className="mt-0.5 size-3 shrink-0" />
+                  ) : (
+                    <Download className="mt-0.5 size-3 shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 break-all">{t.name}</span>
+                  {t.error ? (
+                    <span className="min-w-0 shrink-0 text-destructive" title={t.error}>
+                      {t.error}
+                    </span>
+                  ) : (
+                    <span className="shrink-0">{percent}%</span>
+                  )}
+                  <button
+                    type="button"
+                    title={t.done ? '关闭' : '取消传输'}
+                    className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    onClick={() => {
+                      if (t.done) setTransfers((list) => list.filter((item) => item.id !== t.id))
+                      else void window.api.sftp.cancelTransfer(t.id)
+                    }}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+                <div className="h-0.5 rounded-full bg-foreground/10">
+                  <div
+                    className={`h-full rounded-full ${t.error ? 'bg-destructive' : 'bg-foreground/40'}`}
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <PanelDialog
+        open={renaming !== null}
+        title="重命名"
+        initial={renaming?.name ?? ''}
+        placeholder="新的名称"
+        error={renameError}
+        onClose={() => {
+          setRenaming(null)
+          setRenameError('')
+        }}
+        onSave={(value) => void commitRename(value)}
+      />
+      <PanelDialog
+        open={making}
+        title="新建文件夹"
+        initial=""
+        placeholder="文件夹名"
+        error={folderError}
+        onClose={() => {
+          setMaking(false)
+          setFolderError('')
+        }}
+        onSave={(value) => void mkdir(value)}
+      />
+    </div>
+  )
+}
+
+/** 每级缩进 12px，图标自成一列。 */
+const TREE_INDENT = 12
+
+function sortEntries(items: RemoteFile[]): RemoteFile[] {
+  return [...items].sort((a, b) => {
+    const ad = a.kind === 'dir' ? 0 : 1
+    const bd = b.kind === 'dir' ? 0 : 1
+    if (ad !== bd) return ad - bd
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+  })
+}
+
+function baseName(path: string): string {
+  if (path === '/' || path === '.') return path
+  const trimmed = path.replace(/\/+$/, '')
+  const slash = trimmed.lastIndexOf('/')
+  return slash < 0 ? trimmed : trimmed.slice(slash + 1) || '/'
+}
+
+function parentDir(path: string): string | null {
+  const trimmed = path.replace(/\/+$/, '')
+  if (!trimmed || trimmed === '/') return null
+  // POSIX 绝对路径或 Windows 盘符路径（C:/...），其余（相对路径等）没有上级
+  if (!trimmed.startsWith('/') && !/^[A-Za-z]:(\/|$)/.test(trimmed)) return null
+  const slash = trimmed.lastIndexOf('/')
+  if (slash < 0) return null
+  if (slash === 0) return '/'
+  const parent = trimmed.slice(0, slash)
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}/` : parent
+}
+
+function Hint(props: { text: string }) {
+  return <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">{props.text}</p>
+}
+
+const HIDDEN_KEY = 'termpilot.showHidden'
+
+const NO_SFTP = '这台机器没有 SFTP'
+
+function sftpMessage(error: unknown): string {
+  const raw = (error instanceof Error ? error.message : String(error)).replace(
+    /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/,
+    ''
+  )
+  if (/Received exit code 127|establishing SFTP/i.test(raw)) return NO_SFTP
+  return raw
+}
+
+function formatSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`
+}

@@ -11,3 +11,10 @@ release/
 *.db-shm
 *.db-wal
 tmp/
+
+# Wails 重写产物
+wailsapp/build/
+wailsapp/resources/cli/
+wailsapp/frontend/node_modules/
+wailsapp/frontend/dist/
+wailsapp/app.exe

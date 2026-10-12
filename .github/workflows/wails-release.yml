@@ -1,0 +1,78 @@
+name: wails-release
+
+# Wails 重写版的三平台打包。与 Electron 版的 release.yml 分开：
+# 用 wails-v*.*.* 标签触发，避免和正式版发版互相干扰。
+on:
+  push:
+    tags:
+      - 'wails-v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            goos: windows
+          - os: macos-latest
+            goos: darwin
+          - os: ubuntu-latest
+            goos: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: 校验版本号（tag 与 package.json 一致）
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#wails-v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag wails-v$tag 与 package.json 的 version $pkg 不一致"
+            exit 1
+          fi
+
+      - name: 安装 Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+
+      - name: 安装 Linux webview 依赖
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: 前端依赖
+        working-directory: wailsapp/frontend
+        run: npm ci
+
+      - name: 编译 CLI 到嵌入资源
+        run: node scripts/build-cli-wails.mjs ${{ matrix.goos }}
+
+      - name: 构建（Windows 出 NSIS 安装包）
+        working-directory: wailsapp
+        shell: bash
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            wails build -nsis
+          else
+            wails build
+          fi
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: termpilot-wails-${{ matrix.goos }}
+          path: |
+            wailsapp/build/bin/*
+          if-no-files-found: error
