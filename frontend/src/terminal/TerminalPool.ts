@@ -3,6 +3,7 @@ import { composeTerminalRange } from './composeGl'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
+import { bindIme } from './ime'
 import { terminalPalette } from '../theme/terminalThemes'
 
 /**
@@ -21,6 +22,7 @@ interface PoolEntry {
   host: HTMLDivElement
   disposeData: () => void
   disposeScrollHint: () => void
+  settled: boolean
 }
 
 const DEFAULT_FONT_FAMILY = 'Consolas, "Cascadia Mono", "Microsoft YaHei", monospace'
@@ -87,6 +89,7 @@ class TerminalPool {
     term.open(host)
     host.style.background = this.palette.background ?? ''
     bindClipboardKeys(term)
+    bindIme(host, term)
 
     this.enableWebgl(term)
 
@@ -101,7 +104,7 @@ class TerminalPool {
     })
     window.api.term.bindView(termId)
 
-    const entry: PoolEntry = { term, fit, host, disposeData, disposeScrollHint: bindScrollHint(host, term) }
+    const entry: PoolEntry = { term, fit, host, disposeData, disposeScrollHint: bindScrollHint(host, term), settled: false }
     this.entries.set(termId, entry)
     return entry
   }
@@ -112,11 +115,48 @@ class TerminalPool {
     if (e.host.parentElement !== el) el.appendChild(e.host)
     bindClipboardKeys(e.term)
     this.fit(termId)
+    this.scheduleSettle(termId)
+    // 菜单关掉时会把焦点还给「新建」按钮，而且往往排在下一帧之后。
+    // 多补几次，保证新开的终端不用再点一下才能打字。
+    const focus = () => {
+      if (e.host.isConnected) e.term.focus()
+    }
+    focus()
     requestAnimationFrame(() => {
       if (e.host.parentElement === el) {
         this.fit(termId)
-        e.term.focus()
+        focus()
+        e.host.scrollLeft = 0
       }
+    })
+    window.setTimeout(focus, 0)
+    window.setTimeout(focus, 60)
+    window.setTimeout(focus, 180)
+  }
+
+  /**
+   * 第一次画的时候 WebGL 画布像素和格子对不齐，正文会往左裁掉一截。
+   * 拖动窗口会强制按新尺寸重画，所以能自己对齐。字体加载完再按同样的字号
+   * 触发一次重画，就不用等用户去拖。
+   */
+  private scheduleSettle(termId: string): void {
+    const entry = this.entries.get(termId)
+    if (!entry || entry.settled) return
+    entry.settled = true
+    const run = () => {
+      if (!entry.host.isConnected) return
+      const size = entry.term.options.fontSize
+      if (size) {
+        entry.term.options.fontSize = size + 1
+        entry.term.options.fontSize = size
+      }
+      entry.term.clearTextureAtlas()
+      this.fit(termId)
+      entry.host.scrollLeft = 0
+    }
+    void document.fonts.ready.then(() => {
+      requestAnimationFrame(run)
+      window.setTimeout(run, 200)
     })
   }
 

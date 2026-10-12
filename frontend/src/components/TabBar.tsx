@@ -21,6 +21,7 @@ import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } f
 import { useMenuAction } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
+import { terminalPool } from '../terminal/TerminalPool'
 import { CaptureDialog } from './CaptureDialog'
 import { OsIcon, osIconProps } from './OsIcon'
 import type { LocalShell } from '../../../shared/types'
@@ -519,7 +520,20 @@ export function TabBar() {
               <Plus className="size-4" strokeWidth={2} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" ref={menuContentRef} className="relative">
+          <DropdownMenuContent
+            align="start"
+            ref={menuContentRef}
+            className="relative"
+            onCloseAutoFocus={(event) => {
+              // 关掉菜单时 Radix 会把焦点还给「+」按钮，新终端就收不到按键
+              event.preventDefault()
+              const { activeTabId, hostsOpen, settingsOpen } = useAppStore.getState()
+              if (!activeTabId || hostsOpen || settingsOpen) return
+              terminalPool.focus(activeTabId)
+              window.setTimeout(() => terminalPool.focus(activeTabId), 60)
+              window.setTimeout(() => terminalPool.focus(activeTabId), 180)
+            }}
+          >
             {orderedShellKeys.map((key) => {
               const shell = shellById.get(key)!
               return (

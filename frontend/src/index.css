@@ -192,6 +192,20 @@
   background: rgba(128, 128, 128, 0.8);
 }
 
+/* 组字条超出右边界时，浏览器会把终端横向滚走。宽度由 TerminalPool 收到组字时写上。 */
+.xterm .xterm-screen,
+.xterm .xterm-scrollable-element,
+.xterm .xterm-viewport {
+  overflow-x: hidden;
+}
+/* 拼音框的位置和宽度由 terminal/ime.ts 写上 */
+.xterm .composition-view.active {
+  display: block;
+  overflow: hidden;
+  direction: ltr;
+  white-space: nowrap;
+}
+
 /* xterm 6 自带的滚动条(VS Code 式 DOM 滚动条,不是原生那条):
    压掉它 JS 写的内联宽度,收成 8px 轨道 + 4px 居中滑块;
    平时透明不可点,host 有 term-scrolling(滚动中及停滚 3 秒内)才露出 */
