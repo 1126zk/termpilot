@@ -1,6 +1,4 @@
-cli/dist/
 node_modules/
-out/
 dist/
 release/
 *.log
@@ -12,9 +10,11 @@ release/
 *.db-wal
 tmp/
 
-# Wails 重写产物
-wailsapp/build/
-wailsapp/resources/cli/
-wailsapp/frontend/node_modules/
-wailsapp/frontend/dist/
-wailsapp/app.exe
+# Wails 构建产物（appicon.png / windows 清单为源文件，需跟踪）
+build/bin/
+build/darwin/
+build/windows/icon.ico
+internal/app/resources/cli/
+frontend/node_modules/
+frontend/dist/
+app.exe

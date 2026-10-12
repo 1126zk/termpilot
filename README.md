@@ -1,29 +1,40 @@
 # TermPilot
 
-本机 SSH 终端（Electron + React + xterm.js），内置 MCP 服务，Agent 可以接管已打开的会话继续操作。
+本机 SSH 终端（Wails + Go + React + xterm.js），内置 MCP 服务，Agent 可以接管已打开的会话继续操作。
 
 ## 环境要求
 
+- Go 1.26+
 - Node.js 20+
-- Windows 上安装依赖时会编译 node-pty 原生模块，需要 Python 和 Visual Studio Build Tools
-- 打包时需要 Go（编译 `cli/` 下的配套命令行）
+- Wails CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`
+- Linux 需要 webview 依赖：`sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev`
 
 ## 运行
 
 ```bash
-npm install
-npm run dev
+cd frontend && npm install && cd ..
+node scripts/build-cli.mjs   # 编译配套 CLI 到 resources/cli/（go:embed 打进主程序）
+wails dev
 ```
 
 ## 打包
 
 ```bash
-npm run dist:win     # Windows（NSIS 安装包 + zip）
-npm run dist:mac     # macOS（dmg + zip）
-npm run dist:linux   # Linux（AppImage + deb）
+node scripts/build-cli.mjs [darwin|linux|windows]
+wails build
 ```
 
-产物在 `release/` 目录。
+产物是 `build/bin/` 下的可执行文件（Windows 为 `TermPilot.exe`，无安装包）。打 `v*.*.*` 标签会触发 GitHub Actions 三平台打包（tag 版本号需与 `frontend/package.json` 的 version 一致）。
+
+## 目录结构
+
+- `main.go` — Wails 入口（`wails dev` / `wails build` 要求 main 包在仓库根）
+- `internal/app/` — 应用主体：App 生命周期、Bridge 绑定、IPC handler、系统操作；`internal/app/resources/` 是内嵌资源（SKILL.md、卸载脚本、CLI 二进制）
+- `internal/`（其余）— 终端、SSH、SFTP、MCP、存储等核心服务
+- `frontend/` — React 前端（Vite）
+- `shared/` — 前后端共享的 TS 类型与常量
+- `cmd/termpilot-cli/` — 配套命令行（独立 module，被主程序内嵌，Agent 通过它操作终端）
+- `scripts/build-cli.mjs` — 编译 CLI 到 `internal/app/resources/cli/`
 
 ## 数据位置
 
