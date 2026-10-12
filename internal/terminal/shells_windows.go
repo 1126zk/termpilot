@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // 本机 shell 探测（Windows），照搬 TS localShellExe / detectLocalShells 的顺序与判定。
@@ -31,7 +32,10 @@ func fileExists(p string) bool {
 // 不要 WSL 的）。where 找到的不查 fileExists：WindowsApps 商店别名是 reparse point，
 // fs 探不到但能启动。
 func findExe(name string, pathHint *regexp.Regexp, fallbacks ...string) string {
-	out, err := exec.Command("where.exe", name).Output()
+	cmd := exec.Command("where.exe", name)
+	// GUI 程序起控制台子进程会闪黑窗，藏掉（同 sshx hideWindow）。
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmd.Output()
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			p := strings.TrimSpace(line)

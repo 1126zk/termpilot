@@ -7,9 +7,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 )
 
 func isWindows() bool { return true }
+
+// hideConsole 藏掉控制台子进程的黑窗（powershell 等），同 sshx hideWindow。
+func hideConsole(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+}
 
 // ensureWindowsPath 把 bin 目录写进当前用户 PATH（对应 install-cli.ts 的 PowerShell 脚本）。
 func ensureWindowsPath(dir string) {
@@ -31,6 +37,7 @@ $items.Add($dir)
 [Environment]::SetEnvironmentVariable('Path', ($items -join ';'), 'User')
 `
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	hideConsole(cmd)
 	cmd.Env = append(os.Environ(), "TERMPILOT_BIN="+dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		println("[TermPilot] 没能写入用户 PATH:", err.Error(), string(out))
@@ -55,6 +62,7 @@ func copyImageToClipboard(path string) error {
 		`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile(%q))`,
 		abs)
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-STA", "-Command", script)
+	hideConsole(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("复制图片失败: %v %s", err, out)
 	}
