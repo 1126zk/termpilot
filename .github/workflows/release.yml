@@ -55,8 +55,8 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: 编译 CLI 到嵌入资源
-        run: node scripts/build-cli.mjs ${{ matrix.goos }}
+      - name: 构建前准备（CLI + 图标）
+        run: node scripts/prebuild.mjs ${{ matrix.goos }}
 
       - name: 构建
         run: wails build

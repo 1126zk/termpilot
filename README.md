@@ -13,14 +13,14 @@
 
 ```bash
 cd frontend && npm install && cd ..
-node scripts/build-cli.mjs   # 编译配套 CLI 到 resources/cli/（go:embed 打进主程序）
+node scripts/prebuild.mjs   # 编译配套 CLI + 同步图标（wails build 前的准备）
 wails dev
 ```
 
 ## 打包
 
 ```bash
-node scripts/build-cli.mjs [darwin|linux|windows]
+node scripts/prebuild.mjs [darwin|linux|windows]
 wails build
 ```
 
@@ -34,7 +34,8 @@ wails build
 - `frontend/` — React 前端（Vite）
 - `shared/` — 前后端共享的 TS 类型与常量
 - `cmd/termpilot-cli/` — 配套命令行（独立 module，被主程序内嵌，Agent 通过它操作终端）
-- `scripts/build-cli.mjs` — 编译 CLI 到 `internal/app/resources/cli/`
+- `resources/icon.png` — 应用图标源文件（prebuild 时同步到 `build/appicon.png`）
+- `scripts/prebuild.mjs` — `wails build` 前准备：编译 CLI 到 `internal/app/resources/cli/`，同步图标
 
 ## 数据位置
 

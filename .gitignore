@@ -10,10 +10,8 @@ release/
 *.db-wal
 tmp/
 
-# Wails 构建产物（appicon.png / windows 清单为源文件，需跟踪）
-build/bin/
-build/darwin/
-build/windows/icon.ico
+# Wails 构建产物
+build/
 internal/app/resources/cli/
 frontend/node_modules/
 frontend/dist/
