@@ -29,7 +29,7 @@ import rawTheme from 'material-icon-theme/dist/material-icons.json'
 
 const theme = rawTheme as unknown as IconTheme
 
-const iconUrls = import.meta.glob('../../../../node_modules/material-icon-theme/icons/*.svg', {
+const iconUrls = import.meta.glob('../../node_modules/material-icon-theme/icons/*.svg', {
   eager: true,
   query: '?url',
   import: 'default'
