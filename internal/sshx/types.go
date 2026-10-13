@@ -71,6 +71,6 @@ type SessionConfig struct {
 
 // OsInfo 对端系统探测结果。Distro 是 /etc/os-release 的 ID 小写（如 debian），认不出为空。
 type OsInfo struct {
-	OS     string // "windows" | "linux" | "macos" | "unknown"
-	Distro string
+	OS     string `json:"os"` // "windows" | "linux" | "macos" | "unknown"
+	Distro string `json:"distro,omitempty"`
 }

@@ -285,6 +285,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     void window.api.sessions
       .detectOs(session.id)
       .then((info) => {
+        // 连接抖一下就会探成 unknown，别把之前认出来的系统冲掉
+        if (!info?.os || (info.os === 'unknown' && known.os)) return
         set({
           tabs: get().tabs.map((t) => (t.id === tab.id ? { ...t, os: info.os, distro: info.distro } : t))
         })
