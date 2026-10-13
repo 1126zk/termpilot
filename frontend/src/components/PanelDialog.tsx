@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -64,18 +64,45 @@ export function PanelDialog(props: {
   )
 }
 
-function PanelForm(props: {
+/** 和 PanelDialog 同一个外观的确认弹层，删除这类不可撤销的操作用。Enter 确认，Esc 取消。 */
+export function PanelConfirm(props: {
+  open: boolean
   title: string
-  initial: string
-  placeholder: string
+  message: string
+  confirmText?: string
   error?: string
   onClose: () => void
-  onSave: (value: string) => void
+  onConfirm: () => void
 }) {
-  const [value, setValue] = useState(props.initial)
+  if (!props.open) return null
+  return (
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 p-3"
+      onClick={props.onClose}
+    >
+      <PanelCard title={props.title} onClose={props.onClose}>
+        <p className="text-sm break-all text-muted-foreground">{props.message}</p>
+        {props.error ? <p className="text-xs text-destructive">{props.error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={props.onClose}>
+            取消
+          </Button>
+          <Button
+            autoFocus
+            onClick={props.onConfirm}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') props.onClose()
+            }}
+          >
+            {props.confirmText ?? '删除'}
+          </Button>
+        </div>
+      </PanelCard>
+    </div>
+  )
+}
 
-  const save = () => props.onSave(value)
-
+function PanelCard(props: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <div
       className="h-fit w-full rounded-xl border bg-card shadow-lg shadow-black/30"
@@ -92,7 +119,25 @@ function PanelForm(props: {
           <X className="size-4" />
         </button>
       </div>
-      <div className="grid gap-3 p-3">
+      <div className="grid gap-3 p-3">{props.children}</div>
+    </div>
+  )
+}
+
+function PanelForm(props: {
+  title: string
+  initial: string
+  placeholder: string
+  error?: string
+  onClose: () => void
+  onSave: (value: string) => void
+}) {
+  const [value, setValue] = useState(props.initial)
+
+  const save = () => props.onSave(value)
+
+  return (
+    <PanelCard title={props.title} onClose={props.onClose}>
         {/* 不用共享 Input：弹窗的输入框只要描边不要填充底，自带样式避免覆盖顺序问题 */}
         <input
           autoFocus
@@ -115,7 +160,6 @@ function PanelForm(props: {
         <div className="flex justify-end">
           <Button onClick={save}>保存</Button>
         </div>
-      </div>
-    </div>
+    </PanelCard>
   )
 }

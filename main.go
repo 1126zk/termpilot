@@ -31,6 +31,12 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
+		// 拖文件进文件树上传要拿本地绝对路径。不开 DisableWebViewDrop：Windows 上它会让
+		// WebView2 拒收一切外部拖入，前端连 drop 事件都收不到。默认的"拖进来就打开文件"
+		// 由前端注册 OnFileDrop 后 Wails 的监听统一 preventDefault 掉。
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop: true,
+		},
 		// 与 Electron 版默认深色底色一致，避免浅色主题外的白屏首帧。
 		BackgroundColour: &options.RGBA{R: 30, G: 30, B: 30, A: 1},
 		OnStartup:        a.Startup,

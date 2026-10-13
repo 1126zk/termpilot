@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowUp, Download, Eye, EyeOff, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUp, Download, Eye, EyeOff, FilePenLine, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -10,7 +10,8 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
-import { PanelDialog, useMenuAction } from './PanelDialog'
+import { PanelConfirm, PanelDialog, useMenuAction } from './PanelDialog'
+import { DROP_TARGET_STYLE, dropDirAt, registerDropTree } from '../fileDrop'
 import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
@@ -22,6 +23,7 @@ type FsBackend = {
   rename: (from: string, to: string) => Promise<void>
   upload: (dir: string) => Promise<number>
   uploadDir: (dir: string) => Promise<number>
+  uploadPaths: (dir: string, paths: string[]) => Promise<number>
   download: (file: RemoteFile) => Promise<boolean>
   downloadDir: (file: RemoteFile) => Promise<boolean>
 }
@@ -53,6 +55,11 @@ export function FileTree(props: { tab: Tab | null }) {
   // 右键选了重命名/新建文件夹后，菜单关闭时阻止 Radix 把焦点还给列表项，否则弹层的输入框会被顶得失焦
   const panelMenu = useMenuAction()
   const [renameError, setRenameError] = useState('')
+  const [removing, setRemoving] = useState<RemoteFile | null>(null)
+  const [removeError, setRemoveError] = useState('')
+  const [dropDir, setDropDir] = useState<string | null>(null)
+  const dropRef = useRef<(dir: string, paths: string[]) => void>(() => undefined)
+  const treeId = tab?.id ?? ''
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
@@ -80,6 +87,7 @@ export function FileTree(props: { tab: Tab | null }) {
       rename: (from, to) => sftp.rename(id, from, to),
       upload: (dir) => sftp.upload(id, dir),
       uploadDir: (dir) => sftp.uploadDir(id, dir),
+      uploadPaths: (dir, paths) => sftp.uploadPaths(id, dir, paths),
       download: (file) => sftp.download(id, file),
       downloadDir: (file) => sftp.downloadDir(id, file)
     }
@@ -100,6 +108,14 @@ export function FileTree(props: { tab: Tab | null }) {
       }
     })
   }, [])
+
+  useEffect(() => {
+    if (!treeId) return
+    return registerDropTree(treeId, (dir, paths) => {
+      setDropDir(null)
+      dropRef.current(dir, paths)
+    })
+  }, [treeId])
 
   const showRoot = useCallback(
     async (path: string) => {
@@ -214,15 +230,16 @@ export function FileTree(props: { tab: Tab | null }) {
     }
   }
 
-  const remove = async (item: RemoteFile) => {
-    const message =
-      item.kind === 'dir' ? `删除目录 ${item.name} 及其中的文件？` : `删除 ${item.name}？`
-    if (!confirm(message)) return
+  const remove = async () => {
+    const item = removing
+    if (!item) return
     try {
       await fs.remove(item.path, item.kind)
+      setRemoving(null)
+      setRemoveError('')
       await listInto(parentDir(item.path) ?? root)
     } catch (e) {
-      setError(sftpMessage(e))
+      setRemoveError(sftpMessage(e))
     }
   }
 
@@ -248,6 +265,20 @@ export function FileTree(props: { tab: Tab | null }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  dropRef.current = (dir, paths) => {
+    void (async () => {
+      setBusy(true)
+      try {
+        await fs.uploadPaths(dir, paths)
+        await ensureOpen(dir)
+      } catch (e) {
+        setError(sftpMessage(e))
+      } finally {
+        setBusy(false)
+      }
+    })()
   }
 
   const download = async (item: RemoteFile) => {
@@ -329,9 +360,10 @@ export function FileTree(props: { tab: Tab | null }) {
                       : `${item.name}  ${formatSize(item.size)}`
                   }
                   className={`flex h-7 w-full cursor-pointer items-center pr-2 text-left text-sm select-none hover:bg-foreground/5 ${
-                    selected === item.path ? 'bg-foreground/10' : ''
+                    dropDir === item.path ? DROP_HIGHLIGHT : selected === item.path ? 'bg-foreground/10' : ''
                   }`}
                   style={{ paddingLeft: depth * TREE_INDENT }}
+                  data-drop-dir={isDir ? item.path : parentDir(item.path) ?? root}
                   onContextMenu={() => setSelected(item.path)}
                   onClick={() => {
                     setSelected(item.path)
@@ -386,7 +418,7 @@ export function FileTree(props: { tab: Tab | null }) {
                   <ContextMenuItem
                     onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)}
                   >
-                    编辑
+                    <FilePenLine /> 编辑
                   </ContextMenuItem>
                 )}
                 <ContextMenuItem
@@ -409,7 +441,7 @@ export function FileTree(props: { tab: Tab | null }) {
                     <Download /> 下载
                   </ContextMenuItem>
                 )}
-                <ContextMenuItem variant="destructive" onClick={() => remove(item)}>
+                <ContextMenuItem onClick={() => panelMenu.openFromMenu(() => setRemoving(item))}>
                   <Trash2 /> 删除
                 </ContextMenuItem>
               </ContextMenuContent>
@@ -442,7 +474,19 @@ export function FileTree(props: { tab: Tab | null }) {
   const rootName = baseName(root)
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      style={DROP_TARGET_STYLE}
+      data-drop-tree={treeId}
+      data-drop-dir={root}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) setDropDir(dropDirAt(e.target))
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropDir(null)
+      }}
+      onDrop={() => setDropDir(null)}
+    >
       <div className="flex items-center gap-1 pr-1 pb-1">
         <input
           className="h-8 min-w-0 flex-1 rounded bg-foreground/5 px-2 text-sm outline-none focus:bg-foreground/10"
@@ -534,7 +578,7 @@ export function FileTree(props: { tab: Tab | null }) {
                     aria-selected={selected === root}
                     title={root}
                     className={`flex h-7 w-full cursor-pointer items-center pr-2 text-sm select-none hover:bg-foreground/5 ${
-                      selected === root ? 'bg-foreground/10' : ''
+                      dropDir === root ? DROP_HIGHLIGHT : selected === root ? 'bg-foreground/10' : ''
                     }`}
                     style={{ paddingLeft: 0 }}
                     onContextMenu={() => setSelected(root)}
@@ -663,12 +707,29 @@ export function FileTree(props: { tab: Tab | null }) {
         }}
         onSave={(value) => void mkdir(value)}
       />
+      <PanelConfirm
+        open={removing !== null}
+        title={removing?.kind === 'dir' ? '删除文件夹' : '删除文件'}
+        message={
+          removing?.kind === 'dir'
+            ? `删除 ${removing.name} 及其中的所有文件？删除后无法恢复。`
+            : `删除 ${removing?.name ?? ''}？删除后无法恢复。`
+        }
+        error={removeError}
+        onClose={() => {
+          setRemoving(null)
+          setRemoveError('')
+        }}
+        onConfirm={() => void remove()}
+      />
     </div>
   )
 }
 
 /** 每级缩进 12px，图标自成一列。 */
 const TREE_INDENT = 12
+/** 拖文件经过时，会上传进去的那个目录行 */
+const DROP_HIGHLIGHT = 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/50'
 
 function sortEntries(items: RemoteFile[]): RemoteFile[] {
   return [...items].sort((a, b) => {
