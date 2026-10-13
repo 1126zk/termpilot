@@ -370,12 +370,12 @@ export function FileTree(props: { tab: Tab | null }) {
                     if (isDir) {
                       void toggle(item.path)
                     } else {
-                      openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, false)
+                      openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, false)
                     }
                   }}
                   onDoubleClick={() => {
                     if (!isDir) {
-                      openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)
+                      openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true)
                     }
                   }}
                 >
@@ -416,14 +416,14 @@ export function FileTree(props: { tab: Tab | null }) {
                 )}
                 {item.kind !== 'dir' && (
                   <ContextMenuItem
-                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true, true)}
+                    onClick={() => openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true, true)}
                   >
                     <Eye /> 查看
                   </ContextMenuItem>
                 )}
                 {item.kind !== 'dir' && (
                   <ContextMenuItem
-                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true, false)}
+                    onClick={() => openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true, false)}
                   >
                     <FilePenLine /> 编辑
                   </ContextMenuItem>

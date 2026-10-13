@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import { ArrowRightToLine, Eye, FilePenLine, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ import { readBuffer } from '../editor/editorBuffers'
 import { useAppStore, type EditorTab } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { isMarkdown } from './RemoteEditor'
+import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 
 const TOOL_BUTTON =
   'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
@@ -34,8 +35,101 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
   const toggleEditorWrap = useAppStore((s) => s.toggleEditorWrap)
   const setNotice = useAppStore((s) => s.setNotice)
   const activeTab = props.tabs.find((t) => t.key === props.activeKey)
+  const reorderEditorTabs = useAppStore((s) => s.reorderEditorTabs)
   const [pending, setPending] = useState<EditorTab | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // 拖动排序，和顶部会话标签同一套（见 TabBar）：被拖标签跟手，其余 FLIP 让位
+  const stripRef = useRef<HTMLDivElement>(null)
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  const suppressClick = useRef(false)
+  const prevLeft = useRef(new Map<string, number>())
+  const dragStart = useRef({ pos: 0, layout: 0, grab: 0, size: 0 })
+  const pointerX = useRef(0)
+  const keys = props.tabs.map((t) => t.key)
+
+  /** 被拖标签跟手，限制在首尾文件标签之间，不盖住终端标签，也不飞到空白处 */
+  const followPointer = (key: string) => {
+    const strip = stripRef.current
+    const el = strip?.querySelector<HTMLElement>(`[data-file-key="${CSS.escape(key)}"]`)
+    if (!strip || !el) return
+    const offset = pointerX.current - dragStart.current.pos - (el.offsetLeft - dragStart.current.layout)
+    const items = strip.querySelectorAll<HTMLElement>('[data-file-key]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return setDragOffset(offset)
+    const min = first.offsetLeft - el.offsetLeft
+    const max = last.offsetLeft + last.offsetWidth - el.offsetWidth - el.offsetLeft
+    setDragOffset(Math.min(max, Math.max(min, offset)))
+  }
+  useFlipSlide(dragKey !== null, stripRef, 'data-file-key', 'x', dragKey, prevLeft, [keys.join(), dragKey])
+  useLayoutEffect(() => {
+    if (dragKey) followPointer(dragKey)
+  }, [keys.join(), dragKey])
+
+  const startDrag = (event: PointerEvent, key: string) => {
+    startPointerDrag({
+      event,
+      axis: 'x',
+      onActivate: () => {
+        const strip = stripRef.current
+        const el = strip?.querySelector<HTMLElement>(`[data-file-key="${CSS.escape(key)}"]`)
+        const pointer = strip ? event.clientX - strip.getBoundingClientRect().left + strip.scrollLeft : 0
+        dragStart.current = {
+          pos: event.clientX,
+          layout: el?.offsetLeft ?? 0,
+          grab: pointer - (el?.offsetLeft ?? 0),
+          size: el?.offsetWidth ?? 0
+        }
+        setDragKey(key)
+        setDragOffset(0)
+      },
+      onMove: (x) => {
+        pointerX.current = x
+        const strip = stripRef.current
+        if (strip) {
+          // 闭包里的 props 停在拖动开始那一刻，重排后要从 store 取最新顺序
+          const termId = props.tabs.find((t) => t.key === key)?.termId
+          const ids = useAppStore
+            .getState()
+            .editorTabs.filter((t) => t.termId === termId)
+            .map((t) => t.key)
+          // 交换判定也按限位后的视觉位置算，指针拖出范围时不会来回乱换
+          const items = strip.querySelectorAll<HTMLElement>('[data-file-key]')
+          const first = items[0]
+          const last = items[items.length - 1]
+          const raw = x - strip.getBoundingClientRect().left + strip.scrollLeft - dragStart.current.grab
+          const start =
+            first && last
+              ? Math.min(last.offsetLeft + last.offsetWidth - dragStart.current.size, Math.max(first.offsetLeft, raw))
+              : raw
+          const next = moveTo(
+            ids,
+            key,
+            dropIndex(strip, 'data-file-key', 'x', start, start + dragStart.current.size, key, ids)
+          )
+          if (next) {
+            capturePositions(strip, 'data-file-key', 'x', prevLeft.current)
+            reorderEditorTabs(next)
+          }
+        }
+        followPointer(key)
+      },
+      onEnd: () => {
+        // 拖完会补一个 click，不能当成切换/关闭
+        suppressClick.current = true
+        prevLeft.current.clear()
+        setDragKey(null)
+        setDragOffset(0)
+      }
+    })
+  }
+  const clickAllowed = () => {
+    if (!suppressClick.current) return true
+    suppressClick.current = false
+    return false
+  }
 
   const close = (tab: EditorTab) => {
     if (unsaved(tab)) {
@@ -78,7 +172,10 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
   return (
     <>
     <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={stripRef}
+        className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         <button
           type="button"
           title="回到终端，已打开的文件保留"
@@ -97,13 +194,21 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           return (
             <div
               key={tab.key}
+              data-file-key={tab.key}
               title={tab.path}
               className={cn(
                 'flex h-7 max-w-52 min-w-0 shrink-0 items-center gap-1 rounded-md bg-muted/60 pl-2.5 pr-1 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent',
-                active && 'bg-primary/15 text-primary hover:bg-primary/15'
+                active && 'bg-primary/15 text-primary hover:bg-primary/15',
+                dragKey === tab.key && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
               )}
+              style={dragKey === tab.key ? { transform: `translateX(${dragOffset}px)` } : undefined}
+              onPointerDown={(e) => startDrag(e, tab.key)}
             >
-              <button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => activateEditorTab(tab.key)}>
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-1.5"
+                onClick={() => clickAllowed() && activateEditorTab(tab.key)}
+              >
                 <FileIcon name={tab.name} kind="file" />
                 <span className={cn('truncate', tab.preview && 'italic')}>{tab.name}</span>
                 {tab.readOnly && <Eye className="size-3 shrink-0 opacity-70" />}
@@ -113,8 +218,8 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
                 type="button"
                 title="关闭"
                 className="flex size-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-foreground/10 hover:opacity-100"
-                onClick={() => close(tab)}
-                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => clickAllowed() && close(tab)}
+                onPointerDown={(e) => e.stopPropagation()}
               >
                 <X className="size-3.5" />
               </button>
@@ -122,17 +227,6 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           )
         })}
       </div>
-      {activeTab && !(activeTab.readOnly && isMarkdown(activeTab.name)) && (
-        <button
-          type="button"
-          title={wrap ? '长行不折行，横向滚动' : '长行按窗口宽度折行'}
-          className={TOOL_BUTTON}
-          onClick={toggleEditorWrap}
-        >
-          {wrap ? <ArrowRightToLine className="size-4" /> : <WrapText className="size-4" />}
-          {wrap ? '取消换行' : '自动换行'}
-        </button>
-      )}
       {activeTab && (
         <button
           type="button"
@@ -145,6 +239,17 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
         >
           {activeTab.readOnly ? <FilePenLine className="size-4" /> : <Eye className="size-4" />}
           {activeTab.readOnly ? '编辑' : '查看'}
+        </button>
+      )}
+      {activeTab && !(activeTab.readOnly && isMarkdown(activeTab.name)) && (
+        <button
+          type="button"
+          title={wrap ? '长行不折行，横向滚动' : '长行按窗口宽度折行'}
+          className={TOOL_BUTTON}
+          onClick={toggleEditorWrap}
+        >
+          {wrap ? <ArrowRightToLine className="size-4" /> : <WrapText className="size-4" />}
+          {wrap ? '取消换行' : '自动换行'}
         </button>
       )}
     </div>

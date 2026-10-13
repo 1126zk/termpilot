@@ -24,6 +24,8 @@ const EDITOR_WRAP_KEY = 'termpilot.editorWrap'
 
 export interface EditorTab {
   key: string
+  /** 所属终端标签，只在这个终端下显示 */
+  termId: string
   /** null 表示本机文件 */
   sessionId: string | null
   path: string
@@ -63,7 +65,8 @@ interface AppState {
   /** 右侧面板当前板块 */
   rightPanelPane: RightPanelPane
   search: string
-  /** 当前连接或本机下打开的文件。和会话标签分开，按机器保留。 */editorTabs: EditorTab[]
+  /** 各终端标签下打开的文件，按 termId 归属，关终端时一起清掉 */
+  editorTabs: EditorTab[]
   /** 正在看的文件。null 表示回到这台机器的终端。 */
   activeEditorKey: string | null
 
@@ -110,8 +113,16 @@ interface AppState {
   toggleRightPanel: () => void
   setRightPanelPane: (pane: RightPanelPane) => void
   /** readOnly 不传时沿用已打开标签的模式，新标签默认查看 */
-  openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean, readOnly?: boolean) => void
+  openRemoteEditor: (
+    termId: string,
+    sessionId: string | null,
+    file: { path: string; name: string },
+    pin?: boolean,
+    readOnly?: boolean
+  ) => void
   setEditorReadOnly: (key: string, readOnly: boolean) => void
+  /** 文件标签拖动排序：按 key 数组重排（不在数组里的保持相对顺序排在后面） */
+  reorderEditorTabs: (keys: string[]) => void
   /** 编辑器自动换行，所有文件共用，记在本地 */
   editorWrap: boolean
   toggleEditorWrap: () => void
@@ -363,7 +374,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().activeTabId === tabId ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId
     const termState = { ...get().termState }
     delete termState[tabId]
-    set({ tabs, activeTabId, termState })
+    const editorTabs = get().editorTabs.filter((t) => {
+      if (t.termId !== tabId) return true
+      dropBuffer(t.key)
+      return false
+    })
+    const activeEditorKey = editorTabs.some((t) => t.key === get().activeEditorKey) ? get().activeEditorKey : null
+    set({ tabs, activeTabId, termState, editorTabs, activeEditorKey })
     // 先断主进程连接，再销毁 xterm 实例
     window.api.term.close(tabId)
     terminalPool.dispose(tabId)
@@ -416,8 +433,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
   setHostsOpen: (open) => set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false }),
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
-  openRemoteEditor: (sessionId, file, pin = false, readOnly) => {
-    const key = editorKey(sessionId, file.path)
+  openRemoteEditor: (termId, sessionId, file, pin = false, readOnly) => {
+    const key = editorKey(termId, sessionId, file.path)
     const tabs = get().editorTabs
     const existing = tabs.find((t) => t.key === key)
     if (existing) {
@@ -433,7 +450,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     let next = tabs
     if (!pin) {
-      const preview = next.find((t) => t.sessionId === sessionId && t.preview && !t.dirty)
+      const preview = next.find((t) => t.termId === termId && t.preview && !t.dirty)
       if (preview) {
         dropBuffer(preview.key)
         next = next.filter((t) => t.key !== preview.key)
@@ -442,7 +459,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       editorTabs: [
         ...next,
-        { key, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false, readOnly: readOnly ?? true }
+        { key, termId, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false, readOnly: readOnly ?? true }
       ],
       activeEditorKey: key
     })
@@ -451,6 +468,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       editorTabs: get().editorTabs.map((t) => (t.key === key && t.readOnly !== readOnly ? { ...t, readOnly } : t))
     }),
+  reorderEditorTabs: (keys) => {
+    const pos = new Map(keys.map((key, index) => [key, index]))
+    const editorTabs = [...get().editorTabs].sort(
+      (a, b) => (pos.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.key) ?? Number.MAX_SAFE_INTEGER)
+    )
+    set({ editorTabs })
+  },
   editorWrap: localStorage.getItem(EDITOR_WRAP_KEY) !== '0',
   toggleEditorWrap: () => {
     const editorWrap = !get().editorWrap
@@ -461,7 +485,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     dropBuffer(key)
     const current = get().editorTabs.find((t) => t.key === key)
     const tabs = get().editorTabs.filter((t) => t.key !== key)
-    const sibling = tabs.filter((t) => t.sessionId === current?.sessionId)
+    const sibling = tabs.filter((t) => t.termId === current?.termId)
     set({
       editorTabs: tabs,
       activeEditorKey: get().activeEditorKey === key ? (sibling.at(-1)?.key ?? null) : get().activeEditorKey

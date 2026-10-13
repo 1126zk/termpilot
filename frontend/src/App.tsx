@@ -92,11 +92,13 @@ export default function App() {
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const fileTabs = activeTab
-    ? editorTabs.filter((t) => t.sessionId === activeTab.sessionId)
+    ? editorTabs.filter((t) => t.termId === activeTab.id)
     : []
   const currentFile = fileTabs.find((t) => t.key === remoteEditor) ?? null
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  // 文件标签跟着终端页走，切到主机页、设置页时收起
+  const onTerminalPage = !!activeTab && !hostsOpen && !settingsOpen
   const editing = useAppStore((s) => s.editing)
   const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !settingsOpen && activeTab))
 
@@ -106,14 +108,16 @@ export default function App() {
         <TabBar />
         <div className="flex min-h-0 flex-1">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            {fileTabs.length > 0 && <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />}
+            {onTerminalPage && fileTabs.length > 0 && (
+              <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />
+            )}
             <div className="flex min-h-0 flex-1 flex-col">
               {settingsOpen ? (
                 <SettingsPage />
-              ) : currentFile ? (
-                <RemoteEditor key={currentFile.key} tab={currentFile} />
               ) : hostsOpen || !activeTab ? (
                 <HostsPage />
+              ) : currentFile ? (
+                <RemoteEditor key={currentFile.key} tab={currentFile} />
               ) : (
                 <TerminalView key={activeTab.id} termId={activeTab.id} />
               )}

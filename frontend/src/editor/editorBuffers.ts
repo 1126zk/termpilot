@@ -7,8 +7,9 @@ export interface EditorBuffer {
 
 const buffers = new Map<string, EditorBuffer>()
 
-export function editorKey(sessionId: string | null, path: string): string {
-  return `${sessionId ?? 'local'}\n${path}`
+/** 文件标签跟着终端标签走，同一个文件在两个终端里各开一份 */
+export function editorKey(termId: string, sessionId: string | null, path: string): string {
+  return `${termId}\n${sessionId ?? 'local'}\n${path}`
 }
 
 export function readBuffer(key: string): EditorBuffer | undefined {
