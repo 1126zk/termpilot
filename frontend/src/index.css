@@ -133,7 +133,7 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'UI Latin', 'Microsoft YaHei', system-ui, sans-serif;
+    font-family: 'UI Latin', 'UI CJK', 'Microsoft YaHei', system-ui, sans-serif;
     font-size: 14px;
     font-weight: 500;
     line-height: 18px;
@@ -154,6 +154,15 @@
   font-weight: 400;
 }
 
+/* 中文只给微软雅黑 Regular 一档：正文 500 就是 Regular；标签这类 semibold 由浏览器在 Regular 上合成加粗。
+   直接回退的话 semibold 会被挑成雅黑 Bold，笔画糊成一团 */
+@font-face {
+  font-family: 'UI CJK';
+  src: local('Microsoft YaHei UI'), local('Microsoft YaHei');
+  font-weight: 400;
+  unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+3190-31FF, U+3400-4DBF, U+4E00-9FFF,
+    U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF, U+20000-2FA1F;
+}
 /* 输入框不用 shadcn 默认的粗灰描边 + 3px 聚焦环 */
 [data-slot='input'],
 [data-slot='select-trigger'] {

@@ -24,7 +24,7 @@ export function ThemePanel() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="grid gap-4 px-3 pt-3">
         <section className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">字体</p>
+          <p className="text-sm text-muted-foreground">字体</p>
           <Select value={appearance.terminalFont} onValueChange={(terminalFont) => change({ terminalFont })}>
             <SelectTrigger className="w-44 text-muted-foreground [&_svg]:hidden">
               <SelectValue />
@@ -40,7 +40,7 @@ export function ThemePanel() {
         </section>
 
         <section className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">字号</p>
+          <p className="text-sm text-muted-foreground">字号</p>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -72,7 +72,7 @@ export function ThemePanel() {
 
       {/* 只有主题列表自己滚动，滑块因此细小 */}
       <div className="mx-3 mt-3 h-px bg-muted-foreground/15" />
-      <p className="px-3 pt-3 pb-1.5 text-xs text-muted-foreground">主题</p>
+      <p className="px-3 pt-3 pb-1.5 text-sm text-muted-foreground">主题</p>
       <ScrollArea className="min-h-0 flex-1 px-3 pb-3">
         <div className="grid gap-1.5">
           {UNIFIED_THEMES.map((item) => (
@@ -150,7 +150,7 @@ function ThemeCard(props: { item: UnifiedTheme; selected: boolean; onSelect: () 
           ))}
         </span>
       </span>
-      <span className="font-semibold">{props.item.label}</span>
+      <span className="text-sm font-medium">{props.item.label}</span>
     </button>
   )
 }

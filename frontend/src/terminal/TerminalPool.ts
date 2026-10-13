@@ -63,6 +63,17 @@ class TerminalPool {
         /* 容器不可见时 fit 会抛错，忽略 */
       }
     }
+    // @font-face 用到才下载。上面量格子、画字形时内嵌字体多半还没到，
+    // 用的是后备字体，xterm 之后也不会自己重量，所以等字体到了再按新字体重排一遍。
+    void loadFonts(family, size).then(() => {
+      if (this.font.family !== family || this.font.size !== size) return
+      for (const entry of this.entries.values()) {
+        entry.term.options.fontSize = size + 1
+        entry.term.options.fontSize = size
+      }
+      this.clearGlyphAtlas()
+      for (const termId of this.entries.keys()) this.fit(termId)
+    })
   }
 
   ensure(termId: string): PoolEntry {
@@ -72,7 +83,7 @@ class TerminalPool {
     const term = new Terminal({
       fontFamily: this.font.family,
       fontSize: this.font.size,
-      lineHeight: 1.2,
+      lineHeight: 1,
       cursorBlink: true,
       cursorStyle: 'block',
       scrollback: 50000,
@@ -158,7 +169,7 @@ class TerminalPool {
       this.fit(termId)
       entry.host.scrollLeft = 0
     }
-    void document.fonts.ready.then(() => {
+    void loadFonts(this.font.family, this.font.size).then(() => {
       requestAnimationFrame(run)
       window.setTimeout(run, 200)
     })
@@ -220,7 +231,7 @@ class TerminalPool {
       rows: term.rows,
       fontFamily: term.options.fontFamily || DEFAULT_FONT_FAMILY,
       fontSize: term.options.fontSize ?? 14,
-      lineHeight: term.options.lineHeight ?? 1.2,
+      lineHeight: term.options.lineHeight ?? 1,
       theme,
       background: theme.background ?? this.palette.background ?? '#000000'
     }
@@ -417,6 +428,13 @@ function bindClipboardKeys(term: Terminal): void {
     }
     return true
   })
+}
+
+/** 正文、加粗都要用到，各拉一份。加载失败就当后备字体，不挡后面的重排。 */
+function loadFonts(family: string, size: number): Promise<unknown> {
+  return Promise.all(
+    ['400', '700'].map((weight) => document.fonts.load(`${weight} ${size}px ${family}`).catch(() => []))
+  )
 }
 
 function clampLine(line: number, length: number): number {
