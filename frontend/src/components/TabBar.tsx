@@ -168,11 +168,20 @@ export function TabBar() {
     setDragOffset(pointerX.current - tabDragStart.current.pos - (el.offsetLeft - tabDragStart.current.layout))
   }
 
-  /** 被拖菜单项跟手（竖向版） */
+  /** 被拖菜单项跟手（竖向版）。只在本分区里移动，拖出菜单底会撑出滚动条 */
   const followMenuPointer = (key: string) => {
-    const el = menuContentRef.current?.querySelector<HTMLElement>(`[data-menu-key="${key}"]`)
-    if (!el) return
-    setMenuDragOffset(pointerY.current - menuDragStart.current.pos - (el.offsetTop - menuDragStart.current.layout))
+    const content = menuContentRef.current
+    const el = content?.querySelector<HTMLElement>(`[data-menu-key="${key}"]`)
+    if (!content || !el) return
+    const offset = pointerY.current - menuDragStart.current.pos - (el.offsetTop - menuDragStart.current.layout)
+    const prefix = key.slice(0, key.indexOf(':') + 1)
+    const items = content.querySelectorAll<HTMLElement>(`[data-menu-key^="${prefix}"]`)
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return setMenuDragOffset(offset)
+    const min = first.offsetTop - el.offsetTop
+    const max = last.offsetTop + last.offsetHeight - el.offsetHeight - el.offsetTop
+    setMenuDragOffset(Math.min(max, Math.max(min, offset)))
   }
 
   // 重排渲染后：其余项 FLIP 滑过去；被拖项用新布局位重算跟手位移（move 里算时 DOM 还没更新）
@@ -540,7 +549,7 @@ export function TabBar() {
                 <DropdownMenuItem
                   key={key}
                   data-menu-key={key}
-                  className={cn(dragMenuKey === key && 'relative z-10 shadow-lg ring-1 ring-foreground/30')}
+                  className={cn('whitespace-nowrap', dragMenuKey === key && 'relative z-10 shadow-lg ring-1 ring-foreground/30')}
                   style={dragMenuKey === key ? { transform: `translateY(${menuDragOffset}px)` } : undefined}
                   onPointerDown={(e) => startMenuDrag(e, key)}
                   onSelect={(event) => {
@@ -564,7 +573,7 @@ export function TabBar() {
                 <DropdownMenuItem
                   key={key}
                   data-menu-key={key}
-                  className={cn(dragMenuKey === key && 'relative z-10 shadow-lg ring-1 ring-foreground/30')}
+                  className={cn('whitespace-nowrap', dragMenuKey === key && 'relative z-10 shadow-lg ring-1 ring-foreground/30')}
                   style={dragMenuKey === key ? { transform: `translateY(${menuDragOffset}px)` } : undefined}
                   onPointerDown={(e) => startMenuDrag(e, key)}
                   onSelect={(event) => {

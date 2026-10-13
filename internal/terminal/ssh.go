@@ -90,9 +90,10 @@ func (s *Service) bindShared(entry *Entry, hold *sshx.Hold, opts CreateOptions, 
 // openJumpShell 跳板不许转发时，只给终端在跳板里再登录一次。
 // 这条没有到目标机的 SSH 客户端，文件树用不上。
 func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.SessionConfig, secret, jumpSecret string, gen int) {
+	cols, rows := s.sizeOf(entry.id, opts.Cols, opts.Rows)
 	conn, err := sshx.Dial(context.Background(), session, secret, jumpSecret, &sshx.DialOptions{
-		Cols:           opts.Cols,
-		Rows:           opts.Rows,
+		Cols:           cols,
+		Rows:           rows,
 		AllowJumpShell: true,
 	})
 	if !s.alive(entry, gen) {
@@ -150,7 +151,7 @@ func (s *Service) openShell(entry *Entry, client *ssh.Client, opts CreateOptions
 	if err != nil {
 		return err
 	}
-	cols, rows := opts.Cols, opts.Rows
+	cols, rows := s.sizeOf(entry.id, opts.Cols, opts.Rows)
 	if cols <= 0 {
 		cols = 80
 	}
@@ -180,8 +181,8 @@ func (s *Service) openShell(entry *Entry, client *ssh.Client, opts CreateOptions
 		_ = sess.Close()
 		return err
 	}
+	s.attachChannel(entry, &sshShellChannel{sess: sess, stdin: stdin}, cols, rows)
 	s.mu.Lock()
-	entry.ch = &sshShellChannel{sess: sess, stdin: stdin}
 	sessionID := entry.sessionID
 	s.mu.Unlock()
 	s.sendStatus(entry.id, sessionID, StatusConnected, "")

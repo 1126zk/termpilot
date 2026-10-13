@@ -341,8 +341,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       kind: tab.kind,
       sessionId: tab.sessionId ?? undefined,
       title: tab.title,
-      cols: 80,
-      rows: 24
+      ...(terminalPool.size(tab.id) ?? { cols: 80, rows: 24 })
     })
   },
 

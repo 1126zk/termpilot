@@ -105,11 +105,11 @@ export function bindIme(host: HTMLElement, term: Terminal): void {
     if (measure) measure.font = `${fontSize} ${fontFamily}`
     const textWidth = text && measure ? measure.measureText(text).width : 0
     const room = w * Math.max(1, term.cols - col)
-    // 左边多盖 1px，免得光标露出一条边；至少盖满一格。
+    // 四边各多盖 1px，免得光标露出一条边；至少盖满一格。
     const width = Math.ceil(Math.min(room, Math.max(w, textWidth + 2))) + 1
     const left = Math.max(0, Math.floor(col * w) - 1)
-    const top = Math.round(row * h)
-    const height = `${Math.round(h)}px`
+    const top = Math.max(0, Math.floor(row * h) - 1)
+    const height = `${Math.ceil((row + 1) * h) + 1 - top}px`
 
     setStyles(view, {
       left: `${left}px`,

@@ -20,16 +20,15 @@ func (s *Service) createLocal(opts CreateOptions) {
 	}
 	s.mu.Unlock()
 
-	ch, wait, err := startLocalPty(exe, opts.Cols, opts.Rows, func(b []byte) {
+	cols, rows := s.sizeOf(opts.TermID, opts.Cols, opts.Rows)
+	ch, wait, err := startLocalPty(exe, cols, rows, func(b []byte) {
 		s.sendData(opts.TermID, b)
 	})
 	if err != nil {
 		s.sendStatus(opts.TermID, "", StatusError, err.Error())
 		return
 	}
-	s.mu.Lock()
-	entry.ch = ch
-	s.mu.Unlock()
+	s.attachChannel(entry, ch, cols, rows)
 	s.sendStatus(opts.TermID, "", StatusConnected, "")
 	gen := s.arm(entry)
 	go func() {

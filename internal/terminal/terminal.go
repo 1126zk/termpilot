@@ -71,6 +71,9 @@ type Service struct {
 	bindWaiters map[string]chan struct{}
 	// 每扇终端正在输入的那一行。
 	lines map[string]*lineState
+	// 界面最后一次报上来的窗口大小。通道还没建好时报上来的也记着，建好后补上，
+	// 否则 PTY 一直停在创建时的 80x24，光标和画面对不上。
+	sizes map[string][2]int
 	// 正在退出。此时断开不要把窗口从库里删掉。
 	parking bool
 }
@@ -90,6 +93,7 @@ func NewService(sessions SessionStore, history HistoryStore, emitter Emitter, po
 		viewReady:   map[string]bool{},
 		bindWaiters: map[string]chan struct{}{},
 		lines:       map[string]*lineState{},
+		sizes:       map[string][2]int{},
 	}
 }
 
@@ -124,8 +128,36 @@ func (s *Service) Resize(termID string, cols, rows int) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
-	if ch := s.channelOf(termID); ch != nil {
+	s.mu.Lock()
+	s.sizes[termID] = [2]int{cols, rows}
+	var ch Channel
+	if t := s.terms[termID]; t != nil {
+		ch = t.ch
+	}
+	s.mu.Unlock()
+	if ch != nil {
 		_ = ch.Resize(cols, rows)
+	}
+}
+
+// sizeOf 界面报过大小就用界面的，否则用创建参数。
+func (s *Service) sizeOf(termID string, cols, rows int) (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if size, ok := s.sizes[termID]; ok {
+		return size[0], size[1]
+	}
+	return cols, rows
+}
+
+// attachChannel 通道建好时挂上，并补上建的过程中界面报来的大小。
+func (s *Service) attachChannel(entry *Entry, ch Channel, cols, rows int) {
+	s.mu.Lock()
+	entry.ch = ch
+	size, ok := s.sizes[entry.id]
+	s.mu.Unlock()
+	if ok && (size[0] != cols || size[1] != rows) {
+		_ = ch.Resize(size[0], size[1])
 	}
 }
 
@@ -175,6 +207,7 @@ func (s *Service) Close(termID string) {
 	delete(s.lines, termID)
 	delete(s.lastStatus, termID)
 	delete(s.viewReady, termID)
+	delete(s.sizes, termID)
 	s.mu.Unlock()
 	s.releaseLive(t)
 }

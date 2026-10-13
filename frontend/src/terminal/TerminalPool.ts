@@ -2,6 +2,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { composeTerminalRange } from './composeGl'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { bindIme } from './ime'
 import { terminalPalette } from '../theme/terminalThemes'
@@ -81,6 +82,9 @@ class TerminalPool {
 
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // 默认按 Unicode 6 算宽度，✨ 这类 emoji 只占一格，后面的字会压上来
+    term.loadAddon(new Unicode11Addon())
+    term.unicode.activeVersion = '11'
 
     const host = document.createElement('div')
     host.style.width = '100%'
@@ -150,7 +154,7 @@ class TerminalPool {
         entry.term.options.fontSize = size + 1
         entry.term.options.fontSize = size
       }
-      entry.term.clearTextureAtlas()
+      this.clearGlyphAtlas()
       this.fit(termId)
       entry.host.scrollLeft = 0
     }
@@ -158,6 +162,14 @@ class TerminalPool {
       requestAnimationFrame(run)
       window.setTimeout(run, 200)
     })
+  }
+
+  /**
+   * 同字体同配色的终端共用一张 WebGL 字形图。只清一个终端的话，图被它重新排过，
+   * 其它终端还按旧坐标取字，画面就成了碎片，要拖一下窗口才恢复。所以一起清。
+   */
+  private clearGlyphAtlas(): void {
+    for (const entry of this.entries.values()) entry.term.clearTextureAtlas()
   }
 
   detach(termId: string): void {
@@ -226,6 +238,12 @@ class TerminalPool {
       fontSize: term.options.fontSize ?? 14,
       theme
     })
+  }
+
+  size(termId: string): { cols: number; rows: number } | null {
+    const term = this.entries.get(termId)?.term
+    if (!term) return null
+    return { cols: term.cols, rows: term.rows }
   }
 
   pageInfo(termId: string): { viewportY: number; length: number; rows: number } | null {
