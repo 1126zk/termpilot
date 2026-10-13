@@ -416,7 +416,14 @@ export function FileTree(props: { tab: Tab | null }) {
                 )}
                 {item.kind !== 'dir' && (
                   <ContextMenuItem
-                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true)}
+                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true, true)}
+                  >
+                    <Eye /> 查看
+                  </ContextMenuItem>
+                )}
+                {item.kind !== 'dir' && (
+                  <ContextMenuItem
+                    onClick={() => openRemoteEditor(local ? null : sessionId, { path: item.path, name: item.name }, true, false)}
                   >
                     <FilePenLine /> 编辑
                   </ContextMenuItem>

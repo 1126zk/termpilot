@@ -20,6 +20,8 @@ import { dropBuffer, editorKey } from '../editor/editorBuffers'
 import { terminalPool } from '../terminal/TerminalPool'
 import { applyAppearance, readCachedAppearance, type ResolvedAppTheme } from '../theme/applyAppearance'
 
+const EDITOR_WRAP_KEY = 'termpilot.editorWrap'
+
 export interface EditorTab {
   key: string
   /** null 表示本机文件 */
@@ -29,6 +31,8 @@ export interface EditorTab {
   /** 斜体预览：再单击别的文件会替换它 */
   preview: boolean
   dirty: boolean
+  /** 查看模式：编辑器只读，Markdown 显示渲染结果 */
+  readOnly: boolean
 }
 
 interface TermState {
@@ -105,9 +109,15 @@ interface AppState {
 
   toggleRightPanel: () => void
   setRightPanelPane: (pane: RightPanelPane) => void
-  openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean) => void
+  /** readOnly 不传时沿用已打开标签的模式，新标签默认查看 */
+  openRemoteEditor: (sessionId: string | null, file: { path: string; name: string }, pin?: boolean, readOnly?: boolean) => void
+  setEditorReadOnly: (key: string, readOnly: boolean) => void
+  /** 编辑器自动换行，所有文件共用，记在本地 */
+  editorWrap: boolean
+  toggleEditorWrap: () => void
   closeEditorTab: (key: string) => void
-  activateEditorTab: (key: string) => void
+  /** null 表示回到终端，文件标签保留 */
+  activateEditorTab: (key: string | null) => void
   setEditorDirty: (key: string, dirty: boolean) => void
   pinEditorTab: (key: string) => void
   setSearch: (v: string) => void
@@ -406,13 +416,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
   setHostsOpen: (open) => set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false }),
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
-  openRemoteEditor: (sessionId, file, pin = false) => {
+  openRemoteEditor: (sessionId, file, pin = false, readOnly) => {
     const key = editorKey(sessionId, file.path)
     const tabs = get().editorTabs
     const existing = tabs.find((t) => t.key === key)
     if (existing) {
       set({
-        editorTabs: tabs.map((t) => (t.key === key && pin ? { ...t, preview: false } : t)),
+        editorTabs: tabs.map((t) =>
+          t.key === key
+            ? { ...t, preview: pin ? false : t.preview, readOnly: readOnly ?? t.readOnly }
+            : t
+        ),
         activeEditorKey: key
       })
       return
@@ -428,10 +442,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       editorTabs: [
         ...next,
-        { key, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false }
+        { key, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false, readOnly: readOnly ?? true }
       ],
       activeEditorKey: key
     })
+  },
+  setEditorReadOnly: (key, readOnly) =>
+    set({
+      editorTabs: get().editorTabs.map((t) => (t.key === key && t.readOnly !== readOnly ? { ...t, readOnly } : t))
+    }),
+  editorWrap: localStorage.getItem(EDITOR_WRAP_KEY) !== '0',
+  toggleEditorWrap: () => {
+    const editorWrap = !get().editorWrap
+    localStorage.setItem(EDITOR_WRAP_KEY, editorWrap ? '1' : '0')
+    set({ editorWrap })
   },
   closeEditorTab: (key) => {
     dropBuffer(key)

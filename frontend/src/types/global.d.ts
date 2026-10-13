@@ -20,6 +20,7 @@ declare global {
       EventsOn(eventName: string, callback: (...data: any[]) => void): () => void
       /** 全局只能注册一次。useDropTarget 为 true 时只在 --wails-drop-target: drop 的元素上触发 */
       OnFileDrop(callback: (x: number, y: number, paths: string[]) => void, useDropTarget: boolean): void
+      BrowserOpenURL(url: string): void
     }
   }
 }

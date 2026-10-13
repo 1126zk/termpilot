@@ -239,3 +239,128 @@
 .term-scrolling .xterm-scrollable-element > .scrollbar .slider:hover {
   background: color-mix(in oklch, var(--primary) 85%, transparent) !important;
 }
+
+/* Monaco 的滚动条滑块默认是直角 */
+.monaco-editor .monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: 999px;
+}
+
+/* 中键自动滚动的起点标记 */
+.middle-scroll-marker {
+  position: fixed;
+  z-index: 9999;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--primary);
+  background: color-mix(in oklch, var(--background) 70%, transparent)
+    radial-gradient(circle, var(--primary) 0 3px, transparent 3.5px);
+  pointer-events: none;
+}
+.middle-scrolling,
+.middle-scrolling * {
+  cursor: all-scroll !important;
+}
+
+/* 编辑区的 Markdown 预览 */
+.markdown-body {
+  user-select: text;
+  color: var(--foreground);
+  font-size: 15px;
+  line-height: 1.7;
+  word-wrap: break-word;
+}
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.4em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-body h1 {
+  font-size: 1.75em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h2 {
+  font-size: 1.4em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h3 {
+  font-size: 1.2em;
+}
+.markdown-body :is(p, ul, ol, blockquote, pre, table) {
+  margin: 0 0 1em;
+}
+.markdown-body :is(ul, ol) {
+  padding-left: 1.8em;
+}
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body li + li {
+  margin-top: 0.25em;
+}
+.markdown-body a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body strong {
+  font-weight: 600;
+}
+.markdown-body code {
+  font-family: 'SauceCodePro Nerd Font Mono', Consolas, 'Microsoft YaHei', monospace;
+  font-size: 0.9em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: var(--muted);
+}
+.markdown-body pre {
+  padding: 12px 16px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--card);
+  line-height: 1.5;
+}
+.markdown-body pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.875em;
+}
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: var(--muted-foreground);
+  border-left: 3px solid var(--border);
+}
+.markdown-body hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.markdown-body table {
+  display: block;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.markdown-body :is(th, td) {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+}
+.markdown-body th {
+  font-weight: 600;
+  background: var(--muted);
+}
+.markdown-body img {
+  max-width: 100%;
+}
+.markdown-body input[type='checkbox'] {
+  margin-right: 0.4em;
+  vertical-align: middle;
+}
