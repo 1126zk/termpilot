@@ -19,16 +19,9 @@ type conptyChannel struct {
 }
 
 func (c *conptyChannel) Write(data []byte) error {
-	// 对应 node-pty 在 Windows 的输入行为：裸 LF 转成 CRLF。
-	// PSReadLine 只认 CR 提交命令行，直接写 \n 会挂在提示符上不执行。
-	out := make([]byte, 0, len(data)+8)
-	for i, b := range data {
-		if b == '\n' && (i == 0 || data[i-1] != '\r') {
-			out = append(out, '\r')
-		}
-		out = append(out, b)
-	}
-	_, err := c.cpty.Write(out)
+	// PSReadLine 只认 CR 提交。裸 LF 收成 CR，不再留着 LF，
+	// 否则命令执行后多余的换行会被当成续行，提示符变成 >>。
+	_, err := c.cpty.Write(consoleEnter(data))
 	return err
 }
 
