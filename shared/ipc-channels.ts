@@ -56,6 +56,7 @@ export const IPC = {
   historyChanged: 'history:changed',
 
   mcpAudit: 'mcp:audit',
+  mcpAuditExport: 'mcp:audit-export',
   mcpGet: 'mcp:get',
   mcpSave: 'mcp:save',
 

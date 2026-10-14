@@ -157,6 +157,7 @@ const api = {
   mcp: {
     get: () => invoke(IPC.mcpGet, []),
     audit: () => invoke<McpAuditEntry[]>(IPC.mcpAudit, []),
+    exportAudit: () => invoke<boolean>(IPC.mcpAuditExport, []),
     save: (input: McpSettingsInput) => invoke(IPC.mcpSave, [input]),
     state: () => invoke<McpRuntime>(IPC.mcpState, []),
     bound: (termId: string) => send(IPC.mcpBound, termId),

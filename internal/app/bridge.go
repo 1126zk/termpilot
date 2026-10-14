@@ -95,6 +95,7 @@ func (b *Bridge) routes() map[string]handler {
 		"appearance:save":   a.hAppearanceSave,
 		"mcp:get":           func(_ []interface{}) (interface{}, error) { return a.store.GetMcpSettings() },
 		"mcp:audit":         a.hMcpAudit,
+		"mcp:audit-export":  a.hMcpAuditExport,
 		"mcp:save":          a.hMcpSave,
 		"mcp:state":         func(_ []interface{}) (interface{}, error) { return a.mcp.State(), nil },
 		"mcp:bound":         a.hMcpBound,

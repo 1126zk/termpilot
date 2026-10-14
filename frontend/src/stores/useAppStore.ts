@@ -255,7 +255,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  setSettingsOpen: (open) => set(open ? { settingsOpen: true, hostsOpen: false, rightPanelOpen: false } : { settingsOpen: false }),
+  setSettingsOpen: (open) =>
+    set(open ? { settingsOpen: true, hostsOpen: false, rightPanelOpen: false, editing: null } : { settingsOpen: false }),
 
   setNotice: (notice) => {
     if (noticeTimer) clearTimeout(noticeTimer)

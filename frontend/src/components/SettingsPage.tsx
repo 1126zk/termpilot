@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, RefreshCw, ScrollText, Server } from 'lucide-react'
+import { Check, Copy, Download, Info, RefreshCw, ScrollText, Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,11 +8,12 @@ import { cn } from '@/lib/utils'
 import { MCP_DEFAULT_PORT, MCP_HOST, type McpAuditEntry, type McpSettingsInput } from '../../../shared/types'
 import { useAppStore } from '../stores/useAppStore'
 
-type Pane = 'mcp' | 'audit'
+type Pane = 'mcp' | 'audit' | 'about'
 
 const panes: { id: Pane; label: string; icon: typeof Server }[] = [
   { id: 'mcp', label: 'MCP 服务', icon: Server },
-  { id: 'audit', label: '调用记录', icon: ScrollText }
+  { id: 'audit', label: '调用记录', icon: ScrollText },
+  { id: 'about', label: '关于', icon: Info }
 ]
 
 const empty = (): McpSettingsInput => ({
@@ -36,6 +37,7 @@ export function SettingsPage() {
   const [copied, setCopied] = useState<'endpoint' | 'token' | null>(null)
   const [showToken, setShowToken] = useState(false)
   const [audit, setAudit] = useState<McpAuditEntry[]>([])
+  const [version, setVersion] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -45,6 +47,7 @@ export function SettingsPage() {
     setPane('mcp')
     void loadMcp().catch((e) => setError(e instanceof Error ? e.message : String(e)))
     void window.api.mcp.audit().then(setAudit).catch(() => setAudit([]))
+    void window.api.app.version().then(setVersion).catch(() => setVersion(''))
   }, [open, loadMcp])
 
   useEffect(() => {
@@ -95,6 +98,16 @@ export function SettingsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       return false
+    }
+  }
+
+  const exportAudit = async () => {
+    setError('')
+    try {
+      const saved = await window.api.mcp.exportAudit()
+      if (saved) useAppStore.getState().setNotice('调用记录已导出')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -220,11 +233,18 @@ export function SettingsPage() {
 
             {pane === 'audit' && (
               <section className="grid gap-4">
-                <div>
-                  <h2 className="text-base font-medium text-muted-foreground">调用记录</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">最近的 MCP 工具调用，失败的会标出来。</p>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-medium text-muted-foreground">调用记录</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">最近的 MCP 工具调用，失败的会标出来。</p>
+                  </div>
+                  <Button variant="outline" size="sm" disabled={audit.length === 0} onClick={() => void exportAudit()}>
+                    <Download />
+                    导出
+                  </Button>
                 </div>
-                <div className="max-h-[28rem] overflow-auto rounded-xl border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+                {error && <p className="text-xs text-destructive">{error}</p>}
+                <div className="max-h-[28rem] overflow-auto rounded-xl border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed select-text">
                   {audit.length === 0 && <p className="text-muted-foreground">还没有记录</p>}
                   {audit.map((row, index) => (
                     <p key={`${row.at}-${index}`} className={row.ok ? '' : 'text-destructive'}>
@@ -233,6 +253,13 @@ export function SettingsPage() {
                     </p>
                   ))}
                 </div>
+              </section>
+            )}
+
+            {pane === 'about' && (
+              <section className="flex items-center justify-between gap-4">
+                <h2 className="text-base font-medium text-muted-foreground">TermPilot</h2>
+                <span className="text-sm text-muted-foreground">{version ? `v${version}` : ''}</span>
               </section>
             )}
         </div>

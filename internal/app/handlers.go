@@ -2,6 +2,10 @@ package app
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -606,6 +610,43 @@ func (a *App) hAppearanceSave(args []interface{}) (interface{}, error) {
 
 func (a *App) hMcpAudit(_ []interface{}) (interface{}, error) {
 	return a.store.ListAudit(0)
+}
+
+func (a *App) hMcpAuditExport(_ []interface{}) (interface{}, error) {
+	entries, err := a.store.ListAudit(0)
+	if err != nil {
+		return nil, err
+	}
+	picked, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
+		Title:           "导出调用记录",
+		DefaultFilename: fmt.Sprintf("termpilot-audit-%s.log", time.Now().Format("20060102-150405")),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if picked == "" {
+		return false, nil
+	}
+	if err := os.WriteFile(picked, []byte(formatMcpAudit(entries)), 0o600); err != nil {
+		return nil, err
+	}
+	return true, nil
+}
+
+func formatMcpAudit(entries []storage.McpAuditEntry) string {
+	var out strings.Builder
+	for _, entry := range entries {
+		status := "失败"
+		if entry.Ok {
+			status = "成功"
+		}
+		fmt.Fprintf(&out, "%s %s %s", time.UnixMilli(entry.At).Local().Format("2006/01/02 15:04:05"), status, entry.Tool)
+		if entry.Detail != "" {
+			fmt.Fprintf(&out, " %s", entry.Detail)
+		}
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func (a *App) hMcpSave(args []interface{}) (interface{}, error) {

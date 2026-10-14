@@ -1,5 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRightToLine, Eye, EyeOff, Globe, KeyRound, Plus, Tag, User, X } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowRightToLine,
+  ArrowUp,
+  Eye,
+  EyeOff,
+  Globe,
+  KeyRound,
+  Plus,
+  Tag,
+  User,
+  X
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -22,6 +34,24 @@ interface ForwardDraft {
   localPort: string
   remotePort: string
 }
+
+interface JumpDraft {
+  id: number
+  host: string
+  port: number
+  username: string
+  secret: string
+  showSecret: boolean
+}
+
+const newJumpDraft = (id: number): JumpDraft => ({
+  id,
+  host: '',
+  port: 22,
+  username: '',
+  secret: '',
+  showSecret: false
+})
 
 const emptyRule = (): ForwardDraft => ({
   type: 'local',
@@ -52,7 +82,9 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
 
   const [form, setForm] = useState(empty())
   const [forwards, setForwards] = useState<ForwardDraft[]>([])
+  const [jumps, setJumps] = useState<JumpDraft[]>([])
   const [showSecret, setShowSecret] = useState(false)
+  const nextJumpID = useRef(1)
   /** 用户改过才自动保存。初始化填充（含 revealSecret 回填）不算脏 */
   const dirty = useRef(false)
   /** create 在飞时不要并发再建 */
@@ -71,6 +103,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     }
     dirty.current = false
     setShowSecret(false)
+    setJumps([])
     if (editing.action === 'edit') {
       const s = editing.session
       setForm({
@@ -111,6 +144,27 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
   const setRule = (index: number, patch: Partial<ForwardDraft>) => {
     dirty.current = true
     setForwards((list) => list.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
+  }
+
+  const setJump = (id: number, patch: Partial<JumpDraft>) => {
+    setJumps((list) => list.map((jump) => (jump.id === id ? { ...jump, ...patch } : jump)))
+  }
+
+  const addJump = () => {
+    const id = nextJumpID.current++
+    setJumps((list) => [...list, newJumpDraft(id)])
+  }
+
+  const moveJump = (id: number, offset: -1 | 1) => {
+    setJumps((list) => {
+      const from = list.findIndex((jump) => jump.id === id)
+      const to = from + offset
+      if (from < 0 || to < 0 || to >= list.length) return list
+      const next = [...list]
+      const [jump] = next.splice(from, 1)
+      next.splice(to, 0, jump)
+      return next
+    })
   }
 
   /** 全空的规则直接丢弃；任何一条端口不合法就整体跳过这次保存（静默，等用户继续改） */
@@ -310,6 +364,105 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
             <Plus className="size-3.5" />
             添加端口映射
           </button>
+
+          <div className="grid gap-2.5">
+            {jumps.length > 0 && (
+              <p className="text-xs text-muted-foreground">按本机 → 第 1 跳 → 第 2 跳 → 目标主机的顺序排列</p>
+            )}
+
+            {jumps.map((jump, index) => (
+              <div key={jump.id} className="grid gap-2.5 rounded-lg bg-muted/45 p-2.5">
+                <div className="flex h-6 items-center justify-between">
+                  <p className="text-xs font-medium text-muted-foreground">第 {index + 1} 跳</p>
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      title="上移"
+                      disabled={index === 0}
+                      onClick={() => moveJump(jump.id, -1)}
+                    >
+                      <ArrowUp className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      title="下移"
+                      disabled={index === jumps.length - 1}
+                      onClick={() => moveJump(jump.id, 1)}
+                    >
+                      <ArrowDown className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      title="删除这一跳"
+                      onClick={() => setJumps((list) => list.filter((item) => item.id !== jump.id))}
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[1fr_5rem] gap-2">
+                  <IconInput
+                    icon={<Globe />}
+                    value={jump.host}
+                    placeholder="跳板主机"
+                    onChange={(e) => setJump(jump.id, { host: e.target.value })}
+                  />
+                  <Input
+                    className="h-10"
+                    type="number"
+                    placeholder="22"
+                    value={jump.port}
+                    onChange={(e) => setJump(jump.id, { port: Number(e.target.value) || 22 })}
+                  />
+                </div>
+                <IconInput
+                  icon={<User />}
+                  value={jump.username}
+                  placeholder="跳板用户名"
+                  onChange={(e) => setJump(jump.id, { username: e.target.value })}
+                />
+                <div className="relative">
+                  <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
+                    <KeyRound />
+                  </span>
+                  <Input
+                    className="h-10 pr-9 pl-8"
+                    type={jump.showSecret ? 'text' : 'password'}
+                    value={jump.secret}
+                    placeholder="跳板密码"
+                    onChange={(e) => setJump(jump.id, { secret: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    title={jump.showSecret ? '隐藏密码' : '显示密码'}
+                    className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+                    onClick={() => setJump(jump.id, { showSecret: !jump.showSecret })}
+                  >
+                    {jump.showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-muted text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              onClick={addJump}
+            >
+              <Plus className="size-3.5" />
+              添加跳板机
+            </button>
+          </div>
         </div>
       </ScrollArea>
       <div className="shrink-0 border-t p-3">
