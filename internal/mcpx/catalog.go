@@ -197,14 +197,14 @@ var TOOLS = []ToolDef{
 	},
 	{
 		Name:        "term_screenshot",
-		Description: "截取终端画面。仅作用于 PTY 终端。不填行号就截当前这一屏。填了 startLine 和 endLine（两端都包含，0 是最旧的一行）就只返回这一段裁好的图。一次大约 20 屏，更长就只保留末尾，结果里写明缓冲总行数和实际截到的行。行号用 term_lines 查。设置里打开「合成算法」时按缓冲拼图，不滚动正在看的画面；关闭时拍摄已经画出来的画面。",
+		Description: "截取终端画面。仅作用于 PTY 终端。不填行号就截当前这一屏。填了 startLine 和 endLine（两端都包含，0 是最旧的一行）就只返回这一段裁好的图。一次大约 20 屏，更长就只保留末尾，结果里写明缓冲总行数和实际截到的行。行号用 term_lines 查。按缓冲拼图，不滚动正在看的画面。",
 		ReadOnly:    true,
 		Images:      "always",
 		Input:       lineFields(),
 	},
 	{
 		Name:        "term_screenshot_scrollback",
-		Description: "把终端缓冲接成长图。仅作用于 PTY 终端。startLine / endLine 两端都包含，0 是最旧的一行；填了范围就只返回裁好的这一段。一次大约 20 屏，超过后分成多张并只保留末尾，结果写明「缓冲共 X 行，已截取第 A–B 行（超出上限）」。设置里打开「合成算法」时按缓冲拼图，不滚动正在看的画面；关闭时逐屏拍摄再接上。",
+		Description: "把终端缓冲接成长图。仅作用于 PTY 终端。startLine / endLine 两端都包含，0 是最旧的一行；填了范围就只返回裁好的这一段。一次大约 20 屏，超过后分成多张并只保留末尾，结果写明「缓冲共 X 行，已截取第 A–B 行（超出上限）」。按缓冲拼图，不滚动正在看的画面。",
 		ReadOnly:    true,
 		Images:      "ranged",
 		Input:       lineFields(),

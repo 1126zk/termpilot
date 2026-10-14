@@ -15,7 +15,7 @@ export const IPC = {
   termInput: 'term:input',
   termResize: 'term:resize',
   termClose: 'term:close',
-  /** renderer → main，窗口短标题变了 */
+  /** renderer → main，标签标题变了 */
   termLabel: 'term:label',
   /** renderer → main，从屏幕提示符解析终端当前目录 */
   termCwd: 'term:cwd',

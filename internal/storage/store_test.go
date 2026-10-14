@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/base64"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -301,12 +303,12 @@ func TestAppearance(t *testing.T) {
 		t.Fatalf("默认外观 = %+v", def)
 	}
 	saved, err := s.SaveAppearance(Appearance{
-		Theme: "dracula", TerminalFont: " Consolas ", TerminalSize: 16, ExperimentalScreenshot: true,
+		Theme: "dracula", TerminalFont: " Consolas ", TerminalSize: 16,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.TerminalFont != "Consolas" || saved.TerminalSize != 16 || !saved.ExperimentalScreenshot {
+	if saved.TerminalFont != "Consolas" || saved.TerminalSize != 16 {
 		t.Fatalf("保存结果 = %+v", saved)
 	}
 	back, _ := s.GetAppearance()
@@ -321,6 +323,54 @@ func TestAppearance(t *testing.T) {
 	unknown, _ := s.SaveAppearance(Appearance{Theme: "不存在的主题"})
 	if unknown.Theme != "termius-dark" {
 		t.Fatalf("未知主题应回落深色: %+v", unknown)
+	}
+}
+
+func TestDropExperimentalScreenshotColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dir, "termpilot.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE appearance (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		theme TEXT,
+		terminal_font TEXT,
+		terminal_size INTEGER,
+		experimental_screenshot INTEGER NOT NULL DEFAULT 0
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO appearance (id, theme, terminal_font, terminal_size, experimental_screenshot)
+		 VALUES (1, 'dracula', 'Consolas', 16, 1)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(dir, fakeCipher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	got, err := s.GetAppearance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" || got.TerminalFont != "Consolas" || got.TerminalSize != 16 {
+		t.Fatalf("旧外观应保留: %+v", got)
+	}
+	var name string
+	err = s.db.QueryRow(
+		"SELECT name FROM pragma_table_info('appearance') WHERE name = 'experimental_screenshot'",
+	).Scan(&name)
+	if err != sql.ErrNoRows {
+		t.Fatalf("废弃列应已删除, name=%q err=%v", name, err)
 	}
 }
 

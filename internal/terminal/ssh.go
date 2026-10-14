@@ -32,7 +32,7 @@ func (s *Service) createSSH(opts CreateOptions, retried bool) {
 			id:        opts.TermID,
 			sessionID: session.ID,
 			kind:      KindSSH,
-			title:     orDefault(strings.TrimSpace(opts.Title), "窗口"),
+			title:     orDefault(strings.TrimSpace(opts.Title), "终端"),
 		}
 		s.terms[opts.TermID] = entry
 	}

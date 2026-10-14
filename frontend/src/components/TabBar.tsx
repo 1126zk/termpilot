@@ -16,7 +16,7 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
-import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt, windowLabel } from '../agentPrompt'
+import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { useMenuAction } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
@@ -33,14 +33,6 @@ function ShellIcon(props: { shell?: LocalShell }) {
   if (props.shell === 'wsl') return <OsIcon os="linux" />
   if (props.shell === 'pwsh') return <SquareTerminal className="size-4 shrink-0" strokeWidth={2} style={{ color: '#2c4fdd' }} />
   return <SquareTerminal className="size-4 shrink-0" strokeWidth={2} style={{ color: '#5391fe' }} />
-}
-
-function shellLabel(shell?: LocalShell): string {
-  if (shell === 'cmd') return 'CMD'
-  if (shell === 'gitbash') return 'Git Bash'
-  if (shell === 'wsl') return 'WSL'
-  if (shell === 'pwsh') return 'PowerShell 7'
-  return 'PowerShell'
 }
 
 const drag = { '--wails-draggable': 'drag' } as CSSProperties
@@ -476,12 +468,12 @@ export function TabBar() {
                   {renamingId === t.id ? (
                     <InlineRename
                       tabId={t.id}
-                      initial={windowLabel(t.title, t.kind === 'local' ? shellLabel(t.shell) : session?.name)}
+                      initial={t.title}
                       done={() => setRenamingId(null)}
                     />
                   ) : (
                     <span className={cn('min-w-0 truncate', active && 'text-primary')}>
-                      {windowLabel(t.title, t.kind === 'local' ? shellLabel(t.shell) : session?.name)}
+                      {t.title}
                     </span>
                   )}
                 </button>

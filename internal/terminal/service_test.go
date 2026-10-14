@@ -53,7 +53,7 @@ func (f *fakeChannel) input() string {
 
 // addFakeTerm 直接往服务里塞一扇带假通道的终端，绕过拨号。
 func addFakeTerm(svc *Service, termID string, kind Kind, ch Channel) *Entry {
-	entry := &Entry{id: termID, kind: kind, title: "窗口", liveGen: 1, ch: ch}
+	entry := &Entry{id: termID, kind: kind, title: "PowerShell (1)", liveGen: 1, ch: ch}
 	if kind == KindSSH {
 		entry.sessionID = "conn-1"
 	}

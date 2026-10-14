@@ -400,7 +400,7 @@ func (s *Service) connectSession(ctx context.Context, key string) (string, error
 			n++
 		}
 	}
-	title := fmt.Sprintf("窗口 %d", n)
+	title := termTitle(session.Name, n)
 	termID := NewTermID()
 	bound := make(chan error, 1)
 	go func() { bound <- s.deps.Terminal.ExpectBind(termID, bindTimeout) }()
@@ -695,7 +695,16 @@ func (s *Service) writeTerm(ctx context.Context, raw map[string]any) (string, er
 	return out, nil
 }
 
-// openLocal 对应 TS openLocal。
+// termTitle 标签标题：标签名加序号，和界面上看到的是同一句。
+func termTitle(name string, n int) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "终端"
+	}
+	return fmt.Sprintf("%s (%d)", name, n)
+}
+
+// openLocal 对应 TS openLocal。本机默认壳是 PowerShell，标题与界面一致。
 func (s *Service) openLocal(ctx context.Context) (string, error) {
 	n := 1
 	for _, term := range s.deps.Terminal.ListTerms() {
@@ -703,7 +712,7 @@ func (s *Service) openLocal(ctx context.Context) (string, error) {
 			n++
 		}
 	}
-	title := fmt.Sprintf("窗口 %d", n)
+	title := termTitle("PowerShell", n)
 	termID := NewTermID()
 	bound := make(chan error, 1)
 	go func() { bound <- s.deps.Terminal.ExpectBind(termID, bindTimeout) }()

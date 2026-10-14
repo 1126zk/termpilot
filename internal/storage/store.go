@@ -1,7 +1,8 @@
 // Package storage 是 TermPilot 会话存储的 Go 移植版（原 src/main/services/StorageService.ts）。
 //
-// 数据库：userData/termpilot.db（modernc.org/sqlite，WAL），schema 与 Electron 版完全一致，
-// 可以直接打开 Electron 版生成的库。凭据只以密文写入 secret_encrypted / jump_secret_encrypted /
+// 数据库：userData/termpilot.db（modernc.org/sqlite，WAL）。schema 从 Electron 版沿用，
+// 可以直接打开旧库；打开时会删掉已废弃的 appearance.experimental_screenshot。
+// 凭据只以密文写入 secret_encrypted / jump_secret_encrypted /
 // mcp_config.token_encrypted，密文编码与 Electron safeStorage 落盘格式一致（见 internal/secrets）。
 package storage
 
@@ -52,7 +53,8 @@ type Store struct {
 	onMcpSettings func(settings McpSettings) error
 }
 
-// schema 照搬 StorageService.ts 构造函数里的 CREATE 语句（顺序一致）。
+// schema 从 Electron 版 StorageService.ts 的 CREATE 语句沿用。
+// experimental_screenshot 已删除，打开旧库时再删列。
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -87,8 +89,7 @@ CREATE TABLE IF NOT EXISTS appearance (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   theme TEXT,
   terminal_font TEXT,
-  terminal_size INTEGER,
-  experimental_screenshot INTEGER NOT NULL DEFAULT 0
+  terminal_size INTEGER
 );
 CREATE TABLE IF NOT EXISTS host_notes (
   host_key TEXT PRIMARY KEY,
@@ -133,7 +134,42 @@ func Open(dir string, cipher Cipher) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("建表失败: %w", err)
 	}
+	if err := dropColumnIfExists(db, "appearance", "experimental_screenshot"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("清理外观表失败: %w", err)
+	}
 	return &Store{db: db, cipher: cipher}, nil
+}
+
+// dropColumnIfExists 删掉旧库里已经不用的列。新库没有这一列时直接返回。
+func dropColumnIfExists(db *sql.DB, table, column string) error {
+	rows, err := db.Query("SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, column))
+	return err
 }
 
 // Close 关闭数据库。
@@ -856,10 +892,9 @@ func (s *Store) GetAppearance() (Appearance, error) {
 	}
 	var theme, font sql.NullString
 	var size sql.NullInt64
-	var experimental int64
 	err := s.db.QueryRow(
-		"SELECT theme, terminal_font, terminal_size, experimental_screenshot FROM appearance WHERE id = 1",
-	).Scan(&theme, &font, &size, &experimental)
+		"SELECT theme, terminal_font, terminal_size FROM appearance WHERE id = 1",
+	).Scan(&theme, &font, &size)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ParseAppearance(Appearance{}), nil
 	}
@@ -867,9 +902,8 @@ func (s *Store) GetAppearance() (Appearance, error) {
 		return Appearance{}, err
 	}
 	out := Appearance{
-		Theme:                  theme.String,
-		TerminalFont:           font.String,
-		ExperimentalScreenshot: experimental == 1,
+		Theme:        theme.String,
+		TerminalFont: font.String,
 	}
 	if size.Valid {
 		out.TerminalSize = int(size.Int64)
@@ -885,9 +919,9 @@ func (s *Store) SaveAppearance(input Appearance) (Appearance, error) {
 	}
 	_, err := s.db.Exec(
 		`UPDATE appearance
-		 SET theme = ?, terminal_font = ?, terminal_size = ?, experimental_screenshot = ?
+		 SET theme = ?, terminal_font = ?, terminal_size = ?
 		 WHERE id = 1`,
-		next.Theme, next.TerminalFont, next.TerminalSize, boolInt(next.ExperimentalScreenshot),
+		next.Theme, next.TerminalFont, next.TerminalSize,
 	)
 	if err != nil {
 		return Appearance{}, err

@@ -81,7 +81,7 @@ export interface Tab {
   /** ssh 标签对应会话 id；本地终端为 null */
   sessionId: string | null
   kind: TabKind
-  /** 这扇窗口自己的短标题，例如「窗口 1」。标签上再拼连接名。 */
+  /** 标签上的标题，例如「PowerShell (1)」「web (2)」。用户改过名则是改过的那句。 */
   title: string
   /** 助手写的备注，帮助以后认出这扇窗口在做什么。 */
   remark?: string
@@ -110,7 +110,7 @@ export interface TermCreateOptions {
   kind: TabKind
   /** kind = ssh 时必填 */
   sessionId?: string
-  /** 窗口短标题，例如「窗口 1」 */
+  /** 标签标题，例如「PowerShell (1)」「web (2)」 */
   title?: string
   /** kind = local 时的壳类型，缺省 powershell */
   shell?: LocalShell
@@ -2552,8 +2552,6 @@ export interface Appearance {
   terminalFont: string
   /** 终端字号，10–24 */
   terminalSize: number
-  /** 打开后所有截图都按缓冲拼图。默认关闭，沿用逐屏拍摄。 */
-  experimentalScreenshot: boolean
 }
 
 /** 终端字体候选。存的是首选字体名，渲染时再接通用 fallback。 */
@@ -2568,8 +2566,7 @@ export const TERMINAL_FONTS = [
 export const DEFAULT_APPEARANCE: Appearance = {
   theme: 'termius-dark',
   terminalFont: 'Consolas',
-  terminalSize: 14,
-  experimentalScreenshot: false
+  terminalSize: 14
 }
 
 export function parseAppearance(input: unknown): Appearance {
@@ -2583,7 +2580,7 @@ export function parseAppearance(input: unknown): Appearance {
       : DEFAULT_APPEARANCE.terminalFont
   const size = typeof row.terminalSize === 'number' ? Math.trunc(row.terminalSize) : NaN
   const terminalSize = size >= 10 && size <= 24 ? size : DEFAULT_APPEARANCE.terminalSize
-  return { theme, terminalFont, terminalSize, experimentalScreenshot: row.experimentalScreenshot === true }
+  return { theme, terminalFont, terminalSize }
 }
 
 /** 一条命令片段：存常用命令，一键发到当前终端执行 */

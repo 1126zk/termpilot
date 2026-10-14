@@ -256,7 +256,7 @@ func (s *Service) ListTerms() []TermInfo {
 	return out
 }
 
-// LabelPatch 窗口短标题或助手备注。编号不变。nil 字段不修改。
+// LabelPatch 标签标题或助手备注。编号不变。nil 字段不修改。
 type LabelPatch struct {
 	Title  *string
 	Remark *string

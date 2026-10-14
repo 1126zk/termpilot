@@ -14,7 +14,7 @@ func (s *Service) createLocal(opts CreateOptions) {
 		entry = &Entry{
 			id:    opts.TermID,
 			kind:  KindLocal,
-			title: orDefault(strings.TrimSpace(opts.Title), "窗口"),
+			title: orDefault(strings.TrimSpace(opts.Title), "终端"),
 		}
 		s.terms[opts.TermID] = entry
 	}

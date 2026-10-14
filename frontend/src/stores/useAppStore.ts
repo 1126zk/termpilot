@@ -17,6 +17,7 @@ import {
 import { newTermId } from '../../../shared/ids'
 import { osIconProps } from '../components/OsIcon'
 import { dropBuffer, editorKey } from '../editor/editorBuffers'
+import { shellLabel, termTitle } from '../agentPrompt'
 import { terminalPool } from '../terminal/TerminalPool'
 import { applyAppearance, readCachedAppearance, type ResolvedAppTheme } from '../theme/applyAppearance'
 
@@ -290,7 +291,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       id: newTermId(),
       sessionId: session.id,
       kind: 'ssh',
-      title: `窗口 ${count + 1}`,
+      title: termTitle(count + 1, session.name),
       ...known
     }
     set({ tabs: [...get().tabs, tab], activeTabId: tab.id })
@@ -329,7 +330,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       id: newTermId(),
       sessionId: null,
       kind: 'local',
-      title: `窗口 ${count + 1}`,
+      title: termTitle(count + 1, shellLabel(shell)),
       os: platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux',
       shell
     }

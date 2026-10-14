@@ -109,10 +109,9 @@ type HistoryEntry struct {
 
 // Appearance 外观设置。
 type Appearance struct {
-	Theme                  string `json:"theme"`
-	TerminalFont           string `json:"terminalFont"`
-	TerminalSize           int    `json:"terminalSize"`
-	ExperimentalScreenshot bool   `json:"experimentalScreenshot"`
+	Theme        string `json:"theme"`
+	TerminalFont string `json:"terminalFont"`
+	TerminalSize int    `json:"terminalSize"`
 }
 
 // McpSettings 已保存的 MCP 服务端配置，token 为明文。
@@ -142,10 +141,9 @@ type McpAuditEntry struct {
 
 // DefaultAppearance 对应 TS 的 DEFAULT_APPEARANCE。
 var DefaultAppearance = Appearance{
-	Theme:                  "termius-dark",
-	TerminalFont:           "Consolas",
-	TerminalSize:           14,
-	ExperimentalScreenshot: false,
+	Theme:        "termius-dark",
+	TerminalFont: "Consolas",
+	TerminalSize: 14,
 }
 
 // legacyThemeIDs 废弃主题 id 的归宿（TS LEGACY_THEME_IDS）。
@@ -212,6 +210,5 @@ func ParseAppearance(input Appearance) Appearance {
 	if input.TerminalSize >= 10 && input.TerminalSize <= 24 {
 		out.TerminalSize = input.TerminalSize
 	}
-	out.ExperimentalScreenshot = input.ExperimentalScreenshot
 	return out
 }

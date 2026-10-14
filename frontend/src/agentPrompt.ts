@@ -1,13 +1,21 @@
-import type { SessionConfig, Tab } from '../../shared/types'
+import type { LocalShell, SessionConfig, Tab } from '../../shared/types'
 
-/** 标签名：连接名 (窗口序号)，本机终端同理。title 形如「窗口 2」。 */
-export function windowLabel(title: string, connectionName?: string | null): string {
-  const n = /^窗口 (\d+)$/.exec(title)?.[1]
-  if (!n) return title
-  return connectionName ? `${connectionName} (${n})` : `本机终端 (${n})`
+/** 本机终端壳的标签名。缺省按 PowerShell。 */
+export function shellLabel(shell?: LocalShell): string {
+  if (shell === 'cmd') return 'CMD'
+  if (shell === 'gitbash') return 'Git Bash'
+  if (shell === 'wsl') return 'WSL'
+  if (shell === 'pwsh') return 'PowerShell 7'
+  return 'PowerShell'
 }
 
-/** 右键一扇终端。只写这扇终端的事实和它所属连接。 */
+/** 新建终端的标题：标签名加序号，例如「PowerShell (1)」「web (2)」。 */
+export function termTitle(index: number, label?: string | null): string {
+  const name = label?.trim() || '终端'
+  return `${name} (${index})`
+}
+
+/** 右键一扇终端。只写这扇终端的编号、标签名和它所属连接。 */
 export function termAgentPrompt(tab: Tab, session: SessionConfig | null): string {
   const lines = [`终端：${tab.id}`, `标题：${tab.title}`]
   if (tab.remark?.trim()) lines.push(`备注：${tab.remark.trim()}`)

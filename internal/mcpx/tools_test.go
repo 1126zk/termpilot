@@ -13,7 +13,7 @@ import (
 func ptrInt(v int) *int { return &v }
 
 func withTerm(term *fakeTerminal, id, status string, kind terminal.Kind) {
-	term.terms = append(term.terms, terminal.TermInfo{ID: id, Kind: kind, Status: status, Title: "窗口 1"})
+	term.terms = append(term.terms, terminal.TermInfo{ID: id, Kind: kind, Status: status, Title: "PowerShell (1)"})
 }
 
 // TestConnectionOpenClose 开关标签事件 + 开连接文案。
@@ -29,7 +29,7 @@ func TestConnectionOpenClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "已打开连接 conn-1234abcd（web）。") || !strings.Contains(out, "标题：窗口 1") {
+	if !strings.Contains(out, "已打开连接 conn-1234abcd（web）。") || !strings.Contains(out, "标题：web (1)") {
 		t.Errorf("开连接文案: %q", out)
 	}
 	if len(opened) != 1 || opened[0].Kind != "ssh" || opened[0].SessionID == nil || *opened[0].SessionID != "s1" {
@@ -341,7 +341,7 @@ func TestOpenLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "已打开本机终端 term-") || !strings.Contains(out, "标题：窗口 1") {
+	if !strings.Contains(out, "已打开本机终端 term-") || !strings.Contains(out, "标题：PowerShell (1)") {
 		t.Errorf("openLocal: %q", out)
 	}
 	if len(opened) != 1 || opened[0].Kind != "local" || opened[0].SessionID != nil {
