@@ -104,6 +104,7 @@ class TerminalPool {
     term.open(host)
     host.style.background = this.palette.background ?? ''
     bindClipboardKeys(term)
+    bindOsc52(term)
     bindIme(host, term)
 
     this.enableWebgl(term)
@@ -435,6 +436,36 @@ function loadFonts(family: string, size: number): Promise<unknown> {
   return Promise.all(
     ['400', '700'].map((weight) => document.fonts.load(`${weight} ${size}px ${family}`).catch(() => []))
   )
+}
+
+const OSC52_MAX_BASE64 = 8 * 1024 * 1024
+
+/**
+ * OSC 52：远端程序（SSH 上的 pi、vim、tmux 等）要写本机剪贴板，xterm 自己不处理。
+ * 只接写入；Pd 为 ? 是读剪贴板，不答，免得远端读走本机内容。
+ * 写剪贴板走 Wails 的 Go 端，WebView 的 navigator.clipboard 没有用户手势时可能被拒。
+ */
+function bindOsc52(term: Terminal): void {
+  term.parser.registerOscHandler(52, (data) => {
+    const sep = data.indexOf(';')
+    if (sep < 0) return true
+    const payload = data.slice(sep + 1)
+    if (!payload || payload === '?' || payload.length > OSC52_MAX_BASE64) return true
+    let text: string
+    try {
+      const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
+      text = new TextDecoder().decode(bytes)
+    } catch {
+      return true
+    }
+    const write = window.runtime?.ClipboardSetText
+    if (write) {
+      void write(text).catch(() => navigator.clipboard.writeText(text).catch(() => undefined))
+    } else {
+      void navigator.clipboard.writeText(text).catch(() => undefined)
+    }
+    return true
+  })
 }
 
 function clampLine(line: number, length: number): number {
