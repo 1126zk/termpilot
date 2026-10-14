@@ -356,6 +356,14 @@ func (a *App) hSftpRead(args []interface{}) (interface{}, error) {
 	return a.sftp.ReadText(sessionID, path)
 }
 
+func (a *App) hSftpReadImage(args []interface{}) (interface{}, error) {
+	sessionID, path, err := twoStrings(args)
+	if err != nil {
+		return nil, err
+	}
+	return a.sftp.ReadImage(sessionID, path)
+}
+
 func (a *App) hSftpWrite(args []interface{}) (interface{}, error) {
 	sessionID, err := argStr(args, 0)
 	if err != nil {
@@ -512,6 +520,14 @@ func (a *App) hLocalRead(args []interface{}) (interface{}, error) {
 		return nil, err
 	}
 	return a.local.ReadText(path)
+}
+
+func (a *App) hLocalReadImage(args []interface{}) (interface{}, error) {
+	path, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.local.ReadImage(path)
 }
 
 func (a *App) hLocalWrite(args []interface{}) (interface{}, error) {

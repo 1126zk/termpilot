@@ -10,6 +10,8 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
+import { isImage } from './RemoteEditor'
+import { TREE_PATH_MIME } from '../terminal/dropPath'
 import { PanelConfirm, PanelDialog, useMenuAction } from './PanelDialog'
 import { DROP_TARGET_STYLE, dropDirAt, registerDropTree } from '../fileDrop'
 import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
@@ -364,6 +366,11 @@ export function FileTree(props: { tab: Tab | null }) {
                   }`}
                   style={{ paddingLeft: depth * TREE_INDENT }}
                   data-drop-dir={isDir ? item.path : parentDir(item.path) ?? root}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local }))
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
                   onContextMenu={() => setSelected(item.path)}
                   onClick={() => {
                     setSelected(item.path)
@@ -421,7 +428,7 @@ export function FileTree(props: { tab: Tab | null }) {
                     <Eye /> 查看
                   </ContextMenuItem>
                 )}
-                {item.kind !== 'dir' && (
+                {item.kind !== 'dir' && !isImage(item.name) && (
                   <ContextMenuItem
                     onClick={() => openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true, false)}
                   >
@@ -588,6 +595,11 @@ export function FileTree(props: { tab: Tab | null }) {
                       dropDir === root ? DROP_HIGHLIGHT : selected === root ? 'bg-foreground/10' : ''
                     }`}
                     style={{ paddingLeft: 0 }}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local }))
+                      e.dataTransfer.effectAllowed = 'copy'
+                    }}
                     onContextMenu={() => setSelected(root)}
                     onClick={() => {
                       setSelected(root)

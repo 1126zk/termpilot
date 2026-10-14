@@ -33,6 +33,7 @@ export const IPC = {
   sftpUploadDir: 'sftp:upload-dir',
   sftpDownloadDir: 'sftp:download-dir',
   sftpRead: 'sftp:read',
+  sftpReadImage: 'sftp:read-image',
   sftpWrite: 'sftp:write',
   sftpRename: 'sftp:rename',
   /** main → renderer，安装 SFTP 的进度和远程日志 */
@@ -94,6 +95,7 @@ export const IPC = {
   localfsDownloadDir: 'localfs:download-dir',
   localfsRename: 'localfs:rename',
   localfsRead: 'localfs:read',
+  localfsReadImage: 'localfs:read-image',
   localfsWrite: 'localfs:write',
   sessionDetectOs: 'session:detect-os',
   sessionSetOs: 'session:set-os',

@@ -1,6 +1,7 @@
 package sftpx
 
 import (
+	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -111,6 +112,32 @@ func (s *Service) ReadText(sessionID, path string) (string, error) {
 		return "", err
 	}
 	return text, nil
+}
+
+// ReadImage 读出整张图片，base64 编码后交给界面预览。
+func (s *Service) ReadImage(sessionID, path string) (string, error) {
+	var encoded string
+	err := s.run(sessionID, func(conn *liveConn) error {
+		return conn.using(normalizeRemotePath(path), func(target string) error {
+			size, err := statSize(conn.client, target)
+			if err != nil {
+				return err
+			}
+			if err := AssertImageSize(size); err != nil {
+				return err
+			}
+			buf, err := readAll(conn.client, target)
+			if err != nil {
+				return err
+			}
+			encoded = base64.StdEncoding.EncodeToString(buf)
+			return nil
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+	return encoded, nil
 }
 
 // WriteText 对应 TS writeText：UTF-8 整写。

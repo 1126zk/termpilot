@@ -24,6 +24,17 @@ func AssertEditSize(size int64) error {
 	return nil
 }
 
+// MaxImageBytes 图片预览上限。整张图转成 base64 交给界面，太大会卡住窗口。
+const MaxImageBytes = 20 * 1024 * 1024
+
+// AssertImageSize 图片超过预览上限时拒绝。
+func AssertImageSize(size int64) error {
+	if size > MaxImageBytes {
+		return errors.New("图片超过 20MB，不在预览里打开")
+	}
+	return nil
+}
+
 // AssertTextBuffer 对应 TS assertTextBuffer：含 NUL 字节按二进制拒绝。
 func AssertTextBuffer(buf []byte) error {
 	if bytes.IndexByte(buf, 0) >= 0 {

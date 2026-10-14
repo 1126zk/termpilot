@@ -9,6 +9,7 @@
 package localfs
 
 import (
+	"encoding/base64"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -155,6 +156,26 @@ func (s *Service) ReadText(path string) (string, error) {
 		return "", err
 	}
 	return string(buf), nil
+}
+
+// ReadImage 读出整张图片，base64 编码后交给界面预览。
+func (s *Service) ReadImage(path string) (string, error) {
+	target, err := s.ToNative(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if err := sftpx.AssertImageSize(info.Size()); err != nil {
+		return "", err
+	}
+	buf, err := os.ReadFile(target)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(buf), nil
 }
 
 // WriteText 对应 TS writeText：整文件覆盖写 UTF-8 文本。

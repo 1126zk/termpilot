@@ -64,6 +64,7 @@ func (b *Bridge) routes() map[string]handler {
 		"sftp:download":        a.hSftpDownload,
 		"sftp:download-dir":    a.hSftpDownloadDir,
 		"sftp:read":            a.hSftpRead,
+		"sftp:read-image":      a.hSftpReadImage,
 		"sftp:write":           a.hSftpWrite,
 		"sftp:transfer-cancel": a.hSftpTransferCancel,
 
@@ -78,6 +79,7 @@ func (b *Bridge) routes() map[string]handler {
 		"localfs:download":     a.hLocalDownload,
 		"localfs:download-dir": a.hLocalDownloadDir,
 		"localfs:read":         a.hLocalRead,
+		"localfs:read-image":   a.hLocalReadImage,
 		"localfs:write":        a.hLocalWrite,
 
 		// 片段 / 历史

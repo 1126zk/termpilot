@@ -115,6 +115,8 @@ const api = {
     downloadDir: (sessionId: string, file: RemoteFile) =>
       invoke<boolean>(IPC.sftpDownloadDir, [sessionId, file]),
     read: (sessionId: string, path: string) => invoke<string>(IPC.sftpRead, [sessionId, path]),
+    /** 整张图片的 base64 */
+    readImage: (sessionId: string, path: string) => invoke<string>(IPC.sftpReadImage, [sessionId, path]),
     write: (sessionId: string, path: string, text: string) =>
       invoke(IPC.sftpWrite, [sessionId, path, text]),
     onInstall: (cb: (event: SftpInstallEvent) => void) => on(IPC.sftpInstall, cb),
@@ -132,6 +134,8 @@ const api = {
     download: (file: RemoteFile) => invoke<boolean>(IPC.localfsDownload, [file]),
     downloadDir: (file: RemoteFile) => invoke<boolean>(IPC.localfsDownloadDir, [file]),
     read: (path: string) => invoke<string>(IPC.localfsRead, [path]),
+    /** 整张图片的 base64 */
+    readImage: (path: string) => invoke<string>(IPC.localfsReadImage, [path]),
     write: (path: string, text: string) => invoke(IPC.localfsWrite, [path, text])
   },
   appearance: {

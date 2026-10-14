@@ -13,7 +13,7 @@ import {
 import { readBuffer } from '../editor/editorBuffers'
 import { useAppStore, type EditorTab } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
-import { isMarkdown } from './RemoteEditor'
+import { ImageTools, isImage, isMarkdown } from './RemoteEditor'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 
 const TOOL_BUTTON =
@@ -227,7 +227,8 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           )
         })}
       </div>
-      {activeTab && (
+      {activeTab && isImage(activeTab.name) && <ImageTools tabKey={activeTab.key} />}
+      {activeTab && !isImage(activeTab.name) && (
         <button
           type="button"
           title={activeTab.readOnly ? '切换到编辑' : '切换到查看'}
@@ -241,7 +242,7 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           {activeTab.readOnly ? '编辑' : '查看'}
         </button>
       )}
-      {activeTab && !(activeTab.readOnly && isMarkdown(activeTab.name)) && (
+      {activeTab && !isImage(activeTab.name) && !(activeTab.readOnly && isMarkdown(activeTab.name)) && (
         <button
           type="button"
           title={wrap ? '长行不折行，横向滚动' : '长行按窗口宽度折行'}

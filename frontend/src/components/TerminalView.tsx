@@ -10,6 +10,9 @@ import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { terminalPool } from '../terminal/TerminalPool'
 import { CaptureDialog } from './CaptureDialog'
+import { cn } from '@/lib/utils'
+import { DROP_TARGET_STYLE } from '../fileDrop'
+import { insertPaths, TREE_PATH_MIME } from '../terminal/dropPath'
 
 /**
  * 终端视图：只负责提供挂载容器，xterm 实例由 TerminalPool 持有。
@@ -21,6 +24,7 @@ export function TerminalView(props: { termId: string }) {
   const [selection, setSelection] = useState<{ text: string; startLine: number; endLine: number } | null>(null)
   const [shot, setShot] = useState<CaptureDone | null>(null)
   const [shotError, setShotError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     const el = ref.current
@@ -91,9 +95,32 @@ export function TerminalView(props: { termId: string }) {
         <ContextMenuTrigger asChild>
           <div
             ref={ref}
-            className="min-h-0 flex-1 px-3 py-1"
-            style={{ background: 'var(--terminal-background)' }}
+            className={cn('min-h-0 flex-1 px-3 py-1', dragging && 'ring-2 ring-primary/60 ring-inset')}
+            style={{ ...DROP_TARGET_STYLE, background: 'var(--terminal-background)' }}
+            data-drop-term={props.termId}
             onContextMenu={() => setSelection(terminalPool.selectionRange(props.termId))}
+            onDragOver={(e) => {
+              if (!e.dataTransfer.types.includes(TREE_PATH_MIME)) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+              setDragging(true)
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+            }}
+            onDrop={(e) => {
+              setDragging(false)
+              const raw = e.dataTransfer.getData(TREE_PATH_MIME)
+              if (!raw) return
+              e.preventDefault()
+              const tab = useAppStore.getState().tabs.find((t) => t.id === props.termId)
+              try {
+                const item = JSON.parse(raw) as { path: string; local: boolean }
+                if (tab) insertPaths(tab, [item.path], item.local)
+              } catch {
+                /* 不是文件树拖出来的 */
+              }
+            }}
           />
         </ContextMenuTrigger>
         <ContextMenuContent>
