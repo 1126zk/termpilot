@@ -46,7 +46,6 @@ func SanitizeSshOptions(value *SshConnectOptions) *SshConnectOptions {
 	}
 
 	options.Algorithms = sanitizeAlgorithms(value.Algorithms)
-	options.ExtraJumps = sanitizeHops(value.ExtraJumps)
 
 	if command := trimSpace(value.ProxyCommand); command != "" && len(command) <= 1000 &&
 		!strings.ContainsAny(command, "\r\n") && !strings.EqualFold(command, "none") {
@@ -63,7 +62,7 @@ func SanitizeSshOptions(value *SshConnectOptions) *SshConnectOptions {
 func hasSshOptions(o *SshConnectOptions) bool {
 	return o.ReadyTimeoutMs != nil || o.KeepaliveIntervalMs != nil || o.KeepaliveCountMax != nil ||
 		o.Compress || o.Family != 0 || o.LocalAddress != "" || o.StrictHostKeyChecking != "" ||
-		o.Algorithms != nil || len(o.ExtraJumps) > 0 || o.ProxyCommand != ""
+		o.Algorithms != nil || o.ProxyCommand != ""
 }
 
 func sanitizeAlgorithms(value *SshAlgorithms) *SshAlgorithms {
@@ -82,26 +81,105 @@ func sanitizeAlgorithms(value *SshAlgorithms) *SshAlgorithms {
 	return &algorithms
 }
 
-func sanitizeHops(value []SshHop) []SshHop {
-	if value == nil {
-		return nil
+type jumpRecord struct {
+	Host            string `json:"host"`
+	Port            int    `json:"port"`
+	Username        string `json:"username"`
+	SecretEncrypted string `json:"secretEncrypted,omitempty"`
+}
+
+func publicJumps(records []jumpRecord) []SshHop {
+	out := make([]SshHop, 0, len(records))
+	for _, record := range records {
+		out = append(out, SshHop{
+			Host: record.Host, Port: record.Port, Username: record.Username,
+			HasSecret: record.SecretEncrypted != "",
+		})
 	}
-	var hops []SshHop
+	return out
+}
+
+func sanitizeJumpInputs(value []SshHopInput) []SshHopInput {
+	var out []SshHopInput
 	for _, item := range value {
 		host := trimSpace(item.Host)
 		username := trimSpace(item.Username)
-		if host == "" || len(host) > 255 || len(username) > 500 {
+		if host == "" || len(host) > 255 || username == "" || len(username) > 500 {
 			continue
 		}
 		if item.Port < 1 || item.Port > 65535 {
 			continue
 		}
-		hops = append(hops, SshHop{Host: host, Port: item.Port, Username: username})
-		if len(hops) >= 8 {
+		out = append(out, SshHopInput{Host: host, Port: item.Port, Username: username, Secret: item.Secret})
+		if len(out) >= 9 {
 			break
 		}
 	}
-	return hops
+	return out
+}
+
+func (s *Store) encodeJumps(value []SshHopInput, previous []jumpRecord) (*string, error) {
+	clean := sanitizeJumpInputs(value)
+	if len(clean) == 0 {
+		return nil, nil
+	}
+	records := make([]jumpRecord, 0, len(clean))
+	for _, hop := range clean {
+		record := jumpRecord{Host: hop.Host, Port: hop.Port, Username: hop.Username}
+		if hop.Secret != nil {
+			encrypted, err := s.encryptSecret(hop.Secret)
+			if err != nil {
+				return nil, err
+			}
+			if encrypted != nil {
+				record.SecretEncrypted = *encrypted
+			}
+		} else if old, ok := findJumpRecord(previous, hop); ok {
+			record.SecretEncrypted = old.SecretEncrypted
+		}
+		records = append(records, record)
+	}
+	data, err := json.Marshal(records)
+	if err != nil {
+		return nil, err
+	}
+	encoded := string(data)
+	return &encoded, nil
+}
+
+func decodeJumps(value *string) []jumpRecord {
+	if value == nil || *value == "" {
+		return nil
+	}
+	var raw []jumpRecord
+	if err := json.Unmarshal([]byte(*value), &raw); err != nil {
+		return nil
+	}
+	out := make([]jumpRecord, 0, len(raw))
+	for _, record := range raw {
+		record.Host = trimSpace(record.Host)
+		record.Username = trimSpace(record.Username)
+		if record.Host == "" || len(record.Host) > 255 || record.Username == "" || len(record.Username) > 500 {
+			continue
+		}
+		if record.Port < 1 || record.Port > 65535 {
+			continue
+		}
+		out = append(out, record)
+		if len(out) >= 9 {
+			break
+		}
+	}
+	return out
+}
+
+func findJumpRecord(records []jumpRecord, hop SshHopInput) (jumpRecord, bool) {
+	for _, record := range records {
+		if record.Host == hop.Host && record.Port == hop.Port && record.Username == hop.Username {
+			return record, true
+		}
+	}
+	return jumpRecord{}, false
 }
 
 func algoList(value []string) []string {

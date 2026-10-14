@@ -110,7 +110,7 @@ func TestCliCall(t *testing.T) {
 	addr := startTestServer(t, svc)
 
 	ok, text := cliOK(t, addr, map[string]any{"op": "call", "tool": "connection_list"})
-	if !ok || !strings.Contains(text, "conn-1234abcd") || !strings.Contains(text, `"jump": false`) {
+	if !ok || !strings.Contains(text, "conn-1234abcd") || !strings.Contains(text, `"jumps": []`) {
 		t.Errorf("connection_list: ok=%v text=%q", ok, text)
 	}
 

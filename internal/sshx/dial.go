@@ -52,14 +52,14 @@ func (c *Conn) Wait() error {
 	return c.Client.Conn.Wait()
 }
 
-// Dial 拨到目标机，对应 TS 的 dialSsh。secret / jumpSecret 是目标机和第一跳跳板的密码，
+// Dial 拨到目标机，对应 TS 的 dialSsh。secret 是目标机密码，jumpSecrets 按跳板顺序排列，
 // 空字符串表示没有。同步实现：TS 里是回调链，但语义上就是逐级穿透。
-func Dial(ctx context.Context, session *SessionConfig, secret, jumpSecret string, opts *DialOptions) (*Conn, error) {
+func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string, opts *DialOptions) (*Conn, error) {
 	if opts == nil {
 		opts = &DialOptions{}
 	}
 	options := session.Options
-	hops := jumpHops(session, jumpSecret)
+	hops := jumpHops(session, jumpSecrets)
 
 	if len(hops) == 0 {
 		cfg := targetConfig(session, secret)
@@ -161,35 +161,29 @@ type dialHop struct {
 	password string
 }
 
-// jumpHops 对应 TS 的 jumpHops：第一跳来自会话字段，后面接 extraJumps。
+// jumpHops 按 session.Jumps 的顺序展开跳板及各自密码。
 // jt_ 开头的用户名把口令并进用户名（username:password），口令本身置空——
 // 那是这类堡垒机的认证格式，不是普通密码登录。
-func jumpHops(session *SessionConfig, jumpSecret string) []dialHop {
-	host := strings.TrimSpace(session.JumpHost)
-	if host == "" {
-		return nil
-	}
-	username := strings.TrimSpace(session.JumpUsername)
-	if username == "" {
-		username = session.Username
-	}
-	password := jumpSecret
-	if strings.HasPrefix(username, "jt_") && password != "" && !strings.Contains(username, ":") {
-		username = username + ":" + password
-		password = ""
-	}
-	hops := []dialHop{{host: host, port: or22(session.JumpPort), username: username, password: password}}
-	if session.Options != nil {
-		for _, extra := range session.Options.ExtraJumps {
-			if strings.TrimSpace(extra.Host) == "" {
-				continue
-			}
-			name := strings.TrimSpace(extra.Username)
-			if name == "" {
-				name = session.Username
-			}
-			hops = append(hops, dialHop{host: extra.Host, port: or22(extra.Port), username: name})
+func jumpHops(session *SessionConfig, jumpSecrets []string) []dialHop {
+	hops := make([]dialHop, 0, len(session.Jumps))
+	for i, hop := range session.Jumps {
+		host := strings.TrimSpace(hop.Host)
+		if host == "" {
+			continue
 		}
+		username := strings.TrimSpace(hop.Username)
+		if username == "" {
+			username = session.Username
+		}
+		password := ""
+		if i < len(jumpSecrets) {
+			password = jumpSecrets[i]
+		}
+		if i == 0 && strings.HasPrefix(username, "jt_") && password != "" && !strings.Contains(username, ":") {
+			username = username + ":" + password
+			password = ""
+		}
+		hops = append(hops, dialHop{host: host, port: or22(hop.Port), username: username, password: password})
 	}
 	return hops
 }

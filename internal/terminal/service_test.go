@@ -387,4 +387,4 @@ type fakeSessions struct{}
 
 func (f *fakeSessions) FindSession(id string) *sshx.SessionConfig { return nil }
 func (f *fakeSessions) GetSecret(sessionID string) string         { return "" }
-func (f *fakeSessions) GetJumpSecret(sessionID string) string     { return "" }
+func (f *fakeSessions) GetJumpSecrets(sessionID string) []string  { return nil }

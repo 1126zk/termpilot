@@ -290,7 +290,7 @@ func TestConnectionCreateUpdateDelete(t *testing.T) {
 	out, err := svc.invoke(ctx, "connection_create", map[string]any{
 		"name": "db", "host": "2.2.2.2", "username": "root", "secret": "pw",
 	})
-	if err != nil || !strings.Contains(out, `"id": "conn-new0001"`) {
+	if err != nil || !strings.Contains(out, `"id": "conn-abcd1234"`) {
 		t.Errorf("create: out=%q err=%v", out, err)
 	}
 	if changed != 1 {
@@ -328,6 +328,44 @@ func TestConnectionCreateUpdateDelete(t *testing.T) {
 	}
 	if len(st.deleted) != 1 || st.deleted[0] != "s1" {
 		t.Errorf("删除: %v", st.deleted)
+	}
+}
+
+func TestConnectionJumps(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _, _, _ := newTestService()
+
+	out, err := svc.invoke(ctx, "connection_create", map[string]any{
+		"name": "jumped", "host": "target", "username": "root", "secret": "target-pw",
+		"jumps": []any{
+			map[string]any{"host": "j1", "port": 22, "username": "ops", "secret": "j1-pw"},
+			map[string]any{"host": "j2", "port": 2222, "username": "deploy"},
+		},
+	})
+	if err != nil || !strings.Contains(out, `"host": "j1"`) || !strings.Contains(out, `"host": "j2"`) || !strings.Contains(out, `"hasSecret": true`) {
+		t.Fatalf("create jumps: out=%q err=%v", out, err)
+	}
+
+	out, err = svc.invoke(ctx, "connection_update", map[string]any{
+		"connection": "conn-abcd1234", "remark": "两跳",
+	})
+	if err != nil || !strings.Contains(out, `"host": "j1"`) {
+		t.Fatalf("preserve jumps: out=%q err=%v", out, err)
+	}
+
+	out, err = svc.invoke(ctx, "connection_update", map[string]any{
+		"connection": "conn-abcd1234", "jumps": []any{},
+	})
+	if err != nil || !strings.Contains(out, `"jumps": []`) {
+		t.Fatalf("clear jumps: out=%q err=%v", out, err)
+	}
+
+	_, err = svc.invoke(ctx, "connection_update", map[string]any{
+		"connection": "conn-abcd1234",
+		"jumps":      []any{map[string]any{"host": "j3", "port": 22}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "跳板主机和用户名不能为空") {
+		t.Fatalf("invalid jump: %v", err)
 	}
 }
 

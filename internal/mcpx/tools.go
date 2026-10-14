@@ -492,7 +492,7 @@ func (s *Service) deleteSession(ctx context.Context, key string) (string, error)
 	return fmt.Sprintf("已删除 %s", session.Name), nil
 }
 
-// normalize 对应 TS normalize：合并补丁与现值并校验。MCP 不支持改跳板配置，沿用现有值。
+// normalize 对应 TS normalize：合并补丁与现值并校验。jumps 未传时沿用现有跳板链。
 func (s *Service) normalize(current *storage.SessionConfig, patch sessionPatch, creating bool) (*storage.SessionInput, error) {
 	pick := func(p *string, cur string) string {
 		if p != nil {
@@ -503,21 +503,10 @@ func (s *Service) normalize(current *storage.SessionConfig, patch sessionPatch, 
 	var curName, curGroup, curHost, curUsername string
 	var curRemark *string
 	curPort := 22
-	jumpHost, jumpUsername := "", ""
-	jumpPort := 22
 	if current != nil {
 		curName, curGroup, curHost, curUsername = current.Name, current.Group, current.Host, current.Username
 		curRemark = current.Remark
 		curPort = current.Port
-		if current.JumpHost != nil {
-			jumpHost = *current.JumpHost
-		}
-		if current.JumpPort != nil {
-			jumpPort = *current.JumpPort
-		}
-		if current.JumpUsername != nil {
-			jumpUsername = *current.JumpUsername
-		}
 	}
 	input := &storage.SessionInput{
 		Name:     pick(patch.name, curName),
@@ -536,6 +525,11 @@ func (s *Service) normalize(current *storage.SessionConfig, patch sessionPatch, 
 	if patch.secret != nil && *patch.secret != "" {
 		input.Secret = patch.secret
 	}
+	if patch.jumps != nil {
+		input.Jumps = patch.jumps
+	} else if current != nil {
+		input.Jumps = jumpInputsOf(current)
+	}
 	if input.Name == "" {
 		return nil, errors.New("名称不能为空")
 	}
@@ -545,8 +539,15 @@ func (s *Service) normalize(current *storage.SessionConfig, patch sessionPatch, 
 	if creating && input.Secret == nil {
 		return nil, errors.New("需要填写密码（secret）")
 	}
-	if jumpHost != "" && jumpUsername == "" {
-		return nil, errors.New("跳板需要用户名")
+	if input.Jumps != nil {
+		for _, hop := range *input.Jumps {
+			if strings.TrimSpace(hop.Host) == "" || strings.TrimSpace(hop.Username) == "" {
+				return nil, errors.New("跳板主机和用户名不能为空")
+			}
+			if hop.Port < 1 || hop.Port > 65535 {
+				return nil, errors.New("跳板端口需要在 1–65535")
+			}
+		}
 	}
 	sessions, err := s.deps.Storage.List()
 	if err != nil {
@@ -557,11 +558,18 @@ func (s *Service) normalize(current *storage.SessionConfig, patch sessionPatch, 
 			return nil, fmt.Errorf("已有同名连接: %s", input.Name)
 		}
 	}
-	// 跳板沿用现有值（TS 传的 jumpHost/jumpPort/jumpUsername 同理，jumpSecret 恒为 undefined）
-	input.JumpHost = &jumpHost
-	input.JumpPort = &jumpPort
-	input.JumpUsername = &jumpUsername
 	return input, nil
+}
+
+func jumpInputsOf(current *storage.SessionConfig) *[]storage.SshHopInput {
+	if current == nil {
+		return nil
+	}
+	out := make([]storage.SshHopInput, 0, len(current.Jumps))
+	for _, hop := range current.Jumps {
+		out = append(out, storage.SshHopInput{Host: hop.Host, Port: hop.Port, Username: hop.Username})
+	}
+	return &out
 }
 
 // publishSessions 对应 TS publishSessions：通知前端会话列表变了。
@@ -897,13 +905,13 @@ func (s *Service) guardPath(ctx context.Context, path string) error {
 // ------------------------------------------------ 结构体与辅助
 
 type connectionView struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Remark   string `json:"remark"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Jump     bool   `json:"jump"`
+	ID       string           `json:"id"`
+	Name     string           `json:"name"`
+	Remark   string           `json:"remark"`
+	Host     string           `json:"host"`
+	Port     int              `json:"port"`
+	Username string           `json:"username"`
+	Jumps    []storage.SshHop `json:"jumps"`
 }
 
 // makeConnectionView 对应 TS connectionView。
@@ -919,7 +927,7 @@ func makeConnectionView(session *storage.SessionConfig) connectionView {
 		Host:     session.Host,
 		Port:     session.Port,
 		Username: session.Username,
-		Jump:     session.JumpHost != nil && *session.JumpHost != "",
+		Jumps:    append([]storage.SshHop{}, session.Jumps...),
 	}
 }
 

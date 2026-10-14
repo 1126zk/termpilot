@@ -227,6 +227,7 @@ func TestRunAudit(t *testing.T) {
 	// 成功：detail 是 `k=v` 拼接，secret 不出现
 	result := svc.run("connection_create", auditDetail(map[string]any{
 		"name": "db", "host": "2.2.2.2", "secret": "topsecret", "port": float64(22),
+		"jumps": []any{map[string]any{"host": "j1", "port": 22, "username": "ops", "secret": "jump-pw"}},
 	}), func() (string, error) {
 		return `{"id":"conn-new0001"}`, nil
 	})
@@ -240,8 +241,8 @@ func TestRunAudit(t *testing.T) {
 	if rec.tool != "connection_create" || !rec.ok {
 		t.Errorf("审计: %+v", rec)
 	}
-	if strings.Contains(rec.detail, "secret") || strings.Contains(rec.detail, "topsecret") {
-		t.Errorf("secret 泄漏进审计: %q", rec.detail)
+	if strings.Contains(rec.detail, "secret") || strings.Contains(rec.detail, "topsecret") || strings.Contains(rec.detail, "jump-pw") {
+		t.Errorf("密码泄漏进审计: %q", rec.detail)
 	}
 	for _, frag := range []string{"name=db", "host=2.2.2.2", "port=22"} {
 		if !strings.Contains(rec.detail, frag) {

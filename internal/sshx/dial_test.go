@@ -9,12 +9,12 @@ import (
 
 func TestJumpHops(t *testing.T) {
 	t.Run("无跳板", func(t *testing.T) {
-		if hops := jumpHops(&SessionConfig{Host: "h", Username: "u"}, "secret"); hops != nil {
+		if hops := jumpHops(&SessionConfig{Host: "h", Username: "u"}, nil); len(hops) != 0 {
 			t.Fatalf("hops = %+v", hops)
 		}
 	})
 	t.Run("第一跳默认沿用会话用户名和 22 端口", func(t *testing.T) {
-		hops := jumpHops(&SessionConfig{JumpHost: "bastion", Username: "deploy"}, "jsecret")
+		hops := jumpHops(&SessionConfig{Jumps: []Hop{{Host: "bastion"}}, Username: "deploy"}, []string{"jsecret"})
 		if len(hops) != 1 {
 			t.Fatalf("hops = %+v", hops)
 		}
@@ -23,33 +23,37 @@ func TestJumpHops(t *testing.T) {
 		}
 	})
 	t.Run("jt_ 用户名把口令并进用户名", func(t *testing.T) {
-		hops := jumpHops(&SessionConfig{JumpHost: "bastion", JumpUsername: "jt_ops", Username: "deploy"}, "jsecret")
+		hops := jumpHops(&SessionConfig{Jumps: []Hop{{Host: "bastion", Username: "jt_ops"}}, Username: "deploy"}, []string{"jsecret"})
 		if hops[0].username != "jt_ops:jsecret" || hops[0].password != "" {
 			t.Fatalf("hop = %+v", hops[0])
 		}
 		// 口令为空或用户名已含冒号时不做合并
-		hops = jumpHops(&SessionConfig{JumpHost: "bastion", JumpUsername: "jt_ops", Username: "deploy"}, "")
+		hops = jumpHops(&SessionConfig{Jumps: []Hop{{Host: "bastion", Username: "jt_ops"}}, Username: "deploy"}, []string{""})
 		if hops[0].username != "jt_ops" || hops[0].password != "" {
 			t.Fatalf("hop = %+v", hops[0])
 		}
-		hops = jumpHops(&SessionConfig{JumpHost: "bastion", JumpUsername: "jt_ops:tok", Username: "deploy"}, "jsecret")
+		hops = jumpHops(&SessionConfig{Jumps: []Hop{{Host: "bastion", Username: "jt_ops:tok"}}, Username: "deploy"}, []string{"jsecret"})
 		if hops[0].username != "jt_ops:tok" || hops[0].password != "jsecret" {
 			t.Fatalf("hop = %+v", hops[0])
 		}
 	})
-	t.Run("extraJumps 接上，空主机跳过，口令为空", func(t *testing.T) {
+	t.Run("多跳按顺序使用各自密码", func(t *testing.T) {
 		hops := jumpHops(&SessionConfig{
-			JumpHost: "j1", Username: "deploy",
-			Options: &ConnectOptions{ExtraJumps: []Hop{
+			Jumps: []Hop{
+				{Host: "j1"},
 				{Host: "j2", Port: 2200, Username: "ops"},
 				{Host: "  ", Port: 22},
 				{Host: "j3"},
-			}},
-		}, "s")
+			},
+			Username: "deploy",
+		}, []string{"one", "two", "ignored", "four"})
 		if len(hops) != 3 {
 			t.Fatalf("hops = %+v", hops)
 		}
-		if hops[1].host != "j2" || hops[1].port != 2200 || hops[1].username != "ops" || hops[1].password != "" {
+		if hops[0].password != "one" || hops[1].password != "two" || hops[2].password != "four" {
+			t.Fatalf("密码顺序不对: %+v", hops)
+		}
+		if hops[1].host != "j2" || hops[1].port != 2200 || hops[1].username != "ops" {
 			t.Fatalf("hop2 = %+v", hops[1])
 		}
 		if hops[2].host != "j3" || hops[2].port != 22 || hops[2].username != "deploy" {

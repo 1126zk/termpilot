@@ -100,7 +100,7 @@ type SessionStore interface {
 	FindSession(id string) *sshx.SessionConfig
 	// 没有凭据时返回空串（对应 TS 的 null）。
 	GetSecret(sessionID string) string
-	GetJumpSecret(sessionID string) string
+	GetJumpSecrets(sessionID string) []string
 }
 
 // HistoryStore 历史指令落库。AppendHistory 返回 false 表示这条没写进去（如与上一条重复），

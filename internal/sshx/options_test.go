@@ -73,44 +73,6 @@ func TestSanitizeConnectOptions(t *testing.T) {
 			t.Fatalf("Cipher = %v, want %v", got.Algorithms.Cipher, want)
 		}
 	})
-	t.Run("extraJumps 过滤坏条目", func(t *testing.T) {
-		got := SanitizeConnectOptions(map[string]any{
-			"extraJumps": []any{
-				map[string]any{"host": "jump1", "port": float64(22), "username": "u"},
-				map[string]any{"host": "", "port": float64(22)},
-				map[string]any{"host": "jump2", "port": float64(70000)},
-				"not-an-object",
-			},
-		})
-		if got == nil || len(got.ExtraJumps) != 1 || got.ExtraJumps[0].Host != "jump1" {
-			t.Fatalf("ExtraJumps = %+v", got)
-		}
-	})
-}
-
-func TestOptionsForSession(t *testing.T) {
-	withJumps := &ConnectOptions{ExtraJumps: []Hop{{Host: "j2", Port: 22}}}
-	t.Run("没有第一跳时丢弃后续跳板", func(t *testing.T) {
-		if got := OptionsForSession("", withJumps); got != nil {
-			t.Fatalf("got %+v", got)
-		}
-		if got := OptionsForSession("  ", withJumps); got != nil {
-			t.Fatalf("got %+v", got)
-		}
-	})
-	t.Run("有第一跳时保留", func(t *testing.T) {
-		got := OptionsForSession("jump1", withJumps)
-		if got == nil || len(got.ExtraJumps) != 1 {
-			t.Fatalf("got %+v", got)
-		}
-	})
-	t.Run("还有其他字段时不因丢跳板而清空", func(t *testing.T) {
-		opts := &ConnectOptions{Compress: true, ExtraJumps: []Hop{{Host: "j2", Port: 22}}}
-		got := OptionsForSession("", opts)
-		if got == nil || !got.Compress || got.ExtraJumps != nil {
-			t.Fatalf("got %+v", got)
-		}
-	})
 }
 
 func TestHasConnectOptions(t *testing.T) {

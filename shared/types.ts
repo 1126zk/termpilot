@@ -1,4 +1,4 @@
-import type { SshConnectOptions } from './ssh-options'
+import type { SshConnectOptions, SshHop, SshHopInput } from './ssh-options'
 
 export type ForwardType = 'local' | 'remote'
 
@@ -26,12 +26,9 @@ export interface SessionConfig {
   remark?: string
   /** 是否已保存加密凭据（密码） */
   hasSecret: boolean
-  /** ssh -J 跳板。空表示直接连接。 */
-  jumpHost?: string
-  jumpPort?: number
-  jumpUsername?: string
-  hasJumpSecret: boolean
-  /** 命令里带的超时、算法、多跳、ProxyCommand。 */
+  /** 按本机到目标主机的顺序排列的跳板；空表示直接连接。 */
+  jumps?: SshHop[]
+  /** 命令里带的超时、算法、ProxyCommand。 */
   sshOptions?: SshConnectOptions
   /** 端口映射规则，连接建立后挂在共享 SSH 连接上 */
   forwards?: ForwardRule[]
@@ -51,12 +48,8 @@ export interface SessionInput {
   remark?: string
   /** 明文密码；undefined 表示不修改 */
   secret?: string
-  /** 跳板。空字符串表示不经过跳板。 */
-  jumpHost?: string
-  jumpPort?: number
-  jumpUsername?: string
-  /** 跳板口令。undefined 表示不修改，空字符串表示清掉。 */
-  jumpSecret?: string
+  /** 按本机到目标主机的顺序排列的跳板。undefined 表示不修改，空数组表示清掉。 */
+  jumps?: SshHopInput[]
   /** 连接选项。undefined 表示不修改，null 表示清掉。 */
   sshOptions?: SshConnectOptions | null
   /** 端口映射。undefined 表示不修改，否则整体替换（空数组表示清掉）。 */

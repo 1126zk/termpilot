@@ -213,8 +213,8 @@ func (a *App) acquire(sessionID string) (*sshx.Hold, error) {
 		return nil, errors.New("只能浏览正向 SSH 的文件")
 	}
 	secret, _ := a.store.GetSecret(sessionID)
-	jump, _ := a.store.GetJumpSecret(sessionID)
-	return a.pool.Acquire(context.Background(), toSshSession(session), secret, jump)
+	jumps, _ := a.store.GetJumpSecrets(sessionID)
+	return a.pool.Acquire(context.Background(), toSshSession(session), secret, jumps)
 }
 
 func (a *App) acquireIsolated(sessionID string) (*sshx.Hold, error) {
@@ -226,8 +226,8 @@ func (a *App) acquireIsolated(sessionID string) (*sshx.Hold, error) {
 		return nil, errors.New("只能浏览正向 SSH 的文件")
 	}
 	secret, _ := a.store.GetSecret(sessionID)
-	jump, _ := a.store.GetJumpSecret(sessionID)
-	return a.pool.AcquireIsolated(context.Background(), toSshSession(session), secret, jump)
+	jumps, _ := a.store.GetJumpSecrets(sessionID)
+	return a.pool.AcquireIsolated(context.Background(), toSshSession(session), secret, jumps)
 }
 
 // watchMaximize 轮询最大化状态，变化时推 win:maximize-changed（Wails 没有原生最大化事件）。
@@ -264,8 +264,8 @@ func (s sessionStoreAdapter) GetSecret(sessionID string) string {
 	return v
 }
 
-func (s sessionStoreAdapter) GetJumpSecret(sessionID string) string {
-	v, _ := s.a.store.GetJumpSecret(sessionID)
+func (s sessionStoreAdapter) GetJumpSecrets(sessionID string) []string {
+	v, _ := s.a.store.GetJumpSecrets(sessionID)
 	return v
 }
 
@@ -294,14 +294,8 @@ func toSshSession(s *storage.SessionConfig) *sshx.SessionConfig {
 		Port:     s.Port,
 		Username: s.Username,
 	}
-	if s.JumpHost != nil {
-		out.JumpHost = *s.JumpHost
-	}
-	if s.JumpPort != nil {
-		out.JumpPort = *s.JumpPort
-	}
-	if s.JumpUsername != nil {
-		out.JumpUsername = *s.JumpUsername
+	for _, hop := range s.Jumps {
+		out.Jumps = append(out.Jumps, sshx.Hop{Host: hop.Host, Port: hop.Port, Username: hop.Username})
 	}
 	out.Options = toConnectOptions(s.SshOptions)
 	for _, f := range s.Forwards {
@@ -335,9 +329,6 @@ func toConnectOptions(o *storage.SshConnectOptions) *sshx.ConnectOptions {
 			ServerHostKey: o.Algorithms.ServerHostKey,
 			HMAC:          o.Algorithms.Hmac,
 		}
-	}
-	for _, j := range o.ExtraJumps {
-		out.ExtraJumps = append(out.ExtraJumps, sshx.Hop{Host: j.Host, Port: j.Port, Username: j.Username})
 	}
 	return out
 }

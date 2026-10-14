@@ -6,6 +6,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"termpilot/internal/storage"
 )
 
 // parseToolArgs 对应 TS tool-catalog.ts 的 parseToolArgs：zod object 校验 +
@@ -82,6 +84,12 @@ func checkField(f FieldSpec, path string, value any) string {
 			return fmt.Sprintf("%s: Array must contain at most %d element(s)", path, f.MaxItems)
 		}
 		for i, item := range list {
+			if len(f.ItemFields) > 0 {
+				if msg := checkField(FieldSpec{Type: "object", ItemFields: f.ItemFields}, fmt.Sprintf("%s.%d", path, i), item); msg != "" {
+					return msg
+				}
+				continue
+			}
 			s, ok := item.(string)
 			if !ok {
 				return fmt.Sprintf("%s.%d: Expected string, received %s", path, i, jsonTypeName(item))
@@ -89,6 +97,23 @@ func checkField(f FieldSpec, path string, value any) string {
 			if len(f.ItemEnum) > 0 && !containsString(f.ItemEnum, s) {
 				return fmt.Sprintf("%s.%d: Invalid enum value. Expected %s, received '%s'",
 					path, i, enumExpectation(f.ItemEnum), s)
+			}
+		}
+	case "object":
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("%s: Expected object, received %s", path, jsonTypeName(value))
+		}
+		for _, field := range f.ItemFields {
+			item, present := obj[field.Name]
+			if !present || item == nil {
+				if field.Required {
+					return fmt.Sprintf("%s.%s: Required", path, field.Name)
+				}
+				continue
+			}
+			if msg := checkField(field, fmt.Sprintf("%s.%s", path, field.Name), item); msg != "" {
+				return msg
 			}
 		}
 	}
@@ -254,6 +279,7 @@ type sessionPatch struct {
 	secret   *string
 	group    *string
 	remark   *string
+	jumps    *[]storage.SshHopInput
 }
 
 func readSessionPatch(raw map[string]any) (sessionPatch, error) {
@@ -277,7 +303,50 @@ func readSessionPatch(raw map[string]any) (sessionPatch, error) {
 	if patch.remark, err = textArg(raw, "remark"); err != nil {
 		return patch, err
 	}
+	if patch.jumps, err = hopsArg(raw, "jumps"); err != nil {
+		return patch, err
+	}
 	return patch, nil
+}
+
+func hopsArg(raw map[string]any, key string) (*[]storage.SshHopInput, error) {
+	value, present := raw[key]
+	if !present || value == nil {
+		return nil, nil
+	}
+	list, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s 必须是数组", key)
+	}
+	out := make([]storage.SshHopInput, 0, len(list))
+	for i, item := range list {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s.%d 必须是对象", key, i)
+		}
+		var hop storage.SshHopInput
+		if host, ok := obj["host"].(string); ok {
+			hop.Host = host
+		}
+		switch port := obj["port"].(type) {
+		case float64:
+			hop.Port = int(port)
+		case int:
+			hop.Port = port
+		}
+		if username, ok := obj["username"].(string); ok {
+			hop.Username = username
+		}
+		if rawSecret, present := obj["secret"]; present {
+			secret, ok := rawSecret.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s.%d.secret 必须是字符串", key, i)
+			}
+			hop.Secret = &secret
+		}
+		out = append(out, hop)
+	}
+	return &out, nil
 }
 
 // auditDetail 对应 TS auditDetail：过滤掉 secret 和对象值，拼成 `k=v`，最多 500 字符。

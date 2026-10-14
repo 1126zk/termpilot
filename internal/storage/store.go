@@ -2,7 +2,7 @@
 //
 // 数据库：userData/termpilot.db（modernc.org/sqlite，WAL）。schema 从 Electron 版沿用，
 // 可以直接打开旧库；打开时会删掉已废弃的 appearance.experimental_screenshot。
-// 凭据只以密文写入 secret_encrypted / jump_secret_encrypted /
+// 凭据只以密文写入 secret_encrypted / jumps /
 // mcp_config.token_encrypted，密文编码与 Electron safeStorage 落盘格式一致（见 internal/secrets）。
 package storage
 
@@ -66,10 +66,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   username TEXT NOT NULL DEFAULT '',
   remark TEXT,
   secret_encrypted TEXT,
-  jump_host TEXT,
-  jump_port INTEGER,
-  jump_username TEXT,
-  jump_secret_encrypted TEXT,
+  jumps TEXT,
   ssh_options TEXT,
   config_host TEXT,
   forwards TEXT,
@@ -138,6 +135,16 @@ func Open(dir string, cipher Cipher) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("清理外观表失败: %w", err)
 	}
+	if err := ensureColumn(db, "sessions", "jumps", "TEXT"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("添加 jumps 列失败: %w", err)
+	}
+	for _, column := range []string{"jump_host", "jump_port", "jump_username", "jump_secret_encrypted"} {
+		if err := dropColumnIfExists(db, "sessions", column); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("清理旧跳板字段失败: %w", err)
+		}
+	}
 	return &Store{db: db, cipher: cipher}, nil
 }
 
@@ -169,6 +176,36 @@ func dropColumnIfExists(db *sql.DB, table, column string) error {
 		return nil
 	}
 	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, column))
+	return err
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query("SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
 	return err
 }
 
@@ -283,35 +320,30 @@ func (s *Store) decryptSecret(encrypted *string) string {
 // ------------------------------------------------------------- 会话 CRUD
 
 type sessionRow struct {
-	id           string
-	publicID     sql.NullString
-	name         string
-	group        string
-	host         string
-	port         int64
-	username     string
-	remark       sql.NullString
-	secret       sql.NullString
-	jumpHost     sql.NullString
-	jumpPort     sql.NullInt64
-	jumpUsername sql.NullString
-	jumpSecret   sql.NullString
-	sshOptions   sql.NullString
-	configHost   sql.NullString
-	forwards     sql.NullString
-	os           sql.NullString
-	createdAt    int64
-	updatedAt    int64
+	id         string
+	publicID   sql.NullString
+	name       string
+	group      string
+	host       string
+	port       int64
+	username   string
+	remark     sql.NullString
+	secret     sql.NullString
+	jumps      sql.NullString
+	sshOptions sql.NullString
+	configHost sql.NullString
+	forwards   sql.NullString
+	os         sql.NullString
+	createdAt  int64
+	updatedAt  int64
 }
 
 const sessionColumns = `id, public_id, name, group_name, host, port, username,
-  remark, secret_encrypted, jump_host, jump_port, jump_username, jump_secret_encrypted,
-  ssh_options, config_host, forwards, os, created_at, updated_at`
+  remark, secret_encrypted, jumps, ssh_options, config_host, forwards, os, created_at, updated_at`
 
 func (r *sessionRow) scan(row interface{ Scan(...any) error }) error {
 	return row.Scan(&r.id, &r.publicID, &r.name, &r.group, &r.host, &r.port, &r.username,
-		&r.remark, &r.secret, &r.jumpHost, &r.jumpPort, &r.jumpUsername, &r.jumpSecret,
-		&r.sshOptions, &r.configHost, &r.forwards, &r.os, &r.createdAt, &r.updatedAt)
+		&r.remark, &r.secret, &r.jumps, &r.sshOptions, &r.configHost, &r.forwards, &r.os, &r.createdAt, &r.updatedAt)
 }
 
 func nullStr(s sql.NullString) *string {
@@ -333,24 +365,21 @@ func nullInt(s sql.NullInt64) *int {
 // toPublic 对应 TS toPublic。
 func (r *sessionRow) toPublic() *SessionConfig {
 	return &SessionConfig{
-		ID:            r.id,
-		PublicID:      r.publicID.String,
-		Name:          r.name,
-		Group:         r.group,
-		Host:          r.host,
-		Port:          int(r.port),
-		Username:      r.username,
-		Remark:        nullStr(r.remark),
-		HasSecret:     r.secret.Valid && r.secret.String != "",
-		JumpHost:      nullStr(r.jumpHost),
-		JumpPort:      nullInt(r.jumpPort),
-		JumpUsername:  nullStr(r.jumpUsername),
-		HasJumpSecret: r.jumpSecret.Valid && r.jumpSecret.String != "",
-		SshOptions:    decodeOptions(nullStr(r.sshOptions)),
-		Forwards:      decodeForwards(nullStr(r.forwards)),
-		Os:            nullStr(r.os),
-		CreatedAt:     r.createdAt,
-		UpdatedAt:     r.updatedAt,
+		ID:         r.id,
+		PublicID:   r.publicID.String,
+		Name:       r.name,
+		Group:      r.group,
+		Host:       r.host,
+		Port:       int(r.port),
+		Username:   r.username,
+		Remark:     nullStr(r.remark),
+		HasSecret:  r.secret.Valid && r.secret.String != "",
+		Jumps:      publicJumps(decodeJumps(nullStr(r.jumps))),
+		SshOptions: decodeOptions(nullStr(r.sshOptions)),
+		Forwards:   decodeForwards(nullStr(r.forwards)),
+		Os:         nullStr(r.os),
+		CreatedAt:  r.createdAt,
+		UpdatedAt:  r.updatedAt,
 	}
 }
 
@@ -407,26 +436,11 @@ func (s *Store) Create(input *SessionInput) (*SessionConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	jumpHost := ""
-	if input.JumpHost != nil {
-		jumpHost = strings.TrimSpace(*input.JumpHost)
-	}
-	var jumpPort, jumpUsername, jumpSecret any
-	if jumpHost != "" {
-		port := 22
-		if input.JumpPort != nil {
-			port = *input.JumpPort
-		}
-		jumpPort = port
-		if input.JumpUsername != nil && strings.TrimSpace(*input.JumpUsername) != "" {
-			jumpUsername = strings.TrimSpace(*input.JumpUsername)
-		}
-		js, err := s.encryptSecret(input.JumpSecret)
+	var jumps *string
+	if input.Jumps != nil {
+		jumps, err = s.encodeJumps(*input.Jumps, nil)
 		if err != nil {
 			return nil, err
-		}
-		if js != nil {
-			jumpSecret = *js
 		}
 	}
 	options, err := encodeOptions(input.SshOptions)
@@ -441,12 +455,11 @@ func (s *Store) Create(input *SessionInput) (*SessionConfig, error) {
 		`INSERT INTO sessions (
 		  id, public_id, name, group_name, host, port, username,
 		  remark, secret_encrypted, created_at, updated_at,
-		  jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  jumps, ssh_options, forwards
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, publicID, input.Name, input.Group, input.Host, input.Port, input.Username,
 		nullStringArg(input.Remark), nullStringArg(secret), now, now,
-		nullStrArg(jumpHost), jumpPort, jumpUsername, jumpSecret,
-		nullStringArg(options), nullStringArg(forwards),
+		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards),
 	)
 	if err != nil {
 		return nil, err
@@ -463,18 +476,13 @@ func (s *Store) Create(input *SessionInput) (*SessionConfig, error) {
 func (s *Store) Update(id string, patch *SessionInput) (*SessionConfig, error) {
 	var existing struct {
 		secret     sql.NullString
-		jumpHost   sql.NullString
-		jumpPort   sql.NullInt64
-		jumpUser   sql.NullString
-		jumpSecret sql.NullString
+		jumps      sql.NullString
 		sshOptions sql.NullString
 		forwards   sql.NullString
 	}
 	err := s.db.QueryRow(
-		`SELECT secret_encrypted, jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
-		 FROM sessions WHERE id = ?`, id,
-	).Scan(&existing.secret, &existing.jumpHost, &existing.jumpPort, &existing.jumpUser,
-		&existing.jumpSecret, &existing.sshOptions, &existing.forwards)
+		`SELECT secret_encrypted, jumps, ssh_options, forwards FROM sessions WHERE id = ?`, id,
+	).Scan(&existing.secret, &existing.jumps, &existing.sshOptions, &existing.forwards)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -493,33 +501,14 @@ func (s *Store) Update(id string, patch *SessionInput) (*SessionConfig, error) {
 		secret = nullSQL(existing.secret)
 	}
 
-	jumpHost := strings.TrimSpace(existing.jumpHost.String)
-	if patch.JumpHost != nil {
-		jumpHost = strings.TrimSpace(*patch.JumpHost)
-	}
-	var jumpSecret any
-	if jumpHost == "" {
-		jumpSecret = nil
-	} else if patch.JumpSecret != nil {
-		enc, err := s.encryptSecret(patch.JumpSecret)
+	var jumps *string
+	if patch.Jumps == nil {
+		jumps = nullStr(existing.jumps)
+	} else {
+		jumps, err = s.encodeJumps(*patch.Jumps, decodeJumps(nullStr(existing.jumps)))
 		if err != nil {
 			return nil, err
 		}
-		jumpSecret = nullStringArg(enc)
-	} else {
-		jumpSecret = nullSQL(existing.jumpSecret)
-	}
-
-	jumpPort := 22
-	if existing.jumpPort.Valid {
-		jumpPort = int(existing.jumpPort.Int64)
-	}
-	if patch.JumpPort != nil {
-		jumpPort = *patch.JumpPort
-	}
-	jumpUsername := strings.TrimSpace(existing.jumpUser.String)
-	if patch.JumpUsername != nil {
-		jumpUsername = strings.TrimSpace(*patch.JumpUsername)
 	}
 
 	var options *string
@@ -541,25 +530,16 @@ func (s *Store) Update(id string, patch *SessionInput) (*SessionConfig, error) {
 		}
 	}
 
-	var jumpPortArg, jumpUsernameArg any
-	if jumpHost != "" {
-		jumpPortArg = jumpPort
-		if jumpUsername != "" {
-			jumpUsernameArg = jumpUsername
-		}
-	}
 	_, err = s.db.Exec(
 		`UPDATE sessions SET
 		  name = ?, group_name = ?, host = ?, port = ?, username = ?,
 		  remark = ?,
 		  secret_encrypted = ?, updated_at = ?,
-		  jump_host = ?, jump_port = ?, jump_username = ?, jump_secret_encrypted = ?,
-		  ssh_options = ?, forwards = ?
+		  jumps = ?, ssh_options = ?, forwards = ?
 		WHERE id = ?`,
 		patch.Name, patch.Group, patch.Host, patch.Port, patch.Username,
 		nullStringArg(patch.Remark), secret, nowMillis(),
-		nullStrArg(jumpHost), jumpPortArg, jumpUsernameArg, jumpSecret,
-		nullStringArg(options), nullStringArg(forwards), id,
+		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards), id,
 	)
 	if err != nil {
 		return nil, err
@@ -658,12 +638,11 @@ func (s *Store) Duplicate(id string) (*SessionConfig, error) {
 		`INSERT INTO sessions (
 		  id, public_id, name, group_name, host, port, username,
 		  remark, secret_encrypted, created_at, updated_at,
-		  jump_host, jump_port, jump_username, jump_secret_encrypted, ssh_options, forwards
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  jumps, ssh_options, forwards
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		newID, publicID, name, r.group, r.host, r.port, r.username,
 		nullSQL(r.remark), nullSQL(r.secret), now, now,
-		nullSQL(r.jumpHost), nullSQLInt(r.jumpPort), nullSQL(r.jumpUsername), nullSQL(r.jumpSecret),
-		nullSQL(r.sshOptions), nullSQL(r.forwards),
+		nullSQL(r.jumps), nullSQL(r.sshOptions), nullSQL(r.forwards),
 	)
 	if err != nil {
 		return nil, err
@@ -1039,9 +1018,22 @@ func (s *Store) GetSecret(id string) (string, error) {
 	return s.readSecret(id, "secret_encrypted")
 }
 
-// GetJumpSecret 跳板口令，与目标机密码分开存。
-func (s *Store) GetJumpSecret(id string) (string, error) {
-	return s.readSecret(id, "jump_secret_encrypted")
+// GetJumpSecrets 按跳板顺序取解密后的密码，与目标机密码分开存。
+func (s *Store) GetJumpSecrets(id string) ([]string, error) {
+	var raw sql.NullString
+	err := s.db.QueryRow(`SELECT jumps FROM sessions WHERE id = ?`, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	records := decodeJumps(nullStr(raw))
+	secrets := make([]string, len(records))
+	for i, record := range records {
+		secrets[i] = s.decryptSecret(&record.SecretEncrypted)
+	}
+	return secrets, nil
 }
 
 func (s *Store) readSecret(id string, column string) (string, error) {

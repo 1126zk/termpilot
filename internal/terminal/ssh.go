@@ -41,15 +41,15 @@ func (s *Service) createSSH(opts CreateOptions, retried bool) {
 	s.sendStatus(opts.TermID, session.ID, StatusConnecting, "")
 
 	secret := s.sessions.GetSecret(session.ID)
-	jumpSecret := s.sessions.GetJumpSecret(session.ID)
-	hold, err := s.pool.Acquire(context.Background(), session, secret, jumpSecret)
+	jumpSecrets := s.sessions.GetJumpSecrets(session.ID)
+	hold, err := s.pool.Acquire(context.Background(), session, secret, jumpSecrets)
 	if err != nil {
 		if !s.alive(entry, gen) {
 			return
 		}
 		// 跳板禁止端口转发时，只给终端在跳板里再登录一次（JumpShell）。
-		if strings.TrimSpace(session.JumpHost) != "" && isForwardDenied(err) {
-			s.openJumpShell(entry, opts, session, secret, jumpSecret, gen)
+		if len(session.Jumps) > 0 && isForwardDenied(err) {
+			s.openJumpShell(entry, opts, session, secret, jumpSecrets, gen)
 			return
 		}
 		s.sendStatus(opts.TermID, session.ID, StatusError, friendlyConnectError(err))
@@ -89,9 +89,9 @@ func (s *Service) bindShared(entry *Entry, hold *sshx.Hold, opts CreateOptions, 
 
 // openJumpShell 跳板不许转发时，只给终端在跳板里再登录一次。
 // 这条没有到目标机的 SSH 客户端，文件树用不上。
-func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.SessionConfig, secret, jumpSecret string, gen int) {
+func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.SessionConfig, secret string, jumpSecrets []string, gen int) {
 	cols, rows := s.sizeOf(entry.id, opts.Cols, opts.Rows)
-	conn, err := sshx.Dial(context.Background(), session, secret, jumpSecret, &sshx.DialOptions{
+	conn, err := sshx.Dial(context.Background(), session, secret, jumpSecrets, &sshx.DialOptions{
 		Cols:           cols,
 		Rows:           rows,
 		AllowJumpShell: true,

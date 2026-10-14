@@ -115,8 +115,7 @@ func TestSchemaAndWAL(t *testing.T) {
 		cols[name] = true
 	}
 	for _, want := range []string{"id", "public_id", "name", "group_name", "host", "port", "username",
-		"remark", "secret_encrypted", "jump_host", "jump_port", "jump_username", "jump_secret_encrypted",
-		"ssh_options", "config_host", "forwards", "os", "created_at", "updated_at"} {
+		"remark", "secret_encrypted", "jumps", "ssh_options", "config_host", "forwards", "os", "created_at", "updated_at"} {
 		if !cols[want] {
 			t.Fatalf("sessions 缺列 %s", want)
 		}
@@ -131,8 +130,10 @@ func TestSessionCRUD(t *testing.T) {
 	created, err := s.Create(&SessionInput{
 		Name: "百度云服务器", Group: "生产", Host: "1.2.3.4", Port: 22, Username: "root",
 		Remark: strPtr("主力机"), Secret: strPtr("p@ssw0rd"),
-		JumpHost: strPtr("10.0.0.1"), JumpPort: intP(2222), JumpUsername: strPtr("ops"),
-		JumpSecret: strPtr("jump-pw"),
+		Jumps: &[]SshHopInput{
+			{Host: "10.0.0.1", Port: 2222, Username: "ops", Secret: strPtr("jump-pw")},
+			{Host: "10.0.0.2", Port: 22, Username: "ops2", Secret: strPtr("jump2-pw")},
+		},
 		SshOptions: &SshConnectOptions{ReadyTimeoutMs: intP(15000), Family: 4},
 		Forwards:   &[]ForwardRule{{Type: "local", ListenPort: 8080, TargetPort: 80}},
 	})
@@ -142,11 +143,11 @@ func TestSessionCRUD(t *testing.T) {
 	if !strings.HasPrefix(created.PublicID, "conn-") || len(created.PublicID) != 13 {
 		t.Fatalf("PublicID 格式不对: %q", created.PublicID)
 	}
-	if !created.HasSecret || !created.HasJumpSecret {
+	if !created.HasSecret || len(created.Jumps) != 2 || !created.Jumps[0].HasSecret || !created.Jumps[1].HasSecret {
 		t.Fatal("密文标志位不对")
 	}
-	if created.JumpHost == nil || *created.JumpHost != "10.0.0.1" || created.JumpPort == nil || *created.JumpPort != 2222 {
-		t.Fatalf("跳板字段不对: %+v", created)
+	if created.Jumps[0].Host != "10.0.0.1" || created.Jumps[0].Port != 2222 {
+		t.Fatalf("跳板字段不对: %+v", created.Jumps)
 	}
 	if created.SshOptions == nil || created.SshOptions.ReadyTimeoutMs == nil || *created.SshOptions.ReadyTimeoutMs != 15000 {
 		t.Fatalf("sshOptions 没存住: %+v", created.SshOptions)
@@ -157,8 +158,8 @@ func TestSessionCRUD(t *testing.T) {
 	if secret, _ := s.GetSecret(created.ID); secret != "p@ssw0rd" {
 		t.Fatalf("GetSecret = %q", secret)
 	}
-	if secret, _ := s.GetJumpSecret(created.ID); secret != "jump-pw" {
-		t.Fatalf("GetJumpSecret = %q", secret)
+	if secrets, _ := s.GetJumpSecrets(created.ID); len(secrets) != 2 || secrets[0] != "jump-pw" || secrets[1] != "jump2-pw" {
+		t.Fatalf("GetJumpSecrets = %q", secrets)
 	}
 	if len(hook.saved) != 1 {
 		t.Fatalf("钩子应触发 1 次，实际 %d", len(hook.saved))
@@ -241,6 +242,79 @@ func TestSessionCRUD(t *testing.T) {
 	ok, _ = s.Delete(created.ID)
 	if ok {
 		t.Fatal("重复删除应返回 false")
+	}
+}
+
+func TestJumpSecretsLifecycle(t *testing.T) {
+	s := newStore(t)
+	created, err := s.Create(&SessionInput{
+		Name: "multi", Host: "target", Port: 22, Username: "root",
+		Jumps: &[]SshHopInput{
+			{Host: "j1", Port: 22, Username: "ops", Secret: strPtr("jump-pw")},
+			{Host: "j2", Port: 2222, Username: "deploy", Secret: strPtr("jump2-pw")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reordered, err := s.Update(created.ID, &SessionInput{
+		Name: "multi", Host: "target", Port: 22, Username: "root",
+		Jumps: &[]SshHopInput{
+			{Host: "j2", Port: 2222, Username: "deploy"},
+			{Host: "j1", Port: 22, Username: "ops"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reordered.Jumps) != 2 || reordered.Jumps[0].Host != "j2" || reordered.Jumps[1].Host != "j1" {
+		t.Fatalf("排序后跳板不对: %+v", reordered.Jumps)
+	}
+	secrets, err := s.GetJumpSecrets(created.ID)
+	if err != nil || len(secrets) != 2 || secrets[0] != "jump2-pw" || secrets[1] != "jump-pw" {
+		t.Fatalf("排序后密码错配: %q %v", secrets, err)
+	}
+
+	changed, err := s.Update(created.ID, &SessionInput{
+		Name: "multi", Host: "target", Port: 22, Username: "root",
+		Jumps: &[]SshHopInput{
+			{Host: "j1", Port: 22, Username: "ops"},
+			{Host: "new", Port: 22, Username: "deploy"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed.Jumps[0].HasSecret || changed.Jumps[1].HasSecret {
+		t.Fatalf("修改地址后不应继承密码: %+v", changed.Jumps)
+	}
+
+	removed, err := s.Update(created.ID, &SessionInput{
+		Name: "multi", Host: "target", Port: 22, Username: "root",
+		Jumps: &[]SshHopInput{{Host: "j1", Port: 22, Username: "ops"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed.Jumps) != 1 || !removed.Jumps[0].HasSecret {
+		t.Fatalf("删除后剩余密码不对: %+v", removed.Jumps)
+	}
+	dup, err := s.Duplicate(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err = s.GetJumpSecrets(dup.ID)
+	if err != nil || len(secrets) != 1 || secrets[0] != "jump-pw" {
+		t.Fatalf("复制后密码不对: %q %v", secrets, err)
+	}
+
+	var raw string
+	if err := s.db.QueryRow("SELECT jumps FROM sessions WHERE id = ?", created.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "jump-pw") || strings.Contains(raw, "jump2-pw") {
+		t.Fatalf("跳板密码以明文落盘: %s", raw)
 	}
 }
 

@@ -100,15 +100,8 @@ func (s *sshSync) applyConfig(id string, fields sshx.HostFields) {
 		Username:     orLocalUser(fields.Username),
 		ProxyCommand: fields.ProxyCommand,
 	}
-	if len(fields.Jumps) > 0 {
-		apply.JumpHost = fields.Jumps[0].Host
-		apply.JumpPort = fields.Jumps[0].Port
-		apply.JumpUsername = fields.Jumps[0].Username
-		for _, hop := range fields.Jumps[1:] {
-			apply.ExtraJumps = append(apply.ExtraJumps, storage.SshHop{
-				Host: hop.Host, Port: hop.Port, Username: hop.Username,
-			})
-		}
+	for _, hop := range fields.Jumps {
+		apply.Jumps = append(apply.Jumps, storage.SshHop{Host: hop.Host, Port: hop.Port, Username: hop.Username})
 	}
 	if err := s.a.store.ApplySshConfig(id, apply); err != nil {
 		log.Printf("[TermPilot] 导入 SSH 配置失败: %v", err)
@@ -124,14 +117,8 @@ func (s *sshSync) insertConfig(alias string, fields sshx.HostFields) {
 		Port:       fields.Port,
 		Username:   orLocalUser(fields.Username),
 		Remark:     strPtr(""),
-		JumpHost:   strPtr(""),
+		Jumps:      hopInputs(fields.Jumps),
 		SshOptions: configOptionsFromFields(fields),
-	}
-	if len(fields.Jumps) > 0 {
-		jump := fields.Jumps[0]
-		input.JumpHost = strPtr(jump.Host)
-		input.JumpPort = intPtr(jump.Port)
-		input.JumpUsername = strPtr(jump.Username)
 	}
 	session, err := s.a.store.Create(input)
 	if err != nil {
@@ -219,25 +206,10 @@ func fieldsFromSession(session *storage.SessionConfig) sshx.HostFields {
 		Port:     session.Port,
 		Username: strings.TrimSpace(session.Username),
 	}
-	if session.JumpHost != nil && strings.TrimSpace(*session.JumpHost) != "" {
-		port := 22
-		if session.JumpPort != nil && *session.JumpPort != 0 {
-			port = *session.JumpPort
-		}
-		username := ""
-		if session.JumpUsername != nil {
-			username = strings.TrimSpace(*session.JumpUsername)
-		}
+	for _, hop := range session.Jumps {
 		fields.Jumps = append(fields.Jumps, sshx.HopFields{
-			Host: strings.TrimSpace(*session.JumpHost), Port: port, Username: username,
+			Host: hop.Host, Port: hop.Port, Username: hop.Username,
 		})
-		if session.SshOptions != nil {
-			for _, hop := range session.SshOptions.ExtraJumps {
-				fields.Jumps = append(fields.Jumps, sshx.HopFields{
-					Host: hop.Host, Port: hop.Port, Username: hop.Username,
-				})
-			}
-		}
 	}
 	if session.SshOptions != nil {
 		fields.ProxyCommand = session.SshOptions.ProxyCommand
@@ -245,17 +217,17 @@ func fieldsFromSession(session *storage.SessionConfig) sshx.HostFields {
 	return fields
 }
 
-// configOptionsFromFields 对应 TS configOptions(extra, proxyCommand)（无 prev 的版本）。
-func configOptionsFromFields(fields sshx.HostFields) *storage.SshConnectOptions {
-	options := &storage.SshConnectOptions{ProxyCommand: fields.ProxyCommand}
-	if len(fields.Jumps) > 1 {
-		for _, hop := range fields.Jumps[1:] {
-			options.ExtraJumps = append(options.ExtraJumps, storage.SshHop{
-				Host: hop.Host, Port: hop.Port, Username: hop.Username,
-			})
-		}
+func hopInputs(hops []sshx.HopFields) *[]storage.SshHopInput {
+	out := make([]storage.SshHopInput, 0, len(hops))
+	for _, hop := range hops {
+		out = append(out, storage.SshHopInput{Host: hop.Host, Port: hop.Port, Username: hop.Username})
 	}
-	return storage.SanitizeSshOptions(options)
+	return &out
+}
+
+// configOptionsFromFields 对应 TS configOptions(proxyCommand)（无 prev 的版本）。
+func configOptionsFromFields(fields sshx.HostFields) *storage.SshConnectOptions {
+	return storage.SanitizeSshOptions(&storage.SshConnectOptions{ProxyCommand: fields.ProxyCommand})
 }
 
 func orLocalUser(username string) string {

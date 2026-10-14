@@ -61,9 +61,12 @@ func TestElectronCompat(t *testing.T) {
 			}
 			checked++
 		}
-		if s.HasJumpSecret {
-			if secret, _ := store.GetJumpSecret(s.ID); secret == "" || !utf8.ValidString(secret) {
-				t.Fatalf("会话 %s 的跳板密文解不开", s.Name)
+		if len(s.Jumps) > 0 {
+			secrets, _ := store.GetJumpSecrets(s.ID)
+			for _, secret := range secrets {
+				if secret == "" || !utf8.ValidString(secret) {
+					t.Fatalf("会话 %s 的跳板密文解不开", s.Name)
+				}
 			}
 		}
 	}

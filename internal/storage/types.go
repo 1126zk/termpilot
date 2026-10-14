@@ -20,9 +20,18 @@ type ForwardRule struct {
 
 // SshHop 一条跳板。用户名可以含冒号，那是名字的一部分。
 type SshHop struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	HasSecret bool   `json:"hasSecret,omitempty"`
+}
+
+// SshHopInput 创建或修改一跳的输入，Secret 为明文，只在 IPC 调用内存中短暂存在。
+type SshHopInput struct {
+	Host     string  `json:"host"`
+	Port     int     `json:"port"`
+	Username string  `json:"username"`
+	Secret   *string `json:"secret,omitempty"`
 }
 
 // SshAlgorithms 保留 OpenSSH 的 + / ^ / - 前缀，拨号时再交给 ssh2。
@@ -44,47 +53,41 @@ type SshConnectOptions struct {
 	LocalAddress          string         `json:"localAddress,omitempty"`
 	StrictHostKeyChecking string         `json:"strictHostKeyChecking,omitempty"` // yes|no|accept-new
 	Algorithms            *SshAlgorithms `json:"algorithms,omitempty"`
-	ExtraJumps            []SshHop       `json:"extraJumps,omitempty"`
 	ProxyCommand          string         `json:"proxyCommand,omitempty"`
 }
 
 // SessionConfig 会话配置（secret 不落盘在本结构里，单独加密存储）。认证只用密码。
 type SessionConfig struct {
-	ID            string             `json:"id"`
-	PublicID      string             `json:"publicId"`
-	Name          string             `json:"name"`
-	Group         string             `json:"group"`
-	Host          string             `json:"host"`
-	Port          int                `json:"port"`
-	Username      string             `json:"username"`
-	Remark        *string            `json:"remark,omitempty"`
-	HasSecret     bool               `json:"hasSecret"`
-	JumpHost      *string            `json:"jumpHost,omitempty"`
-	JumpPort      *int               `json:"jumpPort,omitempty"`
-	JumpUsername  *string            `json:"jumpUsername,omitempty"`
-	HasJumpSecret bool               `json:"hasJumpSecret"`
-	SshOptions    *SshConnectOptions `json:"sshOptions,omitempty"`
-	Forwards      []ForwardRule      `json:"forwards,omitempty"`
-	Os            *string            `json:"os,omitempty"`
-	CreatedAt     int64              `json:"createdAt"`
-	UpdatedAt     int64              `json:"updatedAt"`
+	ID         string             `json:"id"`
+	PublicID   string             `json:"publicId"`
+	Name       string             `json:"name"`
+	Group      string             `json:"group"`
+	Host       string             `json:"host"`
+	Port       int                `json:"port"`
+	Username   string             `json:"username"`
+	Remark     *string            `json:"remark,omitempty"`
+	HasSecret  bool               `json:"hasSecret"`
+	Jumps      []SshHop           `json:"jumps,omitempty"`
+	SshOptions *SshConnectOptions `json:"sshOptions,omitempty"`
+	Forwards   []ForwardRule      `json:"forwards,omitempty"`
+	Os         *string            `json:"os,omitempty"`
+	CreatedAt  int64              `json:"createdAt"`
+	UpdatedAt  int64              `json:"updatedAt"`
 }
 
 // SessionInput 创建/更新会话时的输入，Secret 为明文。
 // 指针字段语义对应 TS 的 undefined（nil = 不修改/不写入）；
 // 空字符串 Secret 表示清掉已存凭据。
 type SessionInput struct {
-	Name         string  `json:"name"`
-	Group        string  `json:"group"`
-	Host         string  `json:"host"`
-	Port         int     `json:"port"`
-	Username     string  `json:"username"`
-	Remark       *string `json:"remark,omitempty"`
-	Secret       *string `json:"secret,omitempty"`
-	JumpHost     *string `json:"jumpHost,omitempty"`
-	JumpPort     *int    `json:"jumpPort,omitempty"`
-	JumpUsername *string `json:"jumpUsername,omitempty"`
-	JumpSecret   *string `json:"jumpSecret,omitempty"`
+	Name     string  `json:"name"`
+	Group    string  `json:"group"`
+	Host     string  `json:"host"`
+	Port     int     `json:"port"`
+	Username string  `json:"username"`
+	Remark   *string `json:"remark,omitempty"`
+	Secret   *string `json:"secret,omitempty"`
+	// nil = 不修改；非 nil = 按本机到目标主机的顺序整体替换（空切片清掉）。
+	Jumps *[]SshHopInput `json:"jumps,omitempty"`
 	// nil = 不修改；非 nil（哪怕零值结构）= 整体替换，清洗后为空则存 NULL。
 	SshOptions *SshConnectOptions `json:"sshOptions,omitempty"`
 	// nil = 不修改；非 nil = 整体替换（空切片清掉）。

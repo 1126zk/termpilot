@@ -22,14 +22,14 @@ var toolExpectations = []toolExpect{
 	{
 		name: "connection_create",
 		props: map[string]string{
-			"name": "s", "host": "s", "port": "i", "username": "s", "secret": "s", "group": "s", "remark": "s",
+			"name": "s", "host": "s", "port": "i", "username": "s", "secret": "s", "jumps": "a", "group": "s", "remark": "s",
 		},
 		required: []string{"name"},
 	},
 	{
 		name: "connection_update",
 		props: map[string]string{
-			"connection": "s", "name": "s", "host": "s", "port": "i", "username": "s", "secret": "s", "group": "s", "remark": "s",
+			"connection": "s", "name": "s", "host": "s", "port": "i", "username": "s", "secret": "s", "jumps": "a", "group": "s", "remark": "s",
 		},
 		required: []string{"connection"},
 	},
@@ -203,6 +203,13 @@ func TestSchemaConstraints(t *testing.T) {
 	create, _ := FindTool("connection_create")
 	if port := create.field("port"); port == nil || *port.Min != 1 || *port.Max != 65535 {
 		t.Errorf("connection_create.port: %+v", port)
+	}
+	jumps := create.field("jumps")
+	if jumps == nil || jumps.MaxItems != 9 || len(jumps.ItemFields) != 4 {
+		t.Fatalf("connection_create.jumps: %+v", jumps)
+	}
+	if jumps.ItemFields[0].Name != "host" || jumps.ItemFields[2].Name != "username" || jumps.ItemFields[3].Name != "secret" {
+		t.Fatalf("connection_create.jumps 子字段: %+v", jumps.ItemFields)
 	}
 }
 

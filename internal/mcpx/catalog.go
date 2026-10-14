@@ -25,12 +25,13 @@ type FieldSpec struct {
 	Type        string // "string" | "integer" | "boolean" | "array"
 	Required    bool
 	Description string
-	Enum        []string // Type=string 时的枚举（sftp_remove.kind）
-	ItemEnum    []string // Type=array 时的元素枚举（term_write.keys）
-	Min         *int     // integer 下界
-	Max         *int     // integer 上界
-	MaxLen      int      // string 的 maxLength
-	MaxItems    int      // array 的 maxItems
+	Enum        []string    // Type=string 时的枚举（sftp_remove.kind）
+	ItemEnum    []string    // Type=array 时的元素枚举（term_write.keys）
+	Min         *int        // integer 下界
+	Max         *int        // integer 上界
+	MaxLen      int         // string 的 maxLength
+	MaxItems    int         // array 的 maxItems
+	ItemFields  []FieldSpec // array 元素为对象时的字段（jumps）
 }
 
 // ToolDef 一个工具的定义，对应 TS ToolDef。
@@ -63,6 +64,16 @@ func sessionFields() []FieldSpec {
 		{Name: "port", Type: "integer", Min: intPtr(1), Max: intPtr(65535), Description: "SSH 端口，默认 22"},
 		{Name: "username", Type: "string", Description: "SSH 登录用户"},
 		{Name: "secret", Type: "string", Description: "密码。加密保存，之后不会再返回。留空表示不修改"},
+		{
+			Name: "jumps", Type: "array", MaxItems: 9,
+			Description: "按本机到目标主机的顺序排列的跳板；每项 host/username 必填，secret 可选。未传表示不修改，空数组表示清除",
+			ItemFields: []FieldSpec{
+				{Name: "host", Type: "string", Required: true, Description: "跳板主机"},
+				{Name: "port", Type: "integer", Required: true, Min: intPtr(1), Max: intPtr(65535), Description: "跳板端口"},
+				{Name: "username", Type: "string", Required: true, Description: "跳板用户名"},
+				{Name: "secret", Type: "string", Description: "跳板密码。加密保存，之后不会再返回"},
+			},
+		},
 		{Name: "group", Type: "string", Description: "侧边栏分组，留空归入未分组"},
 		{Name: "remark", Type: "string", Description: "备注"},
 	}
@@ -414,6 +425,21 @@ func fieldSchema(f FieldSpec) any {
 			vals[i] = v
 		}
 		out = append(out, kv{"items", omap{{"type", "string"}, {"enum", vals}}})
+	}
+	if len(f.ItemFields) > 0 {
+		properties := make(omap, 0, len(f.ItemFields))
+		required := make([]any, 0)
+		for _, field := range f.ItemFields {
+			properties = append(properties, kv{field.Name, fieldSchema(field)})
+			if field.Required {
+				required = append(required, field.Name)
+			}
+		}
+		out = append(out, kv{"items", omap{
+			{"type", "object"},
+			{"properties", properties},
+			{"required", required},
+		}})
 	}
 	if f.Min != nil {
 		out = append(out, kv{"minimum", *f.Min})

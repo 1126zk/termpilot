@@ -32,13 +32,14 @@ func (f *fakeStorage) List() ([]*storage.SessionConfig, error) { return f.sessio
 func (f *fakeStorage) Create(input *storage.SessionInput) (*storage.SessionConfig, error) {
 	session := &storage.SessionConfig{
 		ID:       "id-" + input.Name,
-		PublicID: "conn-new0001",
+		PublicID: "conn-abcd1234",
 		Name:     input.Name,
 		Group:    input.Group,
 		Host:     input.Host,
 		Port:     input.Port,
 		Username: input.Username,
 		Remark:   input.Remark,
+		Jumps:    publicJumpsOf(input.Jumps),
 	}
 	f.sessions = append(f.sessions, session)
 	return session, nil
@@ -49,10 +50,27 @@ func (f *fakeStorage) Update(id string, patch *storage.SessionInput) (*storage.S
 		if s.ID == id {
 			s.Name, s.Group, s.Host, s.Port, s.Username = patch.Name, patch.Group, patch.Host, patch.Port, patch.Username
 			s.Remark = patch.Remark
+			if patch.Jumps != nil {
+				s.Jumps = publicJumpsOf(patch.Jumps)
+			}
 			return s, nil
 		}
 	}
 	return nil, nil
+}
+
+func publicJumpsOf(input *[]storage.SshHopInput) []storage.SshHop {
+	if input == nil {
+		return nil
+	}
+	out := make([]storage.SshHop, 0, len(*input))
+	for _, hop := range *input {
+		out = append(out, storage.SshHop{
+			Host: hop.Host, Port: hop.Port, Username: hop.Username,
+			HasSecret: hop.Secret != nil && *hop.Secret != "",
+		})
+	}
+	return out
 }
 
 func (f *fakeStorage) Delete(id string) (bool, error) {

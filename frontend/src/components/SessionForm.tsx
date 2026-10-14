@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils'
 import { useAppStore, type EditingState } from '../stores/useAppStore'
 import type { ForwardRule, ForwardType, SessionConfig, SessionInput } from '../../../shared/types'
+import type { SshHopInput } from '../../../shared/ssh-options'
 
 const empty = () => ({
   name: '',
@@ -41,6 +42,7 @@ interface JumpDraft {
   port: number
   username: string
   secret: string
+  hasSecret?: boolean
   showSecret: boolean
 }
 
@@ -103,7 +105,6 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     }
     dirty.current = false
     setShowSecret(false)
-    setJumps([])
     if (editing.action === 'edit') {
       const s = editing.session
       setForm({
@@ -113,6 +114,17 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
         username: s.username,
         secret: ''
       })
+      setJumps(
+        (s.jumps ?? []).map((hop) => ({
+          id: nextJumpID.current++,
+          host: hop.host,
+          port: hop.port,
+          username: hop.username,
+          secret: '',
+          hasSecret: hop.hasSecret,
+          showSecret: false
+        }))
+      )
       // 编辑时把已存的密码填进密码框，可查看可复制。回填不标脏，不会触发自动保存
       void window.api.sessions
         .revealSecret(s.id)
@@ -132,6 +144,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
         port: editing.port ?? 22
       })
       setForwards([])
+      setJumps([])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editKey])
@@ -146,16 +159,19 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     setForwards((list) => list.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
   }
 
-  const setJump = (id: number, patch: Partial<JumpDraft>) => {
+  const setJump = (id: number, patch: Partial<JumpDraft>, persist = true) => {
+    if (persist) dirty.current = true
     setJumps((list) => list.map((jump) => (jump.id === id ? { ...jump, ...patch } : jump)))
   }
 
   const addJump = () => {
+    dirty.current = true
     const id = nextJumpID.current++
     setJumps((list) => [...list, newJumpDraft(id)])
   }
 
   const moveJump = (id: number, offset: -1 | 1) => {
+    dirty.current = true
     setJumps((list) => {
       const from = list.findIndex((jump) => jump.id === id)
       const to = from + offset
@@ -186,6 +202,18 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     return rules
   }
 
+  const collectJumps = (): SshHopInput[] | null => {
+    const collected: SshHopInput[] = []
+    for (const draft of jumps) {
+      const host = draft.host.trim()
+      const username = draft.username.trim()
+      if (!host && !username && !draft.secret) continue
+      if (!host || !username || !Number.isInteger(draft.port) || draft.port < 1 || draft.port > 65535) return null
+      collected.push({ host, port: draft.port, username, secret: draft.secret || undefined })
+    }
+    return collected
+  }
+
   const autosave = async () => {
     if (!editing) return
     const name = form.name.trim()
@@ -194,7 +222,8 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     if (!name || !host || !username) return
     const rules = collectForwards()
     if (!rules) return
-    // 编辑时跳板、备注、sshOptions 传 undefined，保持原值，不清掉老数据
+    const nextJumps = collectJumps()
+    if (!nextJumps) return
     const patch: SessionInput = {
       name,
       group: '',
@@ -202,7 +231,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       port: form.port,
       username,
       secret: form.secret ? form.secret : undefined,
-      jumpHost: creating ? '' : undefined,
+      jumps: nextJumps,
       sshOptions: creating ? null : undefined,
       forwards: rules
     }
@@ -235,7 +264,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     const timer = setTimeout(() => void autosave(), 600)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, forwards])
+  }, [form, forwards, jumps])
 
   const connect = () => {
     if (!session) return
@@ -403,7 +432,10 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
                       size="icon"
                       className="size-6 text-muted-foreground hover:text-foreground"
                       title="删除这一跳"
-                      onClick={() => setJumps((list) => list.filter((item) => item.id !== jump.id))}
+                      onClick={() => {
+                        dirty.current = true
+                        setJumps((list) => list.filter((item) => item.id !== jump.id))
+                      }}
                     >
                       <X className="size-3.5" />
                     </Button>
@@ -439,14 +471,14 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
                     className="h-10 pr-9 pl-8"
                     type={jump.showSecret ? 'text' : 'password'}
                     value={jump.secret}
-                    placeholder="跳板密码"
+                    placeholder={jump.hasSecret ? '留空则不修改' : '跳板密码'}
                     onChange={(e) => setJump(jump.id, { secret: e.target.value })}
                   />
                   <button
                     type="button"
                     title={jump.showSecret ? '隐藏密码' : '显示密码'}
                     className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
-                    onClick={() => setJump(jump.id, { showSecret: !jump.showSecret })}
+                    onClick={() => setJump(jump.id, { showSecret: !jump.showSecret }, false)}
                   >
                     {jump.showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   </button>

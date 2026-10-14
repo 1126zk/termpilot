@@ -35,7 +35,7 @@ type poolSlot struct {
 type Pool struct {
 	mu    sync.Mutex
 	slots map[string]*poolSlot
-	dial  func(ctx context.Context, session *SessionConfig, secret, jumpSecret string, opts *DialOptions) (*Conn, error)
+	dial  func(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string, opts *DialOptions) (*Conn, error)
 }
 
 // NewPool 建一个空池。
@@ -44,7 +44,7 @@ func NewPool() *Pool {
 }
 
 // SetDialer 替换底层拨号函数（测试或定制传输用）。
-func (p *Pool) SetDialer(dial func(ctx context.Context, session *SessionConfig, secret, jumpSecret string, opts *DialOptions) (*Conn, error)) {
+func (p *Pool) SetDialer(dial func(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string, opts *DialOptions) (*Conn, error)) {
 	p.dial = dial
 }
 
@@ -52,7 +52,7 @@ func (p *Pool) SetDialer(dial func(ctx context.Context, session *SessionConfig, 
 // 并发 Acquire 同一会话时共享同一次拨号。共享连接建立后挂端口映射；
 // 连接断开自动出池，下次 Acquire 重拨。
 // 注意：共享池不走跳板 shell 回退（回退流上开不了通道）。
-func (p *Pool) Acquire(ctx context.Context, session *SessionConfig, secret, jumpSecret string) (*Hold, error) {
+func (p *Pool) Acquire(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string) (*Hold, error) {
 	p.mu.Lock()
 	if slot := p.slots[session.ID]; slot != nil {
 		slot.refs++
@@ -69,7 +69,7 @@ func (p *Pool) Acquire(ctx context.Context, session *SessionConfig, secret, jump
 	p.slots[session.ID] = slot
 	p.mu.Unlock()
 
-	conn, err := p.dial(ctx, session, secret, jumpSecret, nil)
+	conn, err := p.dial(ctx, session, secret, jumpSecrets, nil)
 	if err != nil {
 		p.mu.Lock()
 		if p.slots[session.ID] == slot {
@@ -99,8 +99,8 @@ func (p *Pool) Acquire(ctx context.Context, session *SessionConfig, secret, jump
 
 // AcquireIsolated 另拨一条独立连接，不放进共用池。
 // 改过 sshd 子系统之后，原来那条会话仍按登录时的配置执行 SFTP。
-func (p *Pool) AcquireIsolated(ctx context.Context, session *SessionConfig, secret, jumpSecret string) (*Hold, error) {
-	conn, err := p.dial(ctx, session, secret, jumpSecret, nil)
+func (p *Pool) AcquireIsolated(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string) (*Hold, error) {
+	conn, err := p.dial(ctx, session, secret, jumpSecrets, nil)
 	if err != nil {
 		return nil, err
 	}

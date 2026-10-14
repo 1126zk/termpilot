@@ -49,8 +49,6 @@ type ConnectOptions struct {
 	// "yes" / "no" / "accept-new"。
 	StrictHostKeyChecking string
 	Algorithms            *AlgorithmOptions
-	// 第一跳之后的跳板。
-	ExtraJumps []Hop
 	// 没有跳板时，用这条本地命令代替直连。
 	ProxyCommand string
 }
@@ -61,12 +59,11 @@ type SessionConfig struct {
 	Host     string
 	Port     int
 	Username string
-	// ssh -J 跳板。空表示直接连接。
-	JumpHost     string
-	JumpPort     int
-	JumpUsername string
-	Options      *ConnectOptions
-	Forwards     []ForwardRule
+	// 按本机到目标主机的顺序排列的跳板；空表示直接连接。
+	Jumps   []Hop
+	Options *ConnectOptions
+	// 端口映射规则，连接建立后挂在共享 SSH 连接上。
+	Forwards []ForwardRule
 }
 
 // OsInfo 对端系统探测结果。Distro 是 /etc/os-release 的 ID 小写（如 debian），认不出为空。

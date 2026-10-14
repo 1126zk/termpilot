@@ -47,9 +47,6 @@ func SanitizeConnectOptions(value map[string]any) *ConnectOptions {
 	if algorithms := sanitizeAlgorithms(value["algorithms"]); algorithms != nil {
 		options.Algorithms = algorithms
 	}
-	if hops := sanitizeHops(value["extraJumps"]); hops != nil {
-		options.ExtraJumps = hops
-	}
 	if command, ok := value["proxyCommand"].(string); ok {
 		trimmed := strings.TrimSpace(command)
 		if trimmed != "" && len(trimmed) <= 1000 && !strings.ContainsAny(trimmed, "\r\n") && strings.ToLower(trimmed) != "none" {
@@ -61,21 +58,6 @@ func SanitizeConnectOptions(value map[string]any) *ConnectOptions {
 		return nil
 	}
 	return options
-}
-
-// OptionsForSession 没有第一跳时，后面的跳板没有落点。
-func OptionsForSession(jumpHost string, options *ConnectOptions) *ConnectOptions {
-	if options == nil {
-		return nil
-	}
-	clean := *options
-	if strings.TrimSpace(jumpHost) == "" {
-		clean.ExtraJumps = nil
-	}
-	if !HasConnectOptions(&clean) {
-		return nil
-	}
-	return &clean
 }
 
 // HasConnectOptions 报告选项里是否还有任何生效字段。
@@ -91,7 +73,6 @@ func HasConnectOptions(options *ConnectOptions) bool {
 		options.LocalAddress != "" ||
 		options.StrictHostKeyChecking != "" ||
 		options.Algorithms != nil ||
-		len(options.ExtraJumps) > 0 ||
 		options.ProxyCommand != ""
 }
 
@@ -109,39 +90,6 @@ func sanitizeAlgorithms(value any) *AlgorithmOptions {
 		return nil
 	}
 	return algorithms
-}
-
-func sanitizeHops(value any) []Hop {
-	list, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	var hops []Hop
-	for _, item := range list {
-		raw, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		host, _ := raw["host"].(string)
-		host = strings.TrimSpace(host)
-		username, _ := raw["username"].(string)
-		username = strings.TrimSpace(username)
-		port, ok := finiteNumber(raw["port"])
-		if host == "" || len(host) > 255 || len(username) > 500 {
-			continue
-		}
-		if !ok || port < 1 || port > 65535 {
-			continue
-		}
-		hops = append(hops, Hop{Host: host, Port: port, Username: username})
-		if len(hops) >= 8 {
-			break
-		}
-	}
-	if len(hops) == 0 {
-		return nil
-	}
-	return hops
 }
 
 func sanitizeAlgoList(value any) []string {

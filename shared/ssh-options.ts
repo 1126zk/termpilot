@@ -3,11 +3,22 @@ export interface SshHop {
   host: string
   port: number
   username: string
+  /** 是否已保存这一跳的加密密码。 */
+  hasSecret?: boolean
+}
+
+/** 创建或修改一条跳板。secret 为明文，只在 IPC 调用内存中短暂存在。 */
+export interface SshHopInput {
+  host: string
+  port: number
+  username: string
+  /** undefined 表示保留已有密码，空字符串表示清除。 */
+  secret?: string
 }
 
 /**
  * 从 ssh 命令里认出来、连接时会用上的选项。
- * 主机、端口、用户名、第一跳跳板仍放在会话自己的字段里。
+ * 主机、端口和用户名放在会话自己的字段里。
  */
 export interface SshConnectOptions {
   /** 握手等待，毫秒。0 表示命令里写了不超时，连接时改成有上限的等待。 */
@@ -26,8 +37,6 @@ export interface SshConnectOptions {
     serverHostKey?: string[]
     hmac?: string[]
   }
-  /** 第一跳之后的跳板。 */
-  extraJumps?: SshHop[]
   /** 没有跳板时，用这条本地命令代替直连。 */
   proxyCommand?: string
 }
@@ -57,9 +66,6 @@ export function sanitizeSshOptions(value: unknown): SshConnectOptions | undefine
   const algorithms = sanitizeAlgorithms(raw.algorithms)
   if (algorithms) options.algorithms = algorithms
 
-  const hops = sanitizeHops(raw.extraJumps)
-  if (hops) options.extraJumps = hops
-
   if (typeof raw.proxyCommand === 'string') {
     const command = raw.proxyCommand.trim()
     if (command && command.length <= 1000 && !/[\r\n]/.test(command) && command.toLowerCase() !== 'none') {
@@ -68,17 +74,6 @@ export function sanitizeSshOptions(value: unknown): SshConnectOptions | undefine
   }
 
   return hasSshOptions(options) ? options : undefined
-}
-
-/** 没有第一跳时，后面的跳板没有落点。 */
-export function sshOptionsForSession(
-  jumpHost: string | undefined,
-  options: SshConnectOptions | null | undefined
-): SshConnectOptions | undefined {
-  const clean = sanitizeSshOptions(options)
-  if (!clean) return undefined
-  if (!jumpHost?.trim()) delete clean.extraJumps
-  return hasSshOptions(clean) ? clean : undefined
 }
 
 export function hasSshOptions(options: SshConnectOptions | undefined): boolean {
@@ -106,7 +101,6 @@ export function describeSshOptions(options: SshConnectOptions | null | undefined
   if (clean.algorithms?.kex) parts.push('指定密钥交换')
   if (clean.algorithms?.serverHostKey) parts.push('指定主机密钥算法')
   if (clean.algorithms?.hmac) parts.push('指定校验算法')
-  if (clean.extraJumps?.length) parts.push(`后面还有 ${clean.extraJumps.length} 跳`)
   if (clean.proxyCommand) parts.push('用 ProxyCommand 连接')
   return parts.join('，')
 }
@@ -124,23 +118,6 @@ function sanitizeAlgorithms(value: unknown): SshConnectOptions['algorithms'] | u
   if (serverHostKey) algorithms.serverHostKey = serverHostKey
   if (hmac) algorithms.hmac = hmac
   return Object.keys(algorithms).length > 0 ? algorithms : undefined
-}
-
-function sanitizeHops(value: unknown): SshHop[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const hops: SshHop[] = []
-  for (const item of value) {
-    if (!item || typeof item !== 'object') continue
-    const hop = item as Record<string, unknown>
-    const host = typeof hop.host === 'string' ? hop.host.trim() : ''
-    const username = typeof hop.username === 'string' ? hop.username.trim() : ''
-    const port = finite(hop.port)
-    if (!host || host.length > 255 || username.length > 500) continue
-    if (port === undefined || port < 1 || port > 65535) continue
-    hops.push({ host, port, username })
-    if (hops.length >= 8) break
-  }
-  return hops.length > 0 ? hops : undefined
 }
 
 function algoList(value: unknown): string[] | undefined {
