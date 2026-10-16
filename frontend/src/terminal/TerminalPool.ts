@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
+import { bindFullscreenWheel } from './fullscreenWheel'
 import { bindIme } from './ime'
 import { terminalPalette } from '../theme/terminalThemes'
 
@@ -107,6 +108,7 @@ class TerminalPool {
     bindClipboardKeys(term)
     bindOsc52(term)
     bindIme(host, term)
+    bindFullscreenWheel(host, term)
 
     this.enableWebgl(term)
 
