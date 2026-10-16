@@ -2558,7 +2558,7 @@ export const TERMINAL_FONTS = [
 
 export const DEFAULT_APPEARANCE: Appearance = {
   theme: 'termius-dark',
-  terminalFont: 'Consolas',
+  terminalFont: 'Source Code Pro',
   terminalSize: 14
 }
 

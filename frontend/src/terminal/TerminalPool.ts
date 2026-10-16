@@ -26,7 +26,8 @@ interface PoolEntry {
   settled: boolean
 }
 
-const DEFAULT_FONT_FAMILY = 'Consolas, "Cascadia Mono", "Microsoft YaHei", monospace'
+// 与默认外观 Source Code Pro 的字体栈一致，外观设置推过来之前先用这一套。
+const DEFAULT_FONT_FAMILY = '"SauceCodePro Nerd Font Mono", Consolas, "Cascadia Mono", "Microsoft YaHei", monospace'
 
 export interface TermLook {
   cols: number

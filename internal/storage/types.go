@@ -145,7 +145,7 @@ type McpAuditEntry struct {
 // DefaultAppearance 对应 TS 的 DEFAULT_APPEARANCE。
 var DefaultAppearance = Appearance{
 	Theme:        "termius-dark",
-	TerminalFont: "Consolas",
+	TerminalFont: "Source Code Pro",
 	TerminalSize: 14,
 }
 
