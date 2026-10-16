@@ -12,6 +12,7 @@ import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { isImage } from './RemoteEditor'
 import { TREE_PATH_MIME } from '../terminal/dropPath'
+import { beginTreeMove, finishTreeMove, noteTreeMoveDrop, treeMoveActive } from '../treeMove'
 import { PanelConfirm, PanelDialog, useMenuAction } from './PanelDialog'
 import { DROP_TARGET_STYLE, dropDirAt, registerDropTree } from '../fileDrop'
 import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
@@ -65,6 +66,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   // 自己发起的列目录把代数加一，进行中的自动刷新结果作废，避免盖掉更新的列表
   const listingGen = useRef(0)
   const seenActive = useRef(false)
+  const dragging = useRef(false)
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined)
   const treeId = tab?.id ?? ''
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
@@ -340,7 +343,101 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     }
   }
 
+  // 本机目录之间、以及从系统拖进本机目录树，都是移动。
+  const moveLocalInto = async (dir: string, rawPaths: string[]) => {
+    if (!fs) return
+    const accepted: string[] = []
+    for (const raw of rawPaths) {
+      const src = normPath(raw)
+      if (!src) continue
+      if (pathsEqual(src, dir) || pathInside(src, dir)) {
+        setNotice('不能移动到自身或它里面的目录')
+        continue
+      }
+      const parent = parentDir(src)
+      if (parent && pathsEqual(parent, dir)) {
+        setNotice('它已经在这个目录里')
+        continue
+      }
+      accepted.push(src)
+    }
+    if (accepted.length === 0) return
+    setBusy(true)
+    try {
+      const listing = await fs.list(dir)
+      const todo = accepted.filter((src) => {
+        const clash = listing.entries.some((item) => namesEqual(item.name, baseName(src)))
+        if (clash) setNotice('目标里已经有同名的文件或文件夹')
+        return !clash
+      })
+      if (todo.length === 0) return
+      await window.api.localfs.movePaths(dir, todo)
+      const parents = [...new Set(todo.map((src) => parentDir(src)).filter((p): p is string => !!p))]
+      for (const parent of parents) {
+        if (pathsEqual(parent, root) || open[parent]) await listInto(parent)
+      }
+      await ensureOpen(dir)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 远程文件树内部：同一台服务器上换目录，走 SFTP 重命名。跨磁盘由服务器拒绝。
+  const moveRemoteInto = async (dir: string, raw: string) => {
+    if (!fs) return
+    const src = posixNorm(raw)
+    const destDir = posixNorm(dir)
+    if (!src || src === '/' || src === '.') {
+      setNotice('不能移动根目录')
+      return
+    }
+    if (posixEqual(src, destDir) || posixInside(src, destDir)) {
+      setNotice('不能移动到自身或它里面的目录')
+      return
+    }
+    const parent = parentDir(src)
+    if (parent && posixEqual(parent, destDir)) {
+      setNotice('它已经在这个目录里')
+      return
+    }
+    const name = baseName(src)
+    if (!name || name === '/' || name === '.' || name === '..') {
+      setNotice('不能移动根目录')
+      return
+    }
+    setBusy(true)
+    try {
+      const listing = await fs.list(destDir)
+      if (listing.entries.some((item) => item.name === name)) {
+        setNotice('目标里已经有同名的文件或文件夹')
+        return
+      }
+      await fs.rename(src, posixJoin(destDir, name))
+      if (parent) await listInto(parent)
+      await ensureOpen(destDir)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   dropRef.current = (dir, paths) => {
+    if (treeMoveActive()) {
+      if (!local) {
+        setNotice('拖到本机目录才是移动，不会复制到服务器')
+        noteTreeMoveDrop(Promise.resolve())
+        return
+      }
+      noteTreeMoveDrop(moveLocalInto(dir, paths))
+      return
+    }
+    if (local) {
+      void moveLocalInto(dir, paths)
+      return
+    }
     void (async () => {
       setBusy(true)
       try {
@@ -417,6 +514,30 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     }
   }
 
+  refreshRef.current = refresh
+
+  const dragLocalOut = (path: string) => {
+    if (dragging.current) return
+    dragging.current = true
+    beginTreeMove()
+    void (async () => {
+      let failed = ''
+      try {
+        await window.api.localfs.dragMove([path])
+      } catch (error) {
+        failed = sftpMessage(error)
+      } finally {
+        try {
+          await finishTreeMove()
+          await refreshRef.current()
+        } finally {
+          dragging.current = false
+          if (failed) setNotice(failed)
+        }
+      }
+    })()
+  }
+
   const renderNodes = (items: RemoteFile[], depth: number) =>
     visible(items).map((item) => {
       const isDir = item.kind === 'dir'
@@ -442,8 +563,13 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                   data-drop-dir={isDir ? item.path : parentDir(item.path) ?? root}
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local }))
-                    e.dataTransfer.effectAllowed = 'copy'
+                    if (local) {
+                      e.preventDefault()
+                      dragLocalOut(item.path)
+                      return
+                    }
+                    e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local: false }))
+                    e.dataTransfer.effectAllowed = 'copyMove'
                   }}
                   onContextMenu={() => setSelected(item.path)}
                   onClick={() => {
@@ -566,14 +692,39 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       className="relative flex min-h-0 flex-1 flex-col"
       style={DROP_TARGET_STYLE}
       data-drop-tree={treeId}
+      data-drop-local={local ? '1' : undefined}
       data-drop-dir={root}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('Files')) setDropDir(dropDirAt(e.target))
+        const fromTree = e.dataTransfer.types.includes(TREE_PATH_MIME)
+        if (fromTree) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+        }
+        if (fromTree || e.dataTransfer.types.includes('Files')) setDropDir(dropDirAt(e.target))
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropDir(null)
       }}
-      onDrop={() => setDropDir(null)}
+      onDrop={(e) => {
+        const dir = dropDirAt(e.target)
+        setDropDir(null)
+        if (!dir) return
+        const raw = e.dataTransfer.getData(TREE_PATH_MIME)
+        if (!raw) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        try {
+          const item = JSON.parse(raw) as { path: string; local?: boolean }
+          if (!item.path) return
+          if (local) {
+            if (item.local) void moveLocalInto(dir, [item.path])
+            return
+          }
+          if (!item.local) void moveRemoteInto(dir, item.path)
+        } catch {
+          /* 不是文件树拖出来的 */
+        }
+      }}
     >
       <div className="flex items-center gap-1 pr-1 pb-1">
         <input
@@ -671,8 +822,13 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                     style={{ paddingLeft: 0 }}
                     draggable
                     onDragStart={(e) => {
-                      e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local }))
-                      e.dataTransfer.effectAllowed = 'copy'
+                      if (local) {
+                        e.preventDefault()
+                        dragLocalOut(root)
+                        return
+                      }
+                      e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local: false }))
+                      e.dataTransfer.effectAllowed = 'copyMove'
                     }}
                     onContextMenu={() => setSelected(root)}
                     onClick={() => {
@@ -855,6 +1011,51 @@ function sortEntries(items: RemoteFile[]): RemoteFile[] {
     if (ad !== bd) return ad - bd
     return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
   })
+}
+
+function posixNorm(path: string): string {
+  const trimmed = path.replaceAll('\\', '/').replace(/\/+$/, '')
+  return trimmed || '/'
+}
+
+function posixEqual(a: string, b: string): boolean {
+  return posixNorm(a) === posixNorm(b)
+}
+
+function posixInside(parent: string, child: string): boolean {
+  const base = posixNorm(parent)
+  const target = posixNorm(child)
+  const prefix = base === '/' ? '/' : `${base}/`
+  return target.startsWith(prefix)
+}
+
+function posixJoin(dir: string, name: string): string {
+  const base = posixNorm(dir)
+  return base === '/' ? `/${name}` : `${base}/${name}`
+}
+
+function normPath(path: string): string {
+  const trimmed = path.replaceAll('\\', '/').replace(/\/+$/, '')
+  return trimmed || '/'
+}
+
+function pathsEqual(a: string, b: string): boolean {
+  const x = normPath(a)
+  const y = normPath(b)
+  return window.api.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
+}
+
+function namesEqual(a: string, b: string): boolean {
+  return window.api.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+/** child 是否落在 parent 里面（不含两者相同）。 */
+function pathInside(parent: string, child: string): boolean {
+  const base = normPath(parent)
+  const target = normPath(child)
+  const prefix = base === '/' ? '/' : `${base}/`
+  if (window.api.platform === 'win32') return target.toLowerCase().startsWith(prefix.toLowerCase())
+  return target.startsWith(prefix)
 }
 
 function baseName(path: string): string {

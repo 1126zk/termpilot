@@ -25,8 +25,22 @@ func (s *Service) MoveInto(dir string, localPaths []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, err
+	}
+	homeAbs, err := filepath.Abs(home)
+	if err != nil {
+		return 0, err
+	}
+	items := collectItems(localPaths)
+	for _, item := range items {
+		if err := refuseBroadMove(item.path, homeAbs); err != nil {
+			return 0, err
+		}
+	}
 	done := 0
-	for _, item := range collectItems(localPaths) {
+	for _, item := range items {
 		dst := filepath.Join(target, filepath.Base(item.path))
 		if err := os.Rename(item.path, dst); err != nil {
 			sameVolume := filepath.VolumeName(item.path) == filepath.VolumeName(target)

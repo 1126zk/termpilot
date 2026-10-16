@@ -131,6 +131,10 @@ const api = {
     uploadDir: (dir: string) => invoke<number>(IPC.localfsUploadDir, [dir]),
     uploadPaths: (dir: string, paths: string[]) =>
       invoke<number>(IPC.localfsUploadPaths, [dir, paths]),
+    movePaths: (dir: string, paths: string[]) =>
+      invoke<number>(IPC.localfsMovePaths, [dir, paths]),
+    /** 按住鼠标把本机文件拖出窗口，松手即移动 */
+    dragMove: (paths: string[]) => invoke<void>(IPC.localfsDragMove, [paths]),
     download: (file: RemoteFile) => invoke<boolean>(IPC.localfsDownload, [file]),
     downloadDir: (file: RemoteFile) => invoke<boolean>(IPC.localfsDownloadDir, [file]),
     read: (path: string) => invoke<string>(IPC.localfsRead, [path]),

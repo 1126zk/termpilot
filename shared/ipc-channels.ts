@@ -91,6 +91,8 @@ export const IPC = {
   localfsRemove: 'localfs:remove',
   localfsUpload: 'localfs:upload',
   localfsUploadPaths: 'localfs:upload-paths',
+  localfsMovePaths: 'localfs:move-paths',
+  localfsDragMove: 'localfs:drag-move',
   localfsDownload: 'localfs:download',
   localfsUploadDir: 'localfs:upload-dir',
   localfsDownloadDir: 'localfs:download-dir',

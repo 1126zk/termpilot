@@ -76,6 +76,8 @@ func (b *Bridge) routes() map[string]handler {
 		"localfs:upload":       a.hLocalUpload,
 		"localfs:upload-dir":   a.hLocalUploadDir,
 		"localfs:upload-paths": a.hLocalUploadPaths,
+		"localfs:move-paths":   a.hLocalMovePaths,
+		"localfs:drag-move":    a.hLocalDragMove,
 		"localfs:download":     a.hLocalDownload,
 		"localfs:download-dir": a.hLocalDownloadDir,
 		"localfs:read":         a.hLocalRead,

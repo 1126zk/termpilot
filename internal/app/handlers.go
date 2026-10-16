@@ -473,6 +473,26 @@ func (a *App) hLocalUploadPaths(args []interface{}) (interface{}, error) {
 	return a.local.UploadPaths(dir, paths)
 }
 
+func (a *App) hLocalMovePaths(args []interface{}) (interface{}, error) {
+	dir, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := arg[[]string](args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return a.local.MoveInto(dir, paths)
+}
+
+func (a *App) hLocalDragMove(args []interface{}) (interface{}, error) {
+	paths, err := arg[[]string](args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.local.DragMove(paths)
+}
+
 func (a *App) hLocalDownload(args []interface{}) (interface{}, error) {
 	file, err := arg[sftpx.RemoteFile](args, 0)
 	if err != nil {
