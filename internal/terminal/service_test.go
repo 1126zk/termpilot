@@ -360,6 +360,15 @@ func TestListTerms(t *testing.T) {
 	}
 }
 
+func TestShellError(t *testing.T) {
+	if got := shellError(errString("ssh: pty-req failed")); got != "对方拒绝分配终端" {
+		t.Errorf("pty-req: %q", got)
+	}
+	if got := shellError(errString("shell exploded")); got != "打开 shell 失败: shell exploded" {
+		t.Errorf("未知 shell 错误: %q", got)
+	}
+}
+
 func TestFriendlyConnectError(t *testing.T) {
 	cases := map[string]string{
 		"All configured authentication methods failed": "认证失败：用户名或密码不对",
@@ -369,6 +378,7 @@ func TestFriendlyConnectError(t *testing.T) {
 		"read: ETIMEDOUT":                              "连接超时",
 		"dial tcp: EHOSTUNREACH":                       "主机不可达：检查网络",
 		"Connection lost before handshake":             "握手前连接中断",
+		"ssh: handshake failed: EOF":                   "握手中断：已经连上，但对方在登录完成前关闭了连接",
 		"别的错误":                                         "别的错误",
 	}
 	for in, want := range cases {

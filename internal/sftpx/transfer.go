@@ -129,7 +129,7 @@ func (s *Service) Get(sessionID, remotePath, localPath string) error {
 func (s *Service) UploadPaths(sessionID, dir string, localPaths []string) (int, error) {
 	conn, err := s.sftpOf(sessionID)
 	if err != nil {
-		return 0, err
+		return 0, present(err)
 	}
 	done := 0
 	for _, local := range localPaths {
@@ -141,17 +141,17 @@ func (s *Service) UploadPaths(sessionID, dir string, localPaths []string) (int, 
 		if info.IsDir() {
 			total, err := localTreeSize(local)
 			if err != nil {
-				return done, err
+				return done, present(err)
 			}
 			if err := refuseHuge(total); err != nil {
-				return done, err
+				return done, present(err)
 			}
 			group := s.beginGroup(DirectionUp, filepath.Base(local), total)
 			n, err := s.uploadTree(conn, local, remote, group)
 			if err != nil {
 				s.endGroup(group, err.Error())
 				if !errors.Is(err, ErrCancelled) {
-					return done, err
+					return done, present(err)
 				}
 				continue
 			}
@@ -164,7 +164,7 @@ func (s *Service) UploadPaths(sessionID, dir string, localPaths []string) (int, 
 		}
 		ok, err := s.uploadFile(conn, local, remote, nil)
 		if err != nil {
-			return done, err
+			return done, present(err)
 		}
 		if ok {
 			done++

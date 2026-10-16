@@ -84,7 +84,7 @@ func (s *Service) bindShared(entry *Entry, hold *sshx.Hold, opts CreateOptions, 
 		s.createSSH(opts, true)
 		return
 	}
-	s.sendStatus(entry.id, sessionID, StatusError, "打开 shell 失败: "+err.Error())
+	s.sendStatus(entry.id, sessionID, StatusError, shellError(err))
 }
 
 // openJumpShell 跳板不许转发时，只给终端在跳板里再登录一次。
@@ -141,7 +141,7 @@ func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.
 		if !s.alive(entry, gen) {
 			return
 		}
-		s.sendStatus(entry.id, session.ID, StatusError, "打开 shell 失败: "+err.Error())
+		s.sendStatus(entry.id, session.ID, StatusError, shellError(err))
 	}
 }
 
@@ -267,31 +267,20 @@ func (c *jumpShellChannel) Close() error {
 }
 
 // friendlyConnectError 把 SSH/网络的英文错误翻成用户能看懂的中文，认不出来的保持原文。
-// 对应 TS friendlyConnectError；额外覆盖 Go x/crypto 的认证失败措辞。
 func friendlyConnectError(err error) string {
+	return sshx.FriendlyError(err)
+}
+
+// shellError 打开 shell 失败时给界面的句子。能翻译的用中文，翻译不了的保留原因。
+func shellError(err error) string {
 	if err == nil {
-		return ""
+		return "打开 shell 失败"
 	}
-	message := err.Error()
-	switch {
-	case strings.Contains(message, "All configured authentication methods failed"),
-		strings.Contains(message, "unable to authenticate"):
-		return "认证失败：用户名或密码不对"
-	case strings.Contains(message, "ENOTFOUND"), strings.Contains(message, "EAI_AGAIN"),
-		strings.Contains(message, "no such host"):
-		return "找不到主机：检查地址或网络"
-	case strings.Contains(message, "ECONNREFUSED"), strings.Contains(message, "connection refused"):
-		return "连接被拒绝：目标端口没有开放"
-	case strings.Contains(message, "ETIMEDOUT"), strings.Contains(message, "Timed out while waiting for handshake"),
-		strings.Contains(message, "i/o timeout"):
-		return "连接超时"
-	case strings.Contains(message, "EHOSTUNREACH"), strings.Contains(message, "ENETUNREACH"),
-		strings.Contains(message, "unreachable"):
-		return "主机不可达：检查网络"
-	case strings.Contains(message, "Connection lost before handshake"):
-		return "握手前连接中断"
+	msg := sshx.FriendlyError(err)
+	if msg == err.Error() {
+		return "打开 shell 失败: " + msg
 	}
-	return message
+	return msg
 }
 
 // isForwardDenied 对应 TS isForwardDenied：跳板不许转发的判定串来自 sshx.Dial。

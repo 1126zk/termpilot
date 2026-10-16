@@ -126,6 +126,9 @@ func New(opts Options) *Service {
 }
 
 func (s *Service) emitTransfer(ev TransferEvent) {
+	if ev.Error != "" {
+		ev.Error = sshx.FriendlyError(errors.New(ev.Error))
+	}
 	if s.opts.OnTransfer != nil {
 		s.opts.OnTransfer(ev)
 	}
@@ -142,13 +145,13 @@ func (s *Service) emitInstall(sessionID string, phase InstallPhase, text string)
 func (s *Service) run(sessionID string, op func(conn *liveConn) error) error {
 	conn, err := s.sftpOf(sessionID)
 	if err != nil {
-		return err
+		return present(err)
 	}
 	if err := op(conn); err != nil {
 		if isDeadChannel(err) {
 			s.Close(sessionID)
 		}
-		return err
+		return present(err)
 	}
 	return nil
 }
@@ -163,19 +166,20 @@ func (s *Service) sftpOf(sessionID string) (*liveConn, error) {
 		<-entry.ready
 		if entry.err != nil {
 			s.dropEntry(sessionID, entry)
-			return nil, entry.err
+			return nil, present(entry.err)
 		}
 		return entry.conn, nil
 	}
 	if s.routeOf(sessionID) == routeFresh {
-		return s.openFresh(sessionID)
+		conn, err := s.openFresh(sessionID)
+		return conn, present(err)
 	}
 	conn, err := s.open(sessionID)
 	if err == nil {
 		return conn, nil
 	}
 	if s.hasRoute(sessionID) || !isMissingSftp(err) {
-		return nil, err
+		return nil, present(err)
 	}
 	kind, chooseErr := s.choose(sessionID)
 	if chooseErr != nil {
@@ -189,11 +193,12 @@ func (s *Service) sftpOf(sessionID string) (*liveConn, error) {
 			for _, line := range note {
 				s.emitInstall(sessionID, InstallLog, line)
 			}
-			s.emitInstall(sessionID, InstallError, err.Error())
+			s.emitInstall(sessionID, InstallError, sshx.FriendlyError(err))
 		}
-		return nil, err
+		return nil, present(err)
 	}
-	return s.openFresh(sessionID)
+	conn, err = s.openFresh(sessionID)
+	return conn, present(err)
 }
 
 // open 走共享连接开 SFTP（TS open/connect）。
@@ -428,6 +433,18 @@ func (s *Service) takeSwitchNote(sessionID string) []string {
 	note := s.switchNote[sessionID]
 	delete(s.switchNote, sessionID)
 	return note
+}
+
+// present 把返回给界面的错误换成中文。认不出来的保持原错误，方便 errors.Is。
+func present(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := sshx.FriendlyError(err)
+	if msg == err.Error() {
+		return err
+	}
+	return errors.New(msg)
 }
 
 // withTimeout 对应 TS withTimeout：到时间就报错返回，底层操作留给连接关闭时自然收场。
