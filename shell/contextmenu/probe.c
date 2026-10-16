@@ -14,6 +14,7 @@ int main(void) {
     IClassFactory *factory = NULL;
     IExplorerCommand *command = NULL;
     LPWSTR title = NULL;
+    LPWSTR icon = NULL;
     HRESULT hr;
     const wchar_t *expect = L"\u5728 TermPilot \u4E2D\u6253\u5F00";
 
@@ -53,6 +54,13 @@ int main(void) {
         return 1;
     }
     CoTaskMemFree(title);
+    hr = IExplorerCommand_GetIcon(command, NULL, &icon);
+    if (FAILED(hr) || !icon || !wcsstr(icon, L",-101")) {
+        printf("GetIcon %08lx\n", (unsigned long)hr);
+        IExplorerCommand_Release(command);
+        return 1;
+    }
+    CoTaskMemFree(icon);
     hr = IExplorerCommand_Invoke(command, NULL, NULL);
     IExplorerCommand_Release(command);
     if (hr != E_FAIL && hr != E_INVALIDARG) {

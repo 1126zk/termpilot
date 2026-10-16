@@ -53,17 +53,22 @@ static HRESULT STDMETHODCALLTYPE Command_GetTitle(IExplorerCommand *This, IShell
     return SHStrDupW(kTitle, name);
 }
 
+/* 图标放在 DLL 自己的资源里。exe 被挪走或删掉时，菜单文字还在，图标也不能丢。 */
 static HRESULT STDMETHODCALLTYPE Command_GetIcon(IExplorerCommand *This, IShellItemArray *items, LPWSTR *icon) {
-    wchar_t exe[32768];
+    HMODULE module = NULL;
+    wchar_t dll[32768];
     wchar_t spec[32768];
     (void)This;
     (void)items;
     if (!icon) return E_POINTER;
     *icon = NULL;
-    if (!termpilotExePath(exe, 32768)) return E_NOTIMPL;
-    if (wcslen(exe) + 3 >= 32768) return E_FAIL;
-    wcscpy(spec, exe);
-    wcscat(spec, L",0");
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)(void *)&Command_GetIcon, &module)) {
+        return E_FAIL;
+    }
+    if (GetModuleFileNameW(module, dll, 32768) == 0 || wcslen(dll) + 5 >= 32768) return E_FAIL;
+    wcscpy(spec, dll);
+    wcscat(spec, L",-101");
     return SHStrDupW(spec, icon);
 }
 

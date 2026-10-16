@@ -20,9 +20,13 @@ function Find-KitTool([string]$name) {
 }
 
 Write-Host "compile dll"
+$iconObj = Join-Path $env:TEMP 'termpilot-contextmenu-icon.o'
+& windres -O coff -i (Join-Path $here 'icon.rc') -o $iconObj
+if ($LASTEXITCODE -ne 0) { throw 'icon resource compile failed' }
 & gcc -shared -O2 -std=c11 -Wall -Wextra -DUNICODE -D_UNICODE `
     -o (Join-Path $out 'TermPilotContextMenu.dll') `
     (Join-Path $here 'command.c') `
+    $iconObj `
     (Join-Path $here 'exports.def') `
     -lole32 -lshell32 -loleaut32 -luuid -lshlwapi -luser32
 if ($LASTEXITCODE -ne 0) { throw 'dll compile failed' }
