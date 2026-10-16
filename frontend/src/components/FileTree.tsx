@@ -34,8 +34,9 @@ type FsBackend = {
  * 一个终端标签一棵文件树：组件收 tab prop，RightPanel 按标签各挂一个实例，
  * 切标签只是显隐，状态（当前目录、展开、选中）互不干扰。
  * SSH 窗口显示服务器文件，本地终端显示本机文件。
+ * 当前看得到的树每 3 秒静默重读已展开的目录；自己在树上操作时会让开。
  */
-export function FileTree(props: { tab: Tab | null }) {
+export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   const tab = props.tab
   const local = tab?.kind === 'local'
   const sessionId = local ? null : tab?.sessionId ?? null
@@ -61,6 +62,9 @@ export function FileTree(props: { tab: Tab | null }) {
   const [removeError, setRemoveError] = useState('')
   const [dropDir, setDropDir] = useState<string | null>(null)
   const dropRef = useRef<(dir: string, paths: string[]) => void>(() => undefined)
+  // 自己发起的列目录把代数加一，进行中的自动刷新结果作废，避免盖掉更新的列表
+  const listingGen = useRef(0)
+  const seenActive = useRef(false)
   const treeId = tab?.id ?? ''
   const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
@@ -122,8 +126,10 @@ export function FileTree(props: { tab: Tab | null }) {
   const showRoot = useCallback(
     async (path: string) => {
       if (!fs || !backendKey) return
+      const token = ++listingGen.current
       const requested = path.trim().replaceAll('\\', '/') || '.'
       const res = await fs.list(requested)
+      if (listingGen.current !== token) return
       setRoot(res.path)
       setEntries(sortEntries(res.entries))
       setCache({})
@@ -166,9 +172,11 @@ export function FileTree(props: { tab: Tab | null }) {
   const listInto = useCallback(
     async (path: string) => {
       if (!fs) return
+      const token = ++listingGen.current
       setLoading((s) => ({ ...s, [path]: true }))
       try {
         const res = await fs.list(path)
+        if (listingGen.current !== token) return
         const sorted = sortEntries(res.entries)
         if (path === root) {
           setRoot(res.path)
@@ -200,6 +208,69 @@ export function FileTree(props: { tab: Tab | null }) {
     setOpen((s) => ({ ...s, [path]: true }))
     await listInto(path)
   }
+
+  const pollState = useRef({ fs, root, open, busy, making, renaming, removing, error, entries, cache })
+  pollState.current = { fs, root, open, busy, making, renaming, removing, error, entries, cache }
+
+  // 只刷当前标签、面板开着的那棵树。第一次打开交给上面的 loadRoot，之后切回来立刻补一次。
+  useEffect(() => {
+    if (!props.active || !backendKey) return
+    let stopped = false
+    let inflight = false
+    const tick = async () => {
+      if (stopped || inflight || document.hidden) return
+      const cur = pollState.current
+      if (!cur.fs || cur.busy || cur.making || cur.renaming || cur.removing || cur.error === NO_SFTP) return
+      const token = listingGen.current
+      const rootAtStart = cur.root
+      inflight = true
+      try {
+        const res = await cur.fs.list(rootAtStart)
+        if (stopped || listingGen.current !== token || pollState.current.root !== rootAtStart) return
+        const rootEntries = sortEntries(res.entries)
+        const paths = Object.keys(cur.open).filter((p) => cur.open[p] && p !== rootAtStart && p !== res.path)
+        const nextCache: Record<string, DirListing> = {}
+        await Promise.all(
+          paths.map(async (p) => {
+            try {
+              const child = await cur.fs!.list(p)
+              nextCache[p] = { entries: sortEntries(child.entries) }
+            } catch (e) {
+              nextCache[p] = { entries: [], error: sftpMessage(e) }
+            }
+          })
+        )
+        if (stopped || listingGen.current !== token || pollState.current.root !== rootAtStart) return
+        const latest = pollState.current
+        if (res.path !== latest.root) setRoot(res.path)
+        if (!sameFiles(latest.entries, rootEntries)) setEntries(rootEntries)
+        if (!sameCache(latest.cache, nextCache, paths)) {
+          setCache((prev) => {
+            const merged = { ...prev }
+            for (const p of paths) merged[p] = nextCache[p]
+            return merged
+          })
+        }
+      } catch {
+        // 自动刷新失败时留着现在的列表，不把短暂的网络错误盖上去
+      } finally {
+        inflight = false
+      }
+    }
+    const first = seenActive.current
+    seenActive.current = true
+    if (first) void tick()
+    const timer = window.setInterval(() => void tick(), LISTING_POLL_MS)
+    const onVisible = () => {
+      if (!document.hidden) void tick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [props.active, backendKey])
 
   if (!fs) {
     return <Hint text="打开一个终端窗口，这里显示那台机器的文件。" />
@@ -317,10 +388,12 @@ export function FileTree(props: { tab: Tab | null }) {
   }
 
   const refresh = async () => {
+    const token = ++listingGen.current
     setBusy(true)
     setError('')
     try {
       const res = await fs.list(root)
+      if (listingGen.current !== token) return
       setRoot(res.path)
       setEntries(sortEntries(res.entries))
       const paths = Object.keys(open).filter((p) => open[p] && p !== root && p !== res.path)
@@ -335,6 +408,7 @@ export function FileTree(props: { tab: Tab | null }) {
           }
         })
       )
+      if (listingGen.current !== token) return
       setCache(next)
     } catch (e) {
       setError(sftpMessage(e))
@@ -745,10 +819,34 @@ export function FileTree(props: { tab: Tab | null }) {
   )
 }
 
+/** 文件树自动重读间隔。3 秒能跟上终端里刚改的文件，又不会连续列远程目录。 */
+const LISTING_POLL_MS = 3000
+
 /** 每级缩进 12px，图标自成一列。 */
 const TREE_INDENT = 12
 /** 拖文件经过时，会上传进去的那个目录行 */
 const DROP_HIGHLIGHT = 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/50'
+
+function sameFiles(a: RemoteFile[], b: RemoteFile[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (x.name !== y.name || x.path !== y.path || x.kind !== y.kind || x.size !== y.size || x.mtime !== y.mtime) {
+      return false
+    }
+  }
+  return true
+}
+
+function sameCache(prev: Record<string, DirListing>, next: Record<string, DirListing>, paths: string[]): boolean {
+  for (const p of paths) {
+    const a = prev[p]
+    const b = next[p]
+    if (!a || !b || (a.error ?? '') !== (b.error ?? '') || !sameFiles(a.entries, b.entries)) return false
+  }
+  return true
+}
 
 function sortEntries(items: RemoteFile[]): RemoteFile[] {
   return [...items].sort((a, b) => {

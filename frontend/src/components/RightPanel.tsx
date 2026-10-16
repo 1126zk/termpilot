@@ -60,7 +60,7 @@ export function RightPanel(props: { open: boolean }) {
           </button>
         ))}
       </div>
-      {pane === 'files' && <FileTrees />}
+      {pane === 'files' && <FileTrees watching={props.open} />}
       {pane === 'snippets' && <SnippetsPanel />}
       {pane === 'history' && <HistoryPanel />}
       {pane === 'theme' && <ThemePanel />}
@@ -72,7 +72,7 @@ export function RightPanel(props: { open: boolean }) {
  * 每个终端标签一棵文件树，切标签只显隐不卸载，各自保住当前目录和展开状态。
  * 懒挂载：标签第一次在这个面板里被看到时才建实例，避免开 N 个终端就发 N 次列目录请求。
  */
-function FileTrees() {
+function FileTrees(props: { watching: boolean }) {
   const tabs = useAppStore((s) => s.tabs)
   const activeTabId = useAppStore((s) => s.activeTabId)
   const [visited, setVisited] = useState<string[]>([])
@@ -88,7 +88,7 @@ function FileTrees() {
     <>
       {trees.map((t) => (
         <div key={t.id} className={t.id === activeTabId ? 'contents' : 'hidden'}>
-          <FileTree tab={t} />
+          <FileTree tab={t} active={props.watching && t.id === activeTabId} />
         </div>
       ))}
     </>
