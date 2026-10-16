@@ -18,6 +18,7 @@ import { newTermId } from '../../../shared/ids'
 import { osIconProps } from '../components/OsIcon'
 import { dropBuffer, editorKey } from '../editor/editorBuffers'
 import { shellLabel, termTitle } from '../agentPrompt'
+import { firstOrderedShell } from '../menuOrder'
 import { terminalPool } from '../terminal/TerminalPool'
 import { applyAppearance, readCachedAppearance, type ResolvedAppTheme } from '../theme/applyAppearance'
 
@@ -100,7 +101,9 @@ interface AppState {
   deleteSession: (id: string) => Promise<void>
 
   openSessionTab: (session: SessionConfig, fresh?: boolean) => void
-  openLocalTab: (shell?: LocalShell) => void
+  openLocalTab: (shell?: LocalShell, cwd?: string) => void
+  /** 资源管理器右键：用 + 菜单里排第一的本机终端，打开这个目录 */
+  openAtDir: (dir: string) => Promise<void>
   closeTab: (tabId: string) => void
   reconnectTab: (tabId: string) => void
   renameTab: (tabId: string, title: string) => void
@@ -324,7 +327,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       .catch(() => undefined)
   },
 
-  openLocalTab: (shell = 'powershell') => {
+  openLocalTab: (shell = 'powershell', cwd) => {
     const count = get().tabs.filter((t) => t.kind === 'local').length
     const platform = window.api.platform
     const tab: Tab = {
@@ -342,7 +345,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       settingsOpen: false,
       ...closeOverlaysPatch(get)
     })
-    window.api.term.create({ termId: tab.id, kind: 'local', title: tab.title, shell, cols: 80, rows: 24 })
+    window.api.term.create({
+      termId: tab.id,
+      kind: 'local',
+      title: tab.title,
+      shell,
+      cols: 80,
+      rows: 24,
+      ...(cwd ? { cwd } : {})
+    })
+  },
+
+  openAtDir: async (dir) => {
+    const path = dir.trim()
+    if (!path) return
+    if (get().localShells.length === 0) await get().loadLocalShells()
+    get().openLocalTab(firstOrderedShell(get().localShells), path)
   },
 
   renameTab: (tabId, title) => {

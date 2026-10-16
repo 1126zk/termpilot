@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +43,9 @@ type App struct {
 
 	launchApp  string
 	launchArgs []string
+	// 右键「在 TermPilot 中打开」传来的目录。前端挂上之后取走。
+	launchMu  sync.Mutex
+	launchDir string
 }
 
 // userDataDir 固定 %APPDATA%\TermPilot；TERMPILOT_USERDATA 供冒烟测试覆盖。
@@ -146,6 +150,7 @@ func NewApp() *App {
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	a.noteLaunchDir(dirFromArgs(os.Args))
 
 	go a.watchMaximize()
 
@@ -176,8 +181,10 @@ func (a *App) OnSecondInstance(second options.SecondInstanceData) {
 	if a.ctx == nil {
 		return
 	}
+	a.noteLaunchDir(dirFromArgs(second.Args))
 	wailsRuntime.WindowUnminimise(a.ctx)
 	wailsRuntime.WindowShow(a.ctx)
+	a.pingLaunchDir()
 }
 
 // emit 下行事件总出口；前端还没就绪时事件丢弃（前端挂载后会主动拉取状态）。
@@ -192,6 +199,7 @@ func (a *App) emit(channel string, payload interface{}) {
 
 func (a *App) DomReady(ctx context.Context) {
 	a.ready.Store(true)
+	a.pingLaunchDir()
 	// 对应 Electron 版 recoverBlankWindow 的尺寸 nudge：Windows 隐藏标题栏时
 	// 第一帧偶发停在白底，显示后改一次尺寸强制系统重画。
 	if isWindows() {

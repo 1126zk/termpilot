@@ -24,7 +24,7 @@ func TestConPTYIntegration(t *testing.T) {
 
 	var mu sync.Mutex
 	var out strings.Builder
-	ch, wait, err := startLocalPty("cmd.exe", 80, 24, func(b []byte) {
+	ch, wait, err := startLocalPty("cmd.exe", 80, 24, "", func(b []byte) {
 		mu.Lock()
 		out.Write(b)
 		mu.Unlock()

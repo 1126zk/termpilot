@@ -1,6 +1,25 @@
 package terminal
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
+
+// localWorkDir 校验右键传来的目录。不是现成的文件夹就退回用户主目录。
+func localWorkDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir != "" {
+		info, err := os.Stat(dir)
+		if err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
+}
 
 // 本机终端（对应 TS TerminalService.createLocal / localShellExe / detectLocalShells）。
 // 平台相关部分在 pty_windows.go / pty_unix.go / shells_*.go。
@@ -21,7 +40,7 @@ func (s *Service) createLocal(opts CreateOptions) {
 	s.mu.Unlock()
 
 	cols, rows := s.sizeOf(opts.TermID, opts.Cols, opts.Rows)
-	ch, wait, err := startLocalPty(exe, cols, rows, func(b []byte) {
+	ch, wait, err := startLocalPty(exe, cols, rows, opts.Cwd, func(b []byte) {
 		s.sendData(opts.TermID, b)
 	})
 	if err != nil {

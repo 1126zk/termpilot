@@ -180,7 +180,9 @@ const api = {
     onRun: (cb: (job: CaptureRun) => void) => on(IPC.captureRun, cb)
   },
   app: {
-    version: () => invoke<string>(IPC.appVersion, [])
+    version: () => invoke<string>(IPC.appVersion, []),
+    takeDir: () => invoke<string>(IPC.appTakeDir, []),
+    onOpenDir: (cb: (dir: string) => void) => on(IPC.appOpenDir, cb)
   },
   win: {
     minimize: () => invoke<void>(IPC.winMinimize, []),

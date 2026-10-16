@@ -35,7 +35,7 @@ func (c *conptyChannel) Close() error {
 
 // startLocalPty 启动本机壳并接好读循环。返回通道与阻塞到进程退出的 wait。
 // 对应 TS 里 pty.spawn + onData + onExit 的装配。
-func startLocalPty(exe string, cols, rows int, onData func([]byte)) (Channel, func(), error) {
+func startLocalPty(exe string, cols, rows int, workDir string, onData func([]byte)) (Channel, func(), error) {
 	if !conpty.IsConPtyAvailable() {
 		return nil, nil, errors.New("本机 Windows 不支持 ConPTY（需 Windows 10 1809 以上）")
 	}
@@ -45,8 +45,8 @@ func startLocalPty(exe string, cols, rows int, onData func([]byte)) (Channel, fu
 		cmdLine = "\"" + exe + "\""
 	}
 	options := []conpty.ConPtyOption{conpty.ConPtyEnv(os.Environ())}
-	if home, err := os.UserHomeDir(); err == nil {
-		options = append(options, conpty.ConPtyWorkDir(home))
+	if dir := localWorkDir(workDir); dir != "" {
+		options = append(options, conpty.ConPtyWorkDir(dir))
 	}
 	if cols > 0 && rows > 0 {
 		options = append(options, conpty.ConPtyDimensions(cols, rows))

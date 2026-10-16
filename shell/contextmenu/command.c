@@ -1,5 +1,5 @@
 /* Windows 11 新右键菜单加载的 COM DLL。资源管理器只认这个 DLL，不认 TermPilot.exe。
-   点击后按 exe.path 启动主程序，并带上 --dir。主程序暂时不处理这个参数。 */
+   点击后按 exe.path 启动主程序，并带上 --dir。文件会改成它所在的目录。 */
 
 #define COBJMACROS
 #include "clsid.h"
@@ -97,8 +97,10 @@ static HRESULT STDMETHODCALLTYPE Command_GetState(IExplorerCommand *This, IShell
     return S_OK;
 }
 
-static int firstFolder(IShellItemArray *items, wchar_t *out, DWORD cch) {
+/* 文件夹和空白处用选中路径本身。文件改成它所在的目录，和右键文件夹是同一结果。 */
+static int firstDir(IShellItemArray *items, wchar_t *out, DWORD cch) {
     DWORD count = 0;
+    DWORD attrs;
     IShellItem *item = NULL;
     PWSTR path = NULL;
     HRESULT hr;
@@ -115,6 +117,10 @@ static int firstFolder(IShellItemArray *items, wchar_t *out, DWORD cch) {
     }
     wcscpy(out, path);
     CoTaskMemFree(path);
+    attrs = GetFileAttributesW(out);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+        if (!PathRemoveFileSpecW(out) || out[0] == 0) return 0;
+    }
     return 1;
 }
 
@@ -127,7 +133,7 @@ static HRESULT STDMETHODCALLTYPE Command_Invoke(IExplorerCommand *This, IShellIt
     (void)ctx;
 
     if (!termpilotExePath(exe, 32768)) return E_FAIL;
-    if (!firstFolder(items, dir, 32768)) return E_INVALIDARG;
+    if (!firstDir(items, dir, 32768)) return E_INVALIDARG;
     if (wcslen(dir) + 8 >= 32768) return E_FAIL;
     wcscpy(params, L"--dir \"");
     wcscat(params, dir);

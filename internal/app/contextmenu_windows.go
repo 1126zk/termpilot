@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	"golang.org/x/sys/windows/registry"
@@ -44,6 +45,9 @@ var contextMenuLogo150 []byte
 var contextMenuLogo44 []byte
 
 const contextMenuPackage = "TermPilot.ContextMenu"
+
+// 和 AppxManifest.xml 的 Version 保持一致。变了才会重装稀疏包。
+const contextMenuVersion = "1.0.1.0"
 
 func (a *App) installContextMenu() {
 	if err := a.installContextMenuErr(); err != nil {
@@ -76,11 +80,35 @@ func (a *App) installContextMenuErr() error {
 		return err
 	}
 
-	dllChanged, err := writeIfChanged(filepath.Join(dir, "TermPilotContextMenu.dll"), contextMenuDLL)
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopExplorer()
+		stopped = true
+		time.Sleep(400 * time.Millisecond)
+	}
+	defer func() {
+		if stopped {
+			startExplorer()
+		}
+	}()
+	writeRetry := func(path string, data []byte) (bool, error) {
+		changed, err := writeIfChanged(path, data)
+		if err == nil {
+			return changed, nil
+		}
+		// 资源管理器还握着旧 DLL 时，先关掉它再写。
+		stop()
+		return writeIfChanged(path, data)
+	}
+
+	dllChanged, err := writeRetry(filepath.Join(dir, "TermPilotContextMenu.dll"), contextMenuDLL)
 	if err != nil {
 		return err
 	}
-	hostChanged, err := writeIfChanged(filepath.Join(dir, "TermPilotShellHost.exe"), contextMenuHost)
+	hostChanged, err := writeRetry(filepath.Join(dir, "TermPilotShellHost.exe"), contextMenuHost)
 	if err != nil {
 		return err
 	}
@@ -90,7 +118,6 @@ func (a *App) installContextMenuErr() error {
 	}{
 		{filepath.Join(dir, "resources", "logo_150x150.png"), contextMenuLogo150},
 		{filepath.Join(dir, "resources", "logo_44x44.png"), contextMenuLogo44},
-		{filepath.Join(dir, "ContextMenu.msix"), contextMenuMsix},
 		{filepath.Join(dir, "ContextMenu.cer"), contextMenuCer},
 	}
 	for _, item := range payloads {
@@ -98,20 +125,38 @@ func (a *App) installContextMenuErr() error {
 			return err
 		}
 	}
-
-	installed := contextMenuPackageInstalled()
-	if !dllChanged && !hostChanged && installed {
-		return nil
-	}
-	fresh, err := registerContextMenu(dir)
+	msixChanged, err := writeIfChanged(filepath.Join(dir, "ContextMenu.msix"), contextMenuMsix)
 	if err != nil {
 		return err
 	}
-	if fresh || dllChanged || hostChanged {
+
+	installed := contextMenuPackageInstalled()
+	versionOK := menuVersionInstalled(dir)
+	if !dllChanged && !hostChanged && !msixChanged && installed && versionOK {
+		return nil
+	}
+	if !installed || !versionOK || msixChanged {
+		stop()
+	}
+	fresh, err := registerContextMenu(dir, !installed || !versionOK || msixChanged)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "menu.version"), []byte(contextMenuVersion), 0o644); err != nil {
+		return err
+	}
+	if !stopped && (fresh || dllChanged || hostChanged) {
 		log.Printf("[TermPilot] 右键菜单已注册，正在重启资源管理器")
 		restartExplorer()
+	} else if stopped {
+		log.Printf("[TermPilot] 右键菜单已更新，正在恢复资源管理器")
 	}
 	return nil
+}
+
+func menuVersionInstalled(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "menu.version"))
+	return err == nil && strings.TrimSpace(string(data)) == contextMenuVersion
 }
 
 func writeIfChanged(path string, data []byte) (bool, error) {
@@ -148,7 +193,7 @@ func contextMenuPackageInstalled() bool {
 }
 
 // registerContextMenu 返回 fresh=true 表示这次新装上了包。已经装过则 fresh=false。
-func registerContextMenu(dir string) (bool, error) {
+func registerContextMenu(dir string, update bool) (bool, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return false, err
@@ -176,7 +221,15 @@ foreach ($name in @('TrustedPeople','Root')) {
   }
 }
 $pkg = Get-AppxPackage -Name 'TermPilot.ContextMenu' -ErrorAction SilentlyContinue
-if ($null -ne $pkg) { exit 10 }
+$want = $env:TERMPILOT_SHELL_VERSION
+$need = $env:TERMPILOT_SHELL_UPDATE -eq '1'
+if ($null -ne $pkg -and -not $need -and $pkg.Version.ToString() -eq $want) { exit 10 }
+if ($null -ne $pkg) {
+  try { Remove-AppxPackage -Package $pkg.PackageFullName } catch {
+    [Console]::Out.WriteLine($_.Exception.Message)
+    exit 1
+  }
+}
 try {
   Add-AppxPackage -Path $msix -ExternalLocation $dir
 } catch {
@@ -187,10 +240,16 @@ exit 0
 `
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodeUTF16LEBase64(script))
 	hideConsole(cmd)
+	updateFlag := "0"
+	if update {
+		updateFlag = "1"
+	}
 	cmd.Env = append(os.Environ(),
 		"TERMPILOT_SHELL_CER="+filepath.Join(dir, "ContextMenu.cer"),
 		"TERMPILOT_SHELL_DIR="+dir,
 		"TERMPILOT_SHELL_MSIX="+filepath.Join(dir, "ContextMenu.msix"),
+		"TERMPILOT_SHELL_VERSION="+contextMenuVersion,
+		"TERMPILOT_SHELL_UPDATE="+updateFlag,
 	)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -278,10 +337,22 @@ exit $p.ExitCode
 	return nil
 }
 
-func restartExplorer() {
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", "Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue; Start-Process explorer.exe")
+func stopExplorer() {
+	// 右键 DLL 由 dllhost 加载。先退出资源管理器，再放开仍握着文件的代理进程。
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", "Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300; Stop-Process -Name dllhost -Force -ErrorAction SilentlyContinue")
+	hideConsole(cmd)
+	_, _ = cmd.CombinedOutput()
+}
+
+func startExplorer() {
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", "Start-Process explorer.exe")
 	hideConsole(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("[TermPilot] 没能重启资源管理器: %v %s", err, out)
+		log.Printf("[TermPilot] 没能启动资源管理器: %v %s", err, out)
 	}
+}
+
+func restartExplorer() {
+	stopExplorer()
+	startExplorer()
 }

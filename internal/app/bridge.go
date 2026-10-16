@@ -116,6 +116,7 @@ func (b *Bridge) routes() map[string]handler {
 
 		// 应用 / 窗口
 		"app:version":         func(_ []interface{}) (interface{}, error) { return appVersion, nil },
+		"app:take-dir":        func(_ []interface{}) (interface{}, error) { return a.takeLaunchDir(), nil },
 		"win:minimize":        a.hWinMinimize,
 		"win:toggle-maximize": a.hWinToggleMaximize,
 		"win:close":           a.hWinClose,

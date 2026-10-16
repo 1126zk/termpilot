@@ -49,15 +49,15 @@ func setWinSize(fd uintptr, cols, rows int) error {
 }
 
 // startLocalPty 与 Windows 版同签名：启动本机壳并接好读循环。
-func startLocalPty(exe string, cols, rows int, onData func([]byte)) (Channel, func(), error) {
+func startLocalPty(exe string, cols, rows int, workDir string, onData func([]byte)) (Channel, func(), error) {
 	master, slave, err := openPTY()
 	if err != nil {
 		return nil, nil, err
 	}
 	cmd := exec.Command(exe)
 	cmd.Env = os.Environ()
-	if home, herr := os.UserHomeDir(); herr == nil {
-		cmd.Dir = home
+	if dir := localWorkDir(workDir); dir != "" {
+		cmd.Dir = dir
 	}
 	cmd.Stdin = slave
 	cmd.Stdout = slave

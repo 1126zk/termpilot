@@ -107,6 +107,8 @@ export interface TermCreateOptions {
   title?: string
   /** kind = local 时的壳类型，缺省 powershell */
   shell?: LocalShell
+  /** 本机终端的起始目录。空则用用户主目录 */
+  cwd?: string
   cols: number
   rows: number
 }

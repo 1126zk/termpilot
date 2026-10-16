@@ -18,6 +18,7 @@ import {
 import { cn } from '@/lib/utils'
 import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
+import { applyOrder, readMenuOrder, writeMenuOrder } from '../menuOrder'
 import { useMenuAction } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
@@ -674,26 +675,3 @@ function InlineRename(props: { tabId: string; initial: string; done: () => void 
   )
 }
 
-/** 按保存的顺序排 key；不在顺序表里的新项保持原相对顺序排在末尾。 */
-function applyOrder(keys: string[], order: string[]): string[] {
-  const pos = new Map(order.map((key, index) => [key, index]))
-  return [...keys].sort(
-    (a, b) => (pos.get(a) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b) ?? Number.MAX_SAFE_INTEGER)
-  )
-}
-
-const MENU_ORDER_KEY = 'termpilot.menuOrder'
-
-function readMenuOrder(): string[] {
-  try {
-    const raw = localStorage.getItem(MENU_ORDER_KEY)
-    const parsed = raw ? (JSON.parse(raw) as unknown) : []
-    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-function writeMenuOrder(order: string[]): void {
-  localStorage.setItem(MENU_ORDER_KEY, JSON.stringify(order))
-}

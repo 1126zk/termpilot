@@ -33,6 +33,17 @@ export default function App() {
 
   useEffect(() => window.api.capture.onRun((job) => void runCapture(job)), [])
 
+  useEffect(() => {
+    const open = () => {
+      void window.api.app.takeDir().then((dir) => {
+        if (dir) void useAppStore.getState().openAtDir(dir)
+      })
+    }
+    const off = window.api.app.onOpenDir(open)
+    open()
+    return off
+  }, [])
+
   useEffect(
     () =>
       window.api.term.onLines((job) => {

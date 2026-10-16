@@ -12,7 +12,7 @@
   <Identity
     Name="TermPilot.ContextMenu"
     Publisher="CN=TermPilot"
-    Version="1.0.0.0"
+    Version="1.0.1.0"
     ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>TermPilot</DisplayName>
@@ -52,6 +52,9 @@
               <desktop5:Verb Id="OpenInTermPilot" Clsid="6462009c-09ad-4372-83d0-48ef02e7f635" />
             </desktop5:ItemType>
             <desktop5:ItemType Type="Directory\Background">
+              <desktop5:Verb Id="OpenInTermPilot" Clsid="6462009c-09ad-4372-83d0-48ef02e7f635" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="*">
               <desktop5:Verb Id="OpenInTermPilot" Clsid="6462009c-09ad-4372-83d0-48ef02e7f635" />
             </desktop5:ItemType>
           </desktop4:FileExplorerContextMenus>

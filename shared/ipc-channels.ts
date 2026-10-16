@@ -84,6 +84,10 @@ export const IPC = {
   termModeReply: 'term:mode-reply',
 
   appVersion: 'app:version',
+  /** main → renderer，右键打开带了一个目录，前端来取 */
+  appOpenDir: 'app:open-dir',
+  /** renderer → main，取走并清空待打开的目录 */
+  appTakeDir: 'app:take-dir',
 
   /** 本机文件面板，参数为统一正斜杠路径，无 sessionId */
   localfsList: 'localfs:list',
