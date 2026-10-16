@@ -1,0 +1,4 @@
+LIBRARY TermPilotContextMenu
+EXPORTS
+    DllGetClassObject
+    DllCanUnloadNow

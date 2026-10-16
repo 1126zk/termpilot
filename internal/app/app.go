@@ -160,6 +160,7 @@ func (a *App) Startup(ctx context.Context) {
 
 	a.installSkill()
 	a.installCli()
+	a.installContextMenu()
 }
 
 func (a *App) Shutdown(ctx context.Context) {
