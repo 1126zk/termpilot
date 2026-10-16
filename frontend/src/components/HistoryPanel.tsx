@@ -52,16 +52,16 @@ export function HistoryPanel() {
             value={kw}
             onChange={(e) => setKw(e.target.value)}
             placeholder="搜索"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-primary outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-sm text-primary outline-none placeholder:text-muted-foreground"
           />
         </label>
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={items.length === 0} onClick={() => void clear()}>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-sm" disabled={items.length === 0} onClick={() => void clear()}>
           清空
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {filtered.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">
+          <p className="px-3 py-6 text-center text-sm leading-5 text-muted-foreground">
             {items.length === 0 ? '在终端里跑过的命令会记在这里' : '没有匹配的历史指令'}
           </p>
         ) : (
@@ -71,7 +71,7 @@ export function HistoryPanel() {
                 key={item.id}
                 role="button"
                 title="点击填入当前终端，自己按回车执行"
-                className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 font-mono text-xs break-all text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+                className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 font-mono text-sm break-all text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
                 onClick={() => sendToActiveTerminal(item.command, false)}
               >
                 <span className="min-w-0 flex-1 truncate">{item.command}</span>

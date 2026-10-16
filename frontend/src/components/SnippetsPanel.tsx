@@ -66,7 +66,7 @@ export function SnippetsPanel() {
           placeholder="写一条命令，可以写多行"
           rows={2}
           spellCheck={false}
-          className="min-h-9 min-w-0 flex-1 resize-none rounded-md bg-muted px-2 py-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
+          className="min-h-9 min-w-0 flex-1 resize-none rounded-md bg-muted px-2 py-2 font-mono text-sm outline-none placeholder:text-muted-foreground"
           onChange={(e) => setCommand(e.target.value)}
         />
         <Button
@@ -80,10 +80,10 @@ export function SnippetsPanel() {
           <Check />
         </Button>
       </div>
-      {error && <p className="px-3 pb-1 text-xs text-destructive">{error}</p>}
+      {error && <p className="px-3 pb-1 text-sm text-destructive">{error}</p>}
       <ScrollArea className="min-h-0 flex-1">
         {snippets.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">
+          <p className="px-3 py-6 text-center text-sm leading-5 text-muted-foreground">
             把常用命令存成片段，一键复用
           </p>
         ) : (
@@ -96,7 +96,7 @@ export function SnippetsPanel() {
                 className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
                 onClick={() => sendToActiveTerminal(snippet.command, false)}
               >
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                <span className="min-w-0 flex-1 truncate font-mono text-sm">
                   {snippet.command.split('\n')[0]}
                 </span>
                 <button
