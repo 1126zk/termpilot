@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
-import { ArrowRightToLine, Eye, FilePenLine, Save, SquareTerminal, WrapText, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
+import { ArrowRightToLine, ChevronLeft, ChevronRight, Eye, FilePenLine, Save, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -18,6 +18,9 @@ import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } f
 
 const TOOL_BUTTON =
   'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+
+const STRIP_BUTTON =
+  'flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
 function unsaved(tab: EditorTab): boolean {
   if (tab.dirty) return true
@@ -131,6 +134,58 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
     return false
   }
 
+  const toolsRef = useRef<HTMLDivElement>(null)
+  const normalToolsWidth = useRef(0)
+  const [overflowing, setOverflowing] = useState(false)
+  const [canLeft, setCanLeft] = useState(false)
+  const [canRight, setCanRight] = useState(false)
+  const [compactTools, setCompactTools] = useState(false)
+  const imageOpen = Boolean(activeTab && isImage(activeTab.name))
+
+  const measureStrip = () => {
+    const el = stripRef.current
+    if (!el) return
+    const overflow = el.scrollWidth - el.clientWidth
+    setOverflowing(overflow > 1)
+    setCanLeft(el.scrollLeft > 1)
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1)
+    const tools = toolsRef.current
+    if (!imageOpen || !tools) {
+      setCompactTools(false)
+      return
+    }
+    setCompactTools((prev) => {
+      if (!prev) return overflow > 1
+      const extra = Math.max(0, normalToolsWidth.current - tools.offsetWidth)
+      return overflow > -(Math.max(extra, 8) - 4)
+    })
+  }
+
+  useLayoutEffect(() => {
+    if (!compactTools && toolsRef.current) normalToolsWidth.current = toolsRef.current.offsetWidth
+  })
+
+  useEffect(() => {
+    measureStrip()
+    const el = stripRef.current
+    if (!el) return
+    const observer = new ResizeObserver(measureStrip)
+    observer.observe(el)
+    if (toolsRef.current) observer.observe(toolsRef.current)
+    return () => observer.disconnect()
+  }, [props.tabs.length, props.activeKey, compactTools, imageOpen])
+
+  useEffect(() => {
+    if (!props.activeKey) return
+    stripRef.current
+      ?.querySelector(`[data-file-key="${CSS.escape(props.activeKey)}"]`)
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  }, [props.activeKey])
+
+  const scrollStrip = (dir: -1 | 1) => {
+    stripRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' })
+  }
+
   const close = (tab: EditorTab) => {
     if (unsaved(tab)) {
       setPending(tab)
@@ -172,8 +227,19 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
   return (
     <>
     <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
+      {overflowing && (
+        <button type="button" className={STRIP_BUTTON} disabled={!canLeft} title="向左" onClick={() => scrollStrip(-1)}>
+          <ChevronLeft className="size-4" strokeWidth={2} />
+        </button>
+      )}
       <div
         ref={stripRef}
+        onScroll={measureStrip}
+        onWheel={(e) => {
+          const el = stripRef.current
+          if (!el) return
+          el.scrollLeft += e.deltaY + e.deltaX
+        }}
         className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <button
@@ -227,7 +293,16 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           )
         })}
       </div>
-      {activeTab && isImage(activeTab.name) && <ImageTools tabKey={activeTab.key} />}
+      {overflowing && (
+        <button type="button" className={STRIP_BUTTON} disabled={!canRight} title="向右" onClick={() => scrollStrip(1)}>
+          <ChevronRight className="size-4" strokeWidth={2} />
+        </button>
+      )}
+      {activeTab && isImage(activeTab.name) && (
+        <div ref={toolsRef} className="flex shrink-0">
+          <ImageTools tabKey={activeTab.key} compact={compactTools} />
+        </div>
+      )}
       {activeTab && !isImage(activeTab.name) && !activeTab.readOnly && (
         <button
           type="button"

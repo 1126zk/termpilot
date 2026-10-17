@@ -122,7 +122,7 @@ const MAX_SCALE = 32
 const ZOOM_STEP = 1.25
 const VIEW_PADDING = 32
 const IMAGE_TOOL =
-  'flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+  'flex h-7 shrink-0 items-center gap-1 rounded-md text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
 
 type ImageControls = {
   size: { w: number; h: number }
@@ -156,38 +156,40 @@ export function saveTextFile(key: string): Promise<void> | undefined {
   return textSaves.get(key)?.()
 }
 
-/** 标签栏右侧的图片工具：尺寸、缩放、旋转 */
-export function ImageTools(props: { tabKey: string }) {
+/** 标签栏右侧的图片工具：尺寸、缩放、旋转。compact 只收紧间距，图标大小不变。 */
+export function ImageTools(props: { tabKey: string; compact?: boolean }) {
   const controls = useSyncExternalStore(subscribeControls, () => imageControls.get(props.tabKey))
   if (!controls) return null
+  const pad = props.compact ? 'px-1' : 'px-2'
+  const tool = cn(IMAGE_TOOL, pad)
   return (
-    <>
-      <span className="shrink-0 px-2 text-xs text-muted-foreground tabular-nums">
+    <div className={cn('flex shrink-0 items-center', props.compact ? 'gap-0' : 'gap-1')}>
+      <span className={cn('shrink-0 text-xs text-muted-foreground tabular-nums', pad)}>
         {controls.size.w} × {controls.size.h}
       </span>
-      <button type="button" title="缩小（-）" className={IMAGE_TOOL} onClick={controls.zoomOut}>
+      <button type="button" title="缩小（-）" className={tool} onClick={controls.zoomOut}>
         <ZoomOut className="size-4" />
       </button>
       <span className="w-11 shrink-0 text-center text-xs text-muted-foreground tabular-nums">
         {Math.round(controls.scale * 100)}%
       </span>
-      <button type="button" title="放大（+）" className={IMAGE_TOOL} onClick={controls.zoomIn}>
+      <button type="button" title="放大（+）" className={tool} onClick={controls.zoomIn}>
         <ZoomIn className="size-4" />
       </button>
-      <button type="button" title="适应窗口（0）" className={IMAGE_TOOL} onClick={controls.fit}>
+      <button type="button" title="适应窗口（0）" className={tool} onClick={controls.fit}>
         <Maximize className="size-4" />
         适应
       </button>
-      <button type="button" title="原始大小（1）" className={IMAGE_TOOL} onClick={controls.actual}>
+      <button type="button" title="原始大小（1）" className={tool} onClick={controls.actual}>
         1:1
       </button>
-      <button type="button" title="向左旋转（Shift+R）" className={IMAGE_TOOL} onClick={() => controls.rotate(-90)}>
+      <button type="button" title="向左旋转（Shift+R）" className={tool} onClick={() => controls.rotate(-90)}>
         <RotateCcw className="size-4" />
       </button>
-      <button type="button" title="向右旋转（R）" className={IMAGE_TOOL} onClick={() => controls.rotate(90)}>
+      <button type="button" title="向右旋转（R）" className={tool} onClick={() => controls.rotate(90)}>
         <RotateCw className="size-4" />
       </button>
-    </>
+    </div>
   )
 }
 
