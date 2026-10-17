@@ -149,6 +149,13 @@ function subscribeControls(listener: () => void): () => void {
   return () => controlListeners.delete(listener)
 }
 
+/** 正在编辑的文本把保存函数登记在这里，标签栏的保存按钮按标签 key 调用。 */
+const textSaves = new Map<string, () => Promise<void>>()
+
+export function saveTextFile(key: string): Promise<void> | undefined {
+  return textSaves.get(key)?.()
+}
+
 /** 标签栏右侧的图片工具：尺寸、缩放、旋转 */
 export function ImageTools(props: { tabKey: string }) {
   const controls = useSyncExternalStore(subscribeControls, () => imageControls.get(props.tabKey))
@@ -440,6 +447,13 @@ function TextEditor(props: { tab: EditorTab }) {
       setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '') : String(e))
     }
   }, [tab.key, tab.path, tab.sessionId])
+
+  useEffect(() => {
+    textSaves.set(tab.key, save)
+    return () => {
+      if (textSaves.get(tab.key) === save) textSaves.delete(tab.key)
+    }
+  }, [tab.key, save])
 
   useEffect(() => {
     defineEditorTheme(dark)

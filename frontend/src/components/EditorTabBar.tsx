@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
-import { ArrowRightToLine, Eye, FilePenLine, SquareTerminal, WrapText, X } from 'lucide-react'
+import { ArrowRightToLine, Eye, FilePenLine, Save, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -13,7 +13,7 @@ import {
 import { readBuffer } from '../editor/editorBuffers'
 import { useAppStore, type EditorTab } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
-import { ImageTools, isImage, isMarkdown } from './RemoteEditor'
+import { ImageTools, isImage, isMarkdown, saveTextFile } from './RemoteEditor'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 
 const TOOL_BUTTON =
@@ -228,6 +228,22 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
         })}
       </div>
       {activeTab && isImage(activeTab.name) && <ImageTools tabKey={activeTab.key} />}
+      {activeTab && !isImage(activeTab.name) && !activeTab.readOnly && (
+        <button
+          type="button"
+          title="保存到原文件"
+          className={cn(TOOL_BUTTON, 'disabled:opacity-40')}
+          disabled={saving || !unsaved(activeTab)}
+          onClick={() => {
+            const key = activeTab.key
+            setSaving(true)
+            void Promise.resolve(saveTextFile(key)).finally(() => setSaving(false))
+          }}
+        >
+          <Save className="size-4" />
+          保存
+        </button>
+      )}
       {activeTab && !isImage(activeTab.name) && (
         <button
           type="button"
