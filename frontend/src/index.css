@@ -239,6 +239,11 @@
 .term-scrolling .xterm-scrollable-element > .scrollbar .slider:hover {
   background: color-mix(in oklch, var(--primary) 85%, transparent) !important;
 }
+/* 全屏程序自己画滚动条。这时再露出 xterm 那条，会叠出一段断开的滑块，还挡住点击。 */
+.term-app-mouse .xterm-scrollable-element > .scrollbar {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
 
 /* Monaco 的滚动条滑块默认是直角 */
 .monaco-editor .monaco-scrollable-element > .scrollbar > .slider {

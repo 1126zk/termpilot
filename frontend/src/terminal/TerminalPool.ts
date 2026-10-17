@@ -24,6 +24,7 @@ interface PoolEntry {
   host: HTMLDivElement
   disposeData: () => void
   disposeScrollHint: () => void
+  disposeMouse: () => void
   settled: boolean
 }
 
@@ -108,7 +109,7 @@ class TerminalPool {
     bindClipboardKeys(term)
     bindOsc52(term)
     bindIme(host, term)
-    bindFullscreenWheel(host, term)
+    const disposeMouse = bindFullscreenWheel(host, term)
 
     this.enableWebgl(term)
 
@@ -123,7 +124,15 @@ class TerminalPool {
     })
     window.api.term.bindView(termId)
 
-    const entry: PoolEntry = { term, fit, host, disposeData, disposeScrollHint: bindScrollHint(host, term), settled: false }
+    const entry: PoolEntry = {
+      term,
+      fit,
+      host,
+      disposeData,
+      disposeScrollHint: bindScrollHint(host, term),
+      disposeMouse,
+      settled: false
+    }
     this.entries.set(termId, entry)
     return entry
   }
@@ -332,6 +341,7 @@ class TerminalPool {
   dispose(termId: string): void {
     const e = this.entries.get(termId)
     if (!e) return
+    e.disposeMouse()
     e.disposeData()
     e.disposeScrollHint()
     e.term.dispose()
