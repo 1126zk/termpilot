@@ -2,7 +2,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { composeTerminalRange } from './composeGl'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import '@xterm/xterm/css/xterm.css'
 import { bindFullscreenWheel } from './fullscreenWheel'
 import { bindIme } from './ime'
@@ -96,9 +96,10 @@ class TerminalPool {
 
     const fit = new FitAddon()
     term.loadAddon(fit)
-    // 默认按 Unicode 6 算宽度，✨ 这类 emoji 只占一格，后面的字会压上来
-    term.loadAddon(new Unicode11Addon())
-    term.unicode.activeVersion = '11'
+    // 默认按 Unicode 6 算宽度，✨ 这类 emoji 只占一格，后面的字会压上来。
+    // 字素簇宽度和 Pi 一致：⚠️ 这类带样式选择符的字符占两格，
+    // 全屏程序按这个宽度画的滚动条才不会整列错开。插件会把宽度版本设成 15-graphemes。
+    term.loadAddon(new UnicodeGraphemesAddon())
 
     const host = document.createElement('div')
     host.style.width = '100%'

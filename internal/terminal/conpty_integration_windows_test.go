@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/UserExistsError/conpty"
 )
 
 // 手动集成测试：真实启动 ConPTY（cmd.exe）。默认跳过，
@@ -17,9 +15,6 @@ import (
 func TestConPTYIntegration(t *testing.T) {
 	if os.Getenv("TERMPILOT_CONPTY_IT") != "1" {
 		t.Skip("手动集成测试：设置 TERMPILOT_CONPTY_IT=1 运行")
-	}
-	if !conpty.IsConPtyAvailable() {
-		t.Skip("本机 ConPTY 不可用")
 	}
 
 	var mu sync.Mutex

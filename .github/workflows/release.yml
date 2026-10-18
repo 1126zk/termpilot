@@ -60,7 +60,7 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: 构建前准备（CLI + 图标）
+      - name: 构建前准备（CLI + 图标 + ConPTY）
         run: node scripts/prebuild.mjs ${{ matrix.goos }}
 
       - name: 构建
