@@ -154,11 +154,19 @@ export function TabBar() {
     setMenuOrder(next)
   }
 
-  /** 被拖标签跟手：translateX = 指针位移 − 布局位移。用当前 DOM 的真实 offsetLeft 算 */
+  /** 被拖标签跟手，限制在首尾会话标签之间，不盖住 Host，也不飞到空白处 */
   const followPointer = (id: string) => {
-    const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
-    if (!el) return
-    setDragOffset(pointerX.current - tabDragStart.current.pos - (el.offsetLeft - tabDragStart.current.layout))
+    const strip = stripRef.current
+    const el = strip?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)
+    if (!strip || !el) return
+    const offset = pointerX.current - tabDragStart.current.pos - (el.offsetLeft - tabDragStart.current.layout)
+    const items = strip.querySelectorAll<HTMLElement>('[data-tab-id]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return setDragOffset(offset)
+    const min = first.offsetLeft - el.offsetLeft
+    const max = last.offsetLeft + last.offsetWidth - el.offsetWidth - el.offsetLeft
+    setDragOffset(Math.min(max, Math.max(min, offset)))
   }
 
   /** 被拖菜单项跟手（竖向版）。只在本分区里移动，拖出菜单底会撑出滚动条 */
@@ -194,9 +202,16 @@ export function TabBar() {
   const tabDropOrder = (clientX: number, dragId: string): string[] | null => {
     const strip = stripRef.current
     if (!strip) return null
-    const pointer = clientX - strip.getBoundingClientRect().left + strip.scrollLeft
-    const start = pointer - tabDragStart.current.grab
     const ids = useAppStore.getState().tabs.map((tab) => tab.id)
+    // 交换判定也按限位后的视觉位置算，指针拖出首尾标签外沿时不会乱换
+    const items = strip.querySelectorAll<HTMLElement>('[data-tab-id]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    const raw = clientX - strip.getBoundingClientRect().left + strip.scrollLeft - tabDragStart.current.grab
+    const start =
+      first && last
+        ? Math.min(last.offsetLeft + last.offsetWidth - tabDragStart.current.size, Math.max(first.offsetLeft, raw))
+        : raw
     return moveTo(ids, dragId, dropIndex(strip, 'data-tab-id', 'x', start, start + tabDragStart.current.size, dragId, ids))
   }
 
