@@ -2,6 +2,7 @@ package sshx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -62,7 +63,12 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 	hops := jumpHops(session, jumpSecrets)
 
 	if len(hops) == 0 {
-		cfg := targetConfig(session, secret)
+		cfg := targetConfig(session)
+		cleanup, err := attachAuth(cfg, session, secret)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
 		transport, err := openTransport(ctx, cfg, session.Host, or22(session.Port), session.Username, options)
 		if err != nil {
 			return nil, err
@@ -70,7 +76,7 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 		client, err := handshake(transport, cfg)
 		if err != nil {
 			_ = transport.Close()
-			return nil, err
+			return nil, authError(err, session.UseKey)
 		}
 		startKeepalive(client, options)
 		return &Conn{Client: client}, nil
@@ -135,12 +141,19 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 		return nil, fmt.Errorf("跳板无法转到目标机: %w", err)
 	}
 
-	cfg := targetConfig(session, secret)
-	client, err := handshake(sock, cfg)
+	cfg := targetConfig(session)
+	cleanup, err := attachAuth(cfg, session, secret)
 	if err != nil {
 		_ = sock.Close()
 		closeJumps()
 		return nil, err
+	}
+	defer cleanup()
+	client, err := handshake(sock, cfg)
+	if err != nil {
+		_ = sock.Close()
+		closeJumps()
+		return nil, authError(err, session.UseKey)
 	}
 	startKeepalive(client, options)
 	// 目标连接断开时顺带关掉整条跳板链（对应 TS 里 client.on('close') 回收 opened）。
@@ -188,8 +201,8 @@ func jumpHops(session *SessionConfig, jumpSecrets []string) []dialHop {
 	return hops
 }
 
-// targetConfig 对应 buildConnectConfig：密码认证，默认 15s 握手超时。
-func targetConfig(session *SessionConfig, secret string) *ssh.ClientConfig {
+// targetConfig 对应 buildConnectConfig：默认 15s 握手超时。认证由 attachAuth 另挂。
+func targetConfig(session *SessionConfig) *ssh.ClientConfig {
 	cfg := &ssh.ClientConfig{
 		User:    session.Username,
 		Timeout: 15 * time.Second,
@@ -197,12 +210,37 @@ func targetConfig(session *SessionConfig, secret string) *ssh.ClientConfig {
 		// 这里保持一致全部放行。known_hosts 校验（"yes" 的真语义）尚未实现。
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-	if secret != "" {
-		cfg.Auth = append(cfg.Auth, ssh.Password(secret))
-	}
 	applyDialOptions(cfg, session.Options)
 	applyAlgorithms(cfg, session.Options)
 	return cfg
+}
+
+// attachAuth 给目标机挂上认证。密钥登录和系统 ssh 用同一套默认私钥，密码登录只用密码。
+// 返回的函数在握手结束后关掉密钥代理连接。
+func attachAuth(cfg *ssh.ClientConfig, session *SessionConfig, secret string) (func(), error) {
+	if session != nil && session.UseKey {
+		signers, closer, err := openSigners(session.Host, session.Username, or22(session.Port))
+		if err != nil {
+			return nil, err
+		}
+		cfg.Auth = append(cfg.Auth, ssh.PublicKeys(signers...))
+		return closer, nil
+	}
+	if secret != "" {
+		cfg.Auth = append(cfg.Auth, ssh.Password(secret))
+	}
+	return func() {}, nil
+}
+
+func authError(err error, useKey bool) error {
+	if err == nil || !useKey {
+		return err
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "unable to authenticate") || strings.Contains(msg, "All configured authentication methods failed") {
+		return errors.New("认证失败：密钥不被接受")
+	}
+	return err
 }
 
 // hopConfig 跳板自己的连接参数：20s 握手超时，tryKeyboard（keyboard-interactive 全答密码）。

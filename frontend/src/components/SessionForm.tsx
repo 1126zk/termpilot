@@ -26,7 +26,8 @@ const empty = () => ({
   host: '',
   port: 22,
   username: '',
-  secret: ''
+  secret: '',
+  useKey: false
 })
 
 /** 表单里端口先用字符串存，空值留着，保存时再校验转换。左边永远是本机，右边永远是服务器。 */
@@ -112,7 +113,8 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
         host: s.host,
         port: s.port,
         username: s.username,
-        secret: ''
+        secret: '',
+        useKey: Boolean(s.useKey)
       })
       setJumps(
         (s.jumps ?? []).map((hop) => ({
@@ -230,7 +232,8 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       host,
       port: form.port,
       username,
-      secret: form.secret ? form.secret : undefined,
+      secret: form.useKey ? '' : form.secret ? form.secret : undefined,
+      useKey: form.useKey,
       jumps: nextJumps,
       sshOptions: creating ? null : undefined,
       forwards: rules
@@ -241,8 +244,9 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       await loadSessions()
       return
     }
-    // 新建：密码没填不建记录，等用户继续填
-    if (!form.secret || creatingRef.current) return
+    // 新建：密码登录要等密码。密钥登录和 ssh 用户名@主机一样，不另指定私钥
+    if (creatingRef.current) return
+    if (!form.useKey && !form.secret) return
     creatingRef.current = true
     try {
       const created = (await window.api.sessions.create(patch)) as SessionConfig
@@ -320,12 +324,27 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
               <KeyRound />
             </span>
             <Input
-              className="h-10 pr-9 pl-8"
+              className="h-10 pr-16 pl-8"
               type={showSecret ? 'text' : 'password'}
               value={form.secret}
               placeholder="密码"
+              disabled={form.useKey}
               onChange={(e) => set('secret', e.target.value)}
             />
+            <button
+              type="button"
+              title={form.useKey ? '改用密码' : '用密钥登录'}
+              className={cn(
+                'absolute top-1/2 right-8 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground',
+                form.useKey && 'text-primary hover:text-primary'
+              )}
+              onClick={() => {
+                dirty.current = true
+                setForm((f) => ({ ...f, useKey: !f.useKey, secret: f.useKey ? f.secret : '' }))
+              }}
+            >
+              <KeyRound className="size-4" />
+            </button>
             <button
               type="button"
               title={showSecret ? '隐藏密码' : '显示密码'}

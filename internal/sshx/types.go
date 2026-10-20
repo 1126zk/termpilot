@@ -59,6 +59,8 @@ type SessionConfig struct {
 	Host     string
 	Port     int
 	Username string
+	// UseKey 为真时按系统 ssh 的默认私钥登录，不使用传入的密码。
+	UseKey bool
 	// 按本机到目标主机的顺序排列的跳板；空表示直接连接。
 	Jumps   []Hop
 	Options *ConnectOptions

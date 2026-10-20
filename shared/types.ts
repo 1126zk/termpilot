@@ -12,7 +12,7 @@ export interface ForwardRule {
   targetPort: number
 }
 
-/** 会话配置：一条正向 SSH 连接（secret 不落盘在本结构里，单独加密存储）。认证只用密码。 */
+/** 会话配置：一条正向 SSH 连接（secret 不落盘在本结构里，单独加密存储）。密码登录，或用本机密钥。 */
 export interface SessionConfig {
   id: string
   /** 助手用来查找的编号，conn- 开头。改名不换。 */
@@ -26,6 +26,8 @@ export interface SessionConfig {
   remark?: string
   /** 是否已保存加密凭据（密码） */
   hasSecret: boolean
+  /** 按系统 ssh 的默认私钥登录，不需要密码 */
+  useKey?: boolean
   /** 按本机到目标主机的顺序排列的跳板；空表示直接连接。 */
   jumps?: SshHop[]
   /** 命令里带的超时、算法、ProxyCommand。 */
@@ -48,6 +50,8 @@ export interface SessionInput {
   remark?: string
   /** 明文密码；undefined 表示不修改 */
   secret?: string
+  /** 是否改用本机密钥。undefined 表示不修改 */
+  useKey?: boolean
   /** 按本机到目标主机的顺序排列的跳板。undefined 表示不修改，空数组表示清掉。 */
   jumps?: SshHopInput[]
   /** 连接选项。undefined 表示不修改，null 表示清掉。 */

@@ -56,7 +56,7 @@ type SshConnectOptions struct {
 	ProxyCommand          string         `json:"proxyCommand,omitempty"`
 }
 
-// SessionConfig 会话配置（secret 不落盘在本结构里，单独加密存储）。认证只用密码。
+// SessionConfig 会话配置（secret 不落盘在本结构里，单独加密存储）。密码登录，或用本机密钥。
 type SessionConfig struct {
 	ID         string             `json:"id"`
 	PublicID   string             `json:"publicId"`
@@ -67,6 +67,7 @@ type SessionConfig struct {
 	Username   string             `json:"username"`
 	Remark     *string            `json:"remark,omitempty"`
 	HasSecret  bool               `json:"hasSecret"`
+	UseKey     bool               `json:"useKey,omitempty"`
 	Jumps      []SshHop           `json:"jumps,omitempty"`
 	SshOptions *SshConnectOptions `json:"sshOptions,omitempty"`
 	Forwards   []ForwardRule      `json:"forwards,omitempty"`
@@ -86,6 +87,8 @@ type SessionInput struct {
 	Username string  `json:"username"`
 	Remark   *string `json:"remark,omitempty"`
 	Secret   *string `json:"secret,omitempty"`
+	// nil = 不修改。true 表示按系统 ssh 的默认私钥登录，不再要密码。
+	UseKey *bool `json:"useKey,omitempty"`
 	// nil = 不修改；非 nil = 按本机到目标主机的顺序整体替换（空切片清掉）。
 	Jumps *[]SshHopInput `json:"jumps,omitempty"`
 	// nil = 不修改；非 nil（哪怕零值结构）= 整体替换，清洗后为空则存 NULL。

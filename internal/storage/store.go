@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   forwards TEXT,
   os TEXT,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  use_key INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS sessions_public_id ON sessions(public_id);
 CREATE TABLE IF NOT EXISTS mcp_config (
@@ -138,6 +139,10 @@ func Open(dir string, cipher Cipher) (*Store, error) {
 	if err := ensureColumn(db, "sessions", "jumps", "TEXT"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("添加 jumps 列失败: %w", err)
+	}
+	if err := ensureColumn(db, "sessions", "use_key", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("添加 use_key 列失败: %w", err)
 	}
 	for _, column := range []string{"jump_host", "jump_port", "jump_username", "jump_secret_encrypted"} {
 		if err := dropColumnIfExists(db, "sessions", column); err != nil {
@@ -336,14 +341,15 @@ type sessionRow struct {
 	os         sql.NullString
 	createdAt  int64
 	updatedAt  int64
+	useKey     int64
 }
 
 const sessionColumns = `id, public_id, name, group_name, host, port, username,
-  remark, secret_encrypted, jumps, ssh_options, config_host, forwards, os, created_at, updated_at`
+  remark, secret_encrypted, jumps, ssh_options, config_host, forwards, os, created_at, updated_at, use_key`
 
 func (r *sessionRow) scan(row interface{ Scan(...any) error }) error {
 	return row.Scan(&r.id, &r.publicID, &r.name, &r.group, &r.host, &r.port, &r.username,
-		&r.remark, &r.secret, &r.jumps, &r.sshOptions, &r.configHost, &r.forwards, &r.os, &r.createdAt, &r.updatedAt)
+		&r.remark, &r.secret, &r.jumps, &r.sshOptions, &r.configHost, &r.forwards, &r.os, &r.createdAt, &r.updatedAt, &r.useKey)
 }
 
 func nullStr(s sql.NullString) *string {
@@ -374,6 +380,7 @@ func (r *sessionRow) toPublic() *SessionConfig {
 		Username:   r.username,
 		Remark:     nullStr(r.remark),
 		HasSecret:  r.secret.Valid && r.secret.String != "",
+		UseKey:     r.useKey != 0,
 		Jumps:      publicJumps(decodeJumps(nullStr(r.jumps))),
 		SshOptions: decodeOptions(nullStr(r.sshOptions)),
 		Forwards:   decodeForwards(nullStr(r.forwards)),
@@ -451,15 +458,19 @@ func (s *Store) Create(input *SessionInput) (*SessionConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	useKey := 0
+	if input.UseKey != nil && *input.UseKey {
+		useKey = 1
+	}
 	_, err = s.db.Exec(
 		`INSERT INTO sessions (
 		  id, public_id, name, group_name, host, port, username,
 		  remark, secret_encrypted, created_at, updated_at,
-		  jumps, ssh_options, forwards
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  jumps, ssh_options, forwards, use_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, publicID, input.Name, input.Group, input.Host, input.Port, input.Username,
 		nullStringArg(input.Remark), nullStringArg(secret), now, now,
-		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards),
+		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards), useKey,
 	)
 	if err != nil {
 		return nil, err
@@ -479,10 +490,11 @@ func (s *Store) Update(id string, patch *SessionInput) (*SessionConfig, error) {
 		jumps      sql.NullString
 		sshOptions sql.NullString
 		forwards   sql.NullString
+		useKey     int64
 	}
 	err := s.db.QueryRow(
-		`SELECT secret_encrypted, jumps, ssh_options, forwards FROM sessions WHERE id = ?`, id,
-	).Scan(&existing.secret, &existing.jumps, &existing.sshOptions, &existing.forwards)
+		`SELECT secret_encrypted, jumps, ssh_options, forwards, use_key FROM sessions WHERE id = ?`, id,
+	).Scan(&existing.secret, &existing.jumps, &existing.sshOptions, &existing.forwards, &existing.useKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -530,16 +542,23 @@ func (s *Store) Update(id string, patch *SessionInput) (*SessionConfig, error) {
 		}
 	}
 
+	useKey := existing.useKey
+	if patch.UseKey != nil {
+		useKey = 0
+		if *patch.UseKey {
+			useKey = 1
+		}
+	}
 	_, err = s.db.Exec(
 		`UPDATE sessions SET
 		  name = ?, group_name = ?, host = ?, port = ?, username = ?,
 		  remark = ?,
 		  secret_encrypted = ?, updated_at = ?,
-		  jumps = ?, ssh_options = ?, forwards = ?
+		  jumps = ?, ssh_options = ?, forwards = ?, use_key = ?
 		WHERE id = ?`,
 		patch.Name, patch.Group, patch.Host, patch.Port, patch.Username,
 		nullStringArg(patch.Remark), secret, nowMillis(),
-		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards), id,
+		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards), useKey, id,
 	)
 	if err != nil {
 		return nil, err
@@ -638,11 +657,11 @@ func (s *Store) Duplicate(id string) (*SessionConfig, error) {
 		`INSERT INTO sessions (
 		  id, public_id, name, group_name, host, port, username,
 		  remark, secret_encrypted, created_at, updated_at,
-		  jumps, ssh_options, forwards
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  jumps, ssh_options, forwards, use_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		newID, publicID, name, r.group, r.host, r.port, r.username,
 		nullSQL(r.remark), nullSQL(r.secret), now, now,
-		nullSQL(r.jumps), nullSQL(r.sshOptions), nullSQL(r.forwards),
+		nullSQL(r.jumps), nullSQL(r.sshOptions), nullSQL(r.forwards), r.useKey,
 	)
 	if err != nil {
 		return nil, err

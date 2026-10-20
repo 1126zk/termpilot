@@ -115,7 +115,7 @@ func TestSchemaAndWAL(t *testing.T) {
 		cols[name] = true
 	}
 	for _, want := range []string{"id", "public_id", "name", "group_name", "host", "port", "username",
-		"remark", "secret_encrypted", "jumps", "ssh_options", "config_host", "forwards", "os", "created_at", "updated_at"} {
+		"remark", "secret_encrypted", "jumps", "ssh_options", "config_host", "forwards", "os", "created_at", "updated_at", "use_key"} {
 		if !cols[want] {
 			t.Fatalf("sessions 缺列 %s", want)
 		}
@@ -637,5 +637,37 @@ func TestReopenPersists(t *testing.T) {
 	}
 	if secret, _ := s2.GetSecret(c.ID); secret != "pw1" {
 		t.Fatalf("重开后密文解不开: %q", secret)
+	}
+}
+
+func TestUseKeySession(t *testing.T) {
+	s := newStore(t)
+	on := true
+	created, err := s.Create(&SessionInput{
+		Name: "密钥机", Group: "", Host: "10.0.0.8", Port: 22, Username: "deploy", UseKey: &on,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created.UseKey || created.HasSecret {
+		t.Fatalf("创建后 useKey=%v hasSecret=%v", created.UseKey, created.HasSecret)
+	}
+	dup, err := s.Duplicate(created.ID)
+	if err != nil || dup == nil || !dup.UseKey {
+		t.Fatalf("复制应带上密钥登录: %+v %v", dup, err)
+	}
+	kept, err := s.Update(created.ID, &SessionInput{
+		Name: "密钥机", Group: "", Host: "10.0.0.8", Port: 22, Username: "deploy",
+	})
+	if err != nil || !kept.UseKey {
+		t.Fatalf("未提交的登录方式被清了: %+v %v", kept, err)
+	}
+	off := false
+	switched, err := s.Update(created.ID, &SessionInput{
+		Name: "密钥机", Group: "", Host: "10.0.0.8", Port: 22, Username: "deploy",
+		UseKey: &off, Secret: strPtr("pw"),
+	})
+	if err != nil || switched.UseKey || !switched.HasSecret {
+		t.Fatalf("改回密码不对: %+v %v", switched, err)
 	}
 }

@@ -172,16 +172,16 @@ func TestLoginAnswerer(t *testing.T) {
 
 func TestApplyDialOptionsTimeout(t *testing.T) {
 	zero := 0
-	cfg := targetConfig(&SessionConfig{Username: "u", Options: &ConnectOptions{ReadyTimeoutMs: &zero}}, "")
+	cfg := targetConfig(&SessionConfig{Username: "u", Options: &ConnectOptions{ReadyTimeoutMs: &zero}})
 	if cfg.Timeout != 120000000000 { // 120s
 		t.Fatalf("readyTimeoutMs=0 应改成 120s，得到 %v", cfg.Timeout)
 	}
 	five := 5000
-	cfg = targetConfig(&SessionConfig{Username: "u", Options: &ConnectOptions{ReadyTimeoutMs: &five}}, "")
+	cfg = targetConfig(&SessionConfig{Username: "u", Options: &ConnectOptions{ReadyTimeoutMs: &five}})
 	if cfg.Timeout.Milliseconds() != 5000 {
 		t.Fatalf("got %v", cfg.Timeout)
 	}
-	cfg = targetConfig(&SessionConfig{Username: "u"}, "")
+	cfg = targetConfig(&SessionConfig{Username: "u"})
 	if cfg.Timeout.Milliseconds() != 15000 {
 		t.Fatalf("默认应为 15s，得到 %v", cfg.Timeout)
 	}

@@ -302,6 +302,7 @@ func toSshSession(s *storage.SessionConfig) *sshx.SessionConfig {
 		Host:     s.Host,
 		Port:     s.Port,
 		Username: s.Username,
+		UseKey:   s.UseKey,
 	}
 	for _, hop := range s.Jumps {
 		out.Jumps = append(out.Jumps, sshx.Hop{Host: hop.Host, Port: hop.Port, Username: hop.Username})
