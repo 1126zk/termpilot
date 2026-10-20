@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { AppWindow, Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,6 +66,9 @@ function WindowControls(props: { terminalActive: boolean }) {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
+      <button type="button" className={topBtn} title="新窗口" onClick={() => void window.api.win.newWindow()}>
+        <AppWindow className="size-4" strokeWidth={2} />
+      </button>
       {props.terminalActive && (
         <button
           type="button"
@@ -110,6 +113,7 @@ export function TabBar() {
   const openLocalTab = useAppStore((s) => s.openLocalTab)
   const localShells = useAppStore((s) => s.localShells)
   const openSessionTab = useAppStore((s) => s.openSessionTab)
+  const loadSessions = useAppStore((s) => s.loadSessions)
   const reorderTabs = useAppStore((s) => s.reorderTabs)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
@@ -531,7 +535,7 @@ export function TabBar() {
             </Fragment>
           )
         })}
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (open) void loadSessions() }}>
           <DropdownMenuTrigger asChild>
             <button type="button" className={cn(topBtn, 'shrink-0')} style={noDrag} title="新建终端">
               <Plus className="size-4" strokeWidth={2} />

@@ -88,6 +88,11 @@ func (s *Service) Apply(settings storage.McpSettings) error {
 	return nil
 }
 
+// NoteOtherWindow 端口已经被另一扇窗口占用。本窗口不再监听，设置页说明原因。
+func (s *Service) NoteOtherWindow(port int) {
+	s.publish(McpRuntime{Running: false, Port: port, Clients: 0, Error: "另一个窗口已在监听"})
+}
+
 // Stop 对应 TS stop()：挂起的确认/截图/行读全部按「应用正在退出」收尾，再关监听。
 func (s *Service) Stop() error {
 	s.mu.Lock()

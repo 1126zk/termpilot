@@ -451,7 +451,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleHostsOpen: () =>
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
-  setHostsOpen: (open) => set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false }),
+  setHostsOpen: (open) => {
+    set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false })
+    if (open) void get().loadSessions()
+  },
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
   openRemoteEditor: (termId, sessionId, file, pin = false, readOnly) => {
     const key = editorKey(termId, sessionId, file.path)

@@ -1,6 +1,9 @@
 package app
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // dirFromArgs 取出 --dir <path> 或 --dir=<path>。右键菜单用前一种。
 func dirFromArgs(args []string) string {
@@ -14,6 +17,32 @@ func dirFromArgs(args []string) string {
 		}
 	}
 	return ""
+}
+
+// extraWindow 为真表示这是「新窗口」再启动的一份，不是第一次打开。
+func extraWindow(args []string) bool {
+	for _, arg := range args {
+		if arg == "--extra-window" {
+			return true
+		}
+	}
+	return false
+}
+
+// posFromArgs 取出 --pos <x> <y>。新窗口相对上一扇错开一截。
+func posFromArgs(args []string) (int, int, bool) {
+	for i := 0; i < len(args); i++ {
+		if args[i] != "--pos" || i+2 >= len(args) {
+			continue
+		}
+		x, errX := strconv.Atoi(args[i+1])
+		y, errY := strconv.Atoi(args[i+2])
+		if errX != nil || errY != nil {
+			return 0, 0, false
+		}
+		return x, y, true
+	}
+	return 0, 0, false
 }
 
 func (a *App) noteLaunchDir(dir string) {

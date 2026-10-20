@@ -121,6 +121,7 @@ func (b *Bridge) routes() map[string]handler {
 		"win:toggle-maximize": a.hWinToggleMaximize,
 		"win:close":           a.hWinClose,
 		"win:is-maximized":    a.hWinIsMaximized,
+		"win:new":             a.hWinNew,
 	}
 }
 

@@ -69,6 +69,14 @@ export default function App() {
   )
 
   useEffect(() => {
+    const onFocus = () => {
+      void loadSessions()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [loadSessions])
+
+  useEffect(() => {
     void loadSessions()
     void loadLocalShells()
     loadAppearance()

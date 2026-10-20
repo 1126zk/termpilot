@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -712,6 +713,23 @@ func (a *App) hWinClose(_ []interface{}) (interface{}, error) {
 
 func (a *App) hWinIsMaximized(_ []interface{}) (interface{}, error) {
 	return wailsRuntime.WindowIsMaximised(a.ctx), nil
+}
+
+// hWinNew 再启动一份程序，成为另一扇窗口。主机列表仍是同一份数据库。
+func (a *App) hWinNew(_ []interface{}) (interface{}, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"--extra-window"}
+	if a.ctx != nil && !wailsRuntime.WindowIsMaximised(a.ctx) {
+		x, y := wailsRuntime.WindowGetPosition(a.ctx)
+		args = append(args, "--pos", strconv.Itoa(x+32), strconv.Itoa(y+32))
+	}
+	if err := startDetached(exe, args...); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // ------------------------------------------------------------ 小工具

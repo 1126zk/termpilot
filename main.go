@@ -42,10 +42,6 @@ func main() {
 		OnStartup:        a.Startup,
 		OnDomReady:       a.DomReady,
 		OnShutdown:       a.Shutdown,
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId:               "termpilot-single-instance",
-			OnSecondInstanceLaunch: a.OnSecondInstance,
-		},
 		Bind: []interface{}{
 			a.Bridge,
 		},

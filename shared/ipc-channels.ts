@@ -113,5 +113,7 @@ export const IPC = {
   winToggleMaximize: 'win:toggle-maximize',
   winClose: 'win:close',
   winIsMaximized: 'win:is-maximized',
-  winMaximizeChanged: 'win:maximize-changed'
+  winMaximizeChanged: 'win:maximize-changed',
+  /** 再启动一份程序，打开另一扇窗口 */
+  winNew: 'win:new'
 } as const

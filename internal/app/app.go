@@ -6,11 +6,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/options"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"termpilot/internal/localfs"
@@ -151,21 +151,35 @@ func NewApp() *App {
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.noteLaunchDir(dirFromArgs(os.Args))
+	if x, y, ok := posFromArgs(os.Args); ok {
+		wailsRuntime.WindowSetPosition(ctx, x, y)
+	}
 
 	go a.watchMaximize()
 
-	settings, err := a.store.GetMcpSettings()
-	if err == nil && settings != nil {
-		go func() {
-			if err := a.mcp.Apply(*settings); err != nil {
-				log.Printf("[TermPilot] MCP start failed: %v", err)
-			}
-		}()
+	// 助手只占用一个端口。后开的窗口听不上时，接着用先打开的那个窗口。
+	go a.startMcp()
+	// 右键菜单、命令行是装一次就行。从「新窗口」起来的进程不再重装。
+	if !extraWindow(os.Args) {
+		a.installSkill()
+		a.installCli()
+		a.installContextMenu()
 	}
+}
 
-	a.installSkill()
-	a.installCli()
-	a.installContextMenu()
+func (a *App) startMcp() {
+	settings, err := a.store.GetMcpSettings()
+	if err != nil || settings == nil {
+		return
+	}
+	if err := a.mcp.Apply(*settings); err != nil {
+		if strings.Contains(err.Error(), "已被占用") {
+			log.Printf("[TermPilot] MCP 已由另一个窗口监听")
+			a.mcp.NoteOtherWindow(settings.Port)
+			return
+		}
+		log.Printf("[TermPilot] MCP start failed: %v", err)
+	}
 }
 
 func (a *App) Shutdown(ctx context.Context) {
@@ -175,16 +189,6 @@ func (a *App) Shutdown(ctx context.Context) {
 		log.Printf("[TermPilot] MCP stop: %v", err)
 	}
 	_ = a.store.Close()
-}
-
-func (a *App) OnSecondInstance(second options.SecondInstanceData) {
-	if a.ctx == nil {
-		return
-	}
-	a.noteLaunchDir(dirFromArgs(second.Args))
-	wailsRuntime.WindowUnminimise(a.ctx)
-	wailsRuntime.WindowShow(a.ctx)
-	a.pingLaunchDir()
 }
 
 // emit 下行事件总出口；前端还没就绪时事件丢弃（前端挂载后会主动拉取状态）。

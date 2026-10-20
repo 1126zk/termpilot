@@ -189,7 +189,8 @@ const api = {
     toggleMaximize: () => invoke<void>(IPC.winToggleMaximize, []),
     close: () => invoke<void>(IPC.winClose, []),
     isMaximized: () => invoke<boolean>(IPC.winIsMaximized, []),
-    onMaximizeChanged: (cb: (maximized: boolean) => void) => on(IPC.winMaximizeChanged, cb)
+    onMaximizeChanged: (cb: (maximized: boolean) => void) => on(IPC.winMaximizeChanged, cb),
+    newWindow: () => invoke<void>(IPC.winNew, [])
   }
 }
 
