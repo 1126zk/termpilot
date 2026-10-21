@@ -23,7 +23,7 @@ import (
 )
 
 // appVersion 与根 package.json 的 version 保持一致。
-const appVersion = "0.0.7"
+const appVersion = "0.0.8"
 
 // App 应用装配：持有全部服务，负责启动/退出生命周期。
 type App struct {
