@@ -29,16 +29,9 @@ import rawTheme from 'material-icon-theme/dist/material-icons.json'
 
 const theme = rawTheme as unknown as IconTheme
 
-const iconUrls = import.meta.glob('../../node_modules/material-icon-theme/icons/*.svg', {
-  eager: true,
-  query: '?url',
-  import: 'default'
-}) as Record<string, string>
-
-const urls = new Map<string, string>()
-for (const [path, url] of Object.entries(iconUrls)) {
-  urls.set(path.slice(path.lastIndexOf('/') + 1), url)
-}
+// 图标是静态资源，由 scripts/sync-icons.mjs 同步到 frontend/public/icons。
+// 直接拼相对 URL（base 是 './'，页面在根路径），不走 JS module。
+const iconUrl = (file: string) => `icons/${file}`
 
 const light = theme.light
 const darkMaps = {
@@ -62,7 +55,7 @@ function srcOf(id: string | undefined): string {
   const def = (id && theme.iconDefinitions[id]) || theme.iconDefinitions[theme.file]
   if (!def) return ''
   const file = def.iconPath.slice(def.iconPath.lastIndexOf('/') + 1)
-  return urls.get(file) ?? urls.get('file.svg') ?? ''
+  return iconUrl(file || 'file.svg')
 }
 
 export function materialIconSrc(

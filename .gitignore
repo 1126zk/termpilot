@@ -17,4 +17,5 @@ internal/terminal/resources/conpty/
 shell/contextmenu/.cert/
 frontend/node_modules/
 frontend/dist/
+frontend/public/icons/
 app.exe
