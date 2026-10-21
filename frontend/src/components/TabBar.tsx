@@ -8,6 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -52,6 +53,28 @@ function RestoreIcon() {
 /** 顶栏所有图标按钮的统一规格：28×28 正方形，与标签胶囊同高。 */
 const topBtn =
   'flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
+
+/** 菜单项文字：装得下就正常显示，装不下截断 + 悬停出全名（只给被截断的项弹）。 */
+function MenuLabel(props: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [truncated, setTruncated] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) setTruncated(el.scrollWidth > el.clientWidth + 1)
+  }, [props.text])
+  const label = (
+    <span ref={ref} className="min-w-0 flex-1 truncate">
+      {props.text}
+    </span>
+  )
+  if (!truncated) return label
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{label}</TooltipTrigger>
+      <TooltipContent side="right">{props.text}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 /** 自绘窗口控制按钮：运维面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。面板按钮只在终端页出现。 */
 function WindowControls(props: { terminalActive: boolean }) {
@@ -560,7 +583,7 @@ export function TabBar() {
           <DropdownMenuContent
             align="start"
             ref={menuContentRef}
-            className="relative"
+            className="relative w-auto! max-w-72"
             onCloseAutoFocus={(event) => {
               // 关掉菜单时 Radix 会把焦点还给「+」按钮，新终端就收不到按键
               event.preventDefault()
@@ -590,7 +613,7 @@ export function TabBar() {
                   }}
                 >
                   <ShellIcon shell={shell.id} />
-                  {shell.label}
+                  <MenuLabel text={shell.label} />
                 </DropdownMenuItem>
               )
             })}
@@ -614,7 +637,7 @@ export function TabBar() {
                   }}
                 >
                   <OsIcon {...osIconProps(s.os)} />
-                  {s.name}
+                  <MenuLabel text={s.name} />
                 </DropdownMenuItem>
               )
             })}
