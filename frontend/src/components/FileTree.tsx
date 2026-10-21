@@ -16,6 +16,7 @@ import { beginTreeMove, finishTreeMove, noteTreeMoveDrop, treeMoveActive } from 
 import { PanelConfirm, PanelDialog, useMenuAction } from './PanelDialog'
 import { DROP_TARGET_STYLE, dropDirAt, registerDropTree } from '../fileDrop'
 import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
+import { MAX_EDIT_BYTES } from '../../../shared/file-listing'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
 
@@ -73,6 +74,20 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
   const setNotice = useAppStore((s) => s.setNotice)
+
+  // 编辑器/预览收不下的文件不开废标签页，点击时就地提示。图片走预览，上限另算
+  const openFile = (item: RemoteFile, pin: boolean, readOnly?: boolean) => {
+    if (isImage(item.name)) {
+      if (item.size > 20 * 1024 * 1024) {
+        setNotice('图片超过 20MB，不在预览里打开')
+        return
+      }
+    } else if (item.size > MAX_EDIT_BYTES) {
+      setNotice('文件超过 1.5MB，不在编辑器里打开')
+      return
+    }
+    openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, pin, readOnly)
+  }
 
   const toggleHidden = () =>
     setShowHidden((v) => {
@@ -577,12 +592,12 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                     if (isDir) {
                       void toggle(item.path)
                     } else {
-                      openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, false)
+                      openFile(item, false)
                     }
                   }}
                   onDoubleClick={() => {
                     if (!isDir) {
-                      openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true)
+                      openFile(item, true)
                     }
                   }}
                 >
@@ -623,14 +638,14 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                 )}
                 {item.kind !== 'dir' && (
                   <ContextMenuItem
-                    onClick={() => openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true, true)}
+                    onClick={() => openFile(item, true, true)}
                   >
                     <Eye /> 查看
                   </ContextMenuItem>
                 )}
                 {item.kind !== 'dir' && !isImage(item.name) && (
                   <ContextMenuItem
-                    onClick={() => openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, true, false)}
+                    onClick={() => openFile(item, true, false)}
                   >
                     <FilePenLine /> 编辑
                   </ContextMenuItem>

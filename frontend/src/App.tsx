@@ -137,10 +137,11 @@ export default function App() {
                 <SettingsPage />
               ) : hostsOpen || !activeTab ? (
                 <HostsPage />
+              ) : currentFile ? (
+                // 文件盖在最上层：面板/终端模式下点文件都能看，切走回落到之前的模式
+                <RemoteEditor key={currentFile.key} tab={currentFile} />
               ) : opsPanelTermId === activeTab.id ? (
                 <OpsPanel />
-              ) : currentFile ? (
-                <RemoteEditor key={currentFile.key} tab={currentFile} />
               ) : (
                 <TerminalView key={activeTab.id} termId={activeTab.id} />
               )}

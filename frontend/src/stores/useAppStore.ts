@@ -493,8 +493,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 面板内容硬性互斥：开文件面板就关掉编辑表单
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen, editing: null }),
 
+  // 文件盖在最上层：开面板时把正在看的文件退到后台（tab 不丢），不然面板出不来
   toggleOpsPanel: (termId) =>
-    set({ opsPanelTermId: get().opsPanelTermId === termId ? null : termId }),
+    set(
+      get().opsPanelTermId === termId
+        ? { opsPanelTermId: null }
+        : { opsPanelTermId: termId, activeEditorKey: null }
+    ),
 
   toggleHostsOpen: () =>
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
