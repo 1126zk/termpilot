@@ -9,6 +9,7 @@ import { McpConfirmDialog } from './components/McpConfirmDialog'
 import { NoticeToast } from './components/NoticeToast'
 import { SftpInstallDialog } from './components/SftpInstallDialog'
 import { TerminalView } from './components/TerminalView'
+import { OpsPanel } from './components/OpsPanel'
 import { RemoteEditor } from './components/RemoteEditor'
 import { HostsPage } from './components/HostsPage'
 import { useAppStore } from './stores/useAppStore'
@@ -109,6 +110,7 @@ export default function App() {
   ])
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const opsPanelTermId = useAppStore((s) => s.opsPanelTermId)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const fileTabs = activeTab
     ? editorTabs.filter((t) => t.termId === activeTab.id)
@@ -135,6 +137,8 @@ export default function App() {
                 <SettingsPage />
               ) : hostsOpen || !activeTab ? (
                 <HostsPage />
+              ) : opsPanelTermId === activeTab.id ? (
+                <OpsPanel />
               ) : currentFile ? (
                 <RemoteEditor key={currentFile.key} tab={currentFile} />
               ) : (

@@ -73,6 +73,46 @@ export interface OsInfo {
   distro?: string
 }
 
+/** 运维面板的一次采集快照，字段与 Go 端 sshx.ServerMetrics 一一对应。 */
+export interface ServerMetrics {
+  hostname: string
+  osPretty: string
+  kernel: string
+  uptimeSec: number
+  cores: number
+  cpuPercent: number
+  load1: number
+  load5: number
+  load15: number
+  /** 字节 */
+  memTotal: number
+  /** 字节 */
+  memAvail: number
+  disks: DiskUsage[]
+  procs: ProcInfo[]
+  /** 毫秒时间戳 */
+  collectedAt: number
+}
+
+/** 一个挂载点的用量，字节数 */
+export interface DiskUsage {
+  mount: string
+  total: number
+  used: number
+  usePercent: number
+}
+
+/** 一条进程。rss 是字节数；name 是命令首词的 basename，cmd 是完整命令行。 */
+export interface ProcInfo {
+  pid: number
+  user: string
+  cpu: number
+  mem: number
+  rss: number
+  name: string
+  cmd: string
+}
+
 export interface Tab {
   id: string
   /** ssh 标签对应会话 id；本地终端为 null */

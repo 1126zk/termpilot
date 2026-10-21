@@ -71,6 +71,8 @@ interface AppState {
   editorTabs: EditorTab[]
   /** 正在看的文件。null 表示回到这台机器的终端。 */
   activeEditorKey: string | null
+  /** 运维面板开在哪个终端标签上。null 表示都关着。 */
+  opsPanelTermId: string | null
 
   /** 会话编辑弹窗。host 表示在这台机器下再加一条连接 */
   editing:
@@ -115,6 +117,7 @@ interface AppState {
   onTermMeta: (e: { termId: string; title: string; remark: string }) => void
 
   toggleRightPanel: () => void
+  toggleOpsPanel: (termId: string) => void
   setRightPanelPane: (pane: RightPanelPane) => void
   /** readOnly 不传时沿用已打开标签的模式，新标签默认查看 */
   openRemoteEditor: (
@@ -171,6 +174,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   rightPanelOpen: false,
+  opsPanelTermId: null,
   hostsOpen: false,
   rightPanelPane: 'files',
   search: '',
@@ -400,7 +404,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return false
     })
     const activeEditorKey = editorTabs.some((t) => t.key === get().activeEditorKey) ? get().activeEditorKey : null
-    set({ tabs, activeTabId, termState, editorTabs, activeEditorKey })
+    const opsPanelTermId = get().opsPanelTermId === tabId ? null : get().opsPanelTermId
+    set({ tabs, activeTabId, termState, editorTabs, activeEditorKey, opsPanelTermId })
     // 先断主进程连接，再销毁 xterm 实例
     window.api.term.close(tabId)
     terminalPool.dispose(tabId)
@@ -448,6 +453,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // 面板内容硬性互斥：开文件面板就关掉编辑表单
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen, editing: null }),
+
+  toggleOpsPanel: (termId) =>
+    set({ opsPanelTermId: get().opsPanelTermId === termId ? null : termId }),
 
   toggleHostsOpen: () =>
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),

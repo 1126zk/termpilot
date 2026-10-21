@@ -105,6 +105,7 @@ export const IPC = {
   localfsReadImage: 'localfs:read-image',
   localfsWrite: 'localfs:write',
   sessionDetectOs: 'session:detect-os',
+  sessionMetrics: 'session:metrics',
   sessionSetOs: 'session:set-os',
   sessionRevealSecret: 'session:reveal-secret',
   shellsList: 'shells:list',

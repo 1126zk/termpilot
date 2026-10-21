@@ -178,6 +178,32 @@
   box-shadow: none;
 }
 
+/* 全局滚动条统一成终端那种细条：8px，滑块用边框内缩看着更细，悬停加深。
+   xterm 和 Monaco 有更具体的规则，不受这条影响。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--primary) 40%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--primary) 40%, transparent);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--primary) 70%, transparent);
+  background-clip: padding-box;
+}
+
 /* 终端滚动条：6px 细条，平时透明；host 上有 term-scrolling 时露出，停止滚动 3 秒后由 TerminalPool 摘掉 */
 .xterm .xterm-viewport::-webkit-scrollbar {
   width: 6px;

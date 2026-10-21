@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,22 +53,38 @@ function RestoreIcon() {
 const topBtn =
   'flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40'
 
-/** 自绘窗口控制按钮：最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。面板按钮只在终端页出现。 */
+/** 自绘窗口控制按钮：运维面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。面板按钮只在终端页出现。 */
 function WindowControls(props: { terminalActive: boolean }) {
   const [maximized, setMaximized] = useState(false)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
+  const tabs = useAppStore((s) => s.tabs)
+  const activeTabId = useAppStore((s) => s.activeTabId)
+  const opsPanelTermId = useAppStore((s) => s.opsPanelTermId)
+  const toggleOpsPanel = useAppStore((s) => s.toggleOpsPanel)
 
   useEffect(() => {
     void window.api.win.isMaximized().then(setMaximized)
     return window.api.win.onMaximizeChanged(setMaximized)
   }, [])
 
+  // 运维面板只给 Linux 服务器的 SSH 连接，本地终端和探测不出系统的都没有
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const opsOk = props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
+  const opsOpen = !!activeTab && opsPanelTermId === activeTab.id
+
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
-      <button type="button" className={topBtn} title="新窗口" onClick={() => void window.api.win.newWindow()}>
-        <AppWindow className="size-4" strokeWidth={2} />
-      </button>
+      {opsOk && activeTab && (
+        <button
+          type="button"
+          className={cn(topBtn, opsOpen && 'bg-accent text-foreground')}
+          title={opsOpen ? '返回终端' : '运维面板'}
+          onClick={() => toggleOpsPanel(activeTab.id)}
+        >
+          <Gauge className="size-4" strokeWidth={2} />
+        </button>
+      )}
       {props.terminalActive && (
         <button
           type="button"

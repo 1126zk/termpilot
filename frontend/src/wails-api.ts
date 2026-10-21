@@ -14,6 +14,7 @@ import type {
   RemoteFile,
   SessionConfig,
   SessionInput,
+  ServerMetrics,
   SftpInstallEvent,
   SftpTransferEvent,
   Snippet,
@@ -65,6 +66,7 @@ const api = {
     delete: (id: string) => invoke(IPC.sessionDelete, [id]),
     duplicate: (id: string) => invoke<SessionConfig | null>(IPC.sessionDuplicate, [id]),
     detectOs: (id: string) => invoke<OsInfo>(IPC.sessionDetectOs, [id]),
+    metrics: (id: string) => invoke<ServerMetrics>(IPC.sessionMetrics, [id]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

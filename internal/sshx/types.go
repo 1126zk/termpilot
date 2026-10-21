@@ -73,3 +73,41 @@ type OsInfo struct {
 	OS     string `json:"os"` // "windows" | "linux" | "macos" | "unknown"
 	Distro string `json:"distro,omitempty"`
 }
+
+// ServerMetrics 运维面板的一次采集快照。内存、磁盘都是字节数；
+// 远端某段采集失败时对应字段留零值，只有 exec 通道本身失败才返回 error。
+type ServerMetrics struct {
+	Hostname    string      `json:"hostname"`
+	OsPretty    string      `json:"osPretty"`
+	Kernel      string      `json:"kernel"`
+	UptimeSec   int64       `json:"uptimeSec"`
+	Cores       int         `json:"cores"`
+	CpuPercent  float64     `json:"cpuPercent"`
+	Load1       float64     `json:"load1"`
+	Load5       float64     `json:"load5"`
+	Load15      float64     `json:"load15"`
+	MemTotal    uint64      `json:"memTotal"`
+	MemAvail    uint64      `json:"memAvail"`
+	Disks       []DiskUsage `json:"disks"`
+	Procs       []ProcInfo  `json:"procs"`
+	CollectedAt int64       `json:"collectedAt"` // 毫秒时间戳
+}
+
+// DiskUsage 一个挂载点的用量，字节数。
+type DiskUsage struct {
+	Mount      string  `json:"mount"`
+	Total      uint64  `json:"total"`
+	Used       uint64  `json:"used"`
+	UsePercent float64 `json:"usePercent"`
+}
+
+// ProcInfo 一条进程。Rss 是字节数；Name 是命令首词的 basename，Cmd 是完整命令行。
+type ProcInfo struct {
+	Pid  int     `json:"pid"`
+	User string  `json:"user"`
+	Cpu  float64 `json:"cpu"`
+	Mem  float64 `json:"mem"`
+	Rss  uint64  `json:"rss"`
+	Name string  `json:"name"`
+	Cmd  string  `json:"cmd"`
+}
