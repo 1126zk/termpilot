@@ -109,7 +109,8 @@ interface AppState {
   loadDockerInfo: (sessionId: string, force?: boolean) => void
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
-  setNotice: (notice: string | null) => void
+  /** sticky 为真时不自动消失（长时间任务的进行态），等下一条提示顶掉 */
+  setNotice: (notice: string | null, sticky?: boolean) => void
   deleteSession: (id: string) => Promise<void>
 
   openSessionTab: (session: SessionConfig, fresh?: boolean) => void
@@ -304,10 +305,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSettingsOpen: (open) =>
     set(open ? { settingsOpen: true, hostsOpen: false, rightPanelOpen: false, editing: null } : { settingsOpen: false }),
 
-  setNotice: (notice) => {
+  setNotice: (notice, sticky = false) => {
     if (noticeTimer) clearTimeout(noticeTimer)
     set({ notice })
-    if (notice) noticeTimer = setTimeout(() => set({ notice: null }), 2000)
+    if (notice && !sticky) noticeTimer = setTimeout(() => set({ notice: null }), 2000)
   },
 
   deleteSession: async (id) => {

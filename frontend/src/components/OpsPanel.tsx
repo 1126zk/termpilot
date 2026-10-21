@@ -458,6 +458,7 @@ function DockerSection(props: { sessionId: string }) {
         return
       }
     }
+    if (action === 'save') setNotice(`正在导出 ${name}.tar 到服务器，大镜像要等一会…`, true)
     void window.api.sessions
       .dockerAction(props.sessionId, action, target, name)
       .then((out) => {
@@ -514,7 +515,7 @@ function DockerSection(props: { sessionId: string }) {
                   </Tip>
                 </td>
                 <td className="px-3 py-1.5 text-muted-foreground">
-                  <Tip text={c.ports || '—'}>{c.ports || '—'}</Tip>
+                  <Tip text={formatPorts(c.ports)}>{c.ports || '—'}</Tip>
                 </td>
                 <td className="px-1 py-1.5 text-center">
                   <ActionCell
@@ -618,6 +619,20 @@ function formatCmd(cmd: string): string {
   const parts = cmd.split(/\s+/)
   if (parts.length <= 1) return cmd
   return parts[0] + '\n' + parts.slice(1).map((p) => '  ' + p).join('\n')
+}
+
+/** 端口映射格式化：docker 的 "0.0.0.0:80->80/tcp, [::]:80->80/tcp"
+    拆成每行一条，行首带协议族提示。 */
+function formatPorts(ports: string): string {
+  if (!ports) return '未映射端口'
+  const lines = ports.split(', ').map((m) => {
+    const match = m.match(/^(\S+):(\S+)->(\S+)$/)
+    if (!match) return m
+    const [, ip, hostPort, containerPort] = match
+    const family = ip === '0.0.0.0' ? 'IPv4' : ip === '[::]' ? 'IPv6' : ip
+    return `${family}  ${ip}:${hostPort} → ${containerPort}`
+  })
+  return `端口映射（宿主机 → 容器）\n${lines.join('\n')}`
 }
 
 /** 信息条一项：弱色标签 + 值。值为空不渲染。 */
