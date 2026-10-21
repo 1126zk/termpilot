@@ -80,6 +80,26 @@ func (a *App) hSessionServerInfo(args []interface{}) (interface{}, error) {
 	return a.exec.CollectServerInfo(id)
 }
 
+func (a *App) hSessionKillProc(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	pid, err := arg[int](args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.KillProcess(id, pid)
+}
+
+func (a *App) hSessionDocker(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.CollectDocker(id)
+}
+
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

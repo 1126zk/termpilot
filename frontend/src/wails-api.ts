@@ -3,6 +3,7 @@ import type {
   Appearance,
   CaptureReply,
   CaptureRun,
+  DockerInfo,
   HistoryEntry,
   LocalShellInfo,
   McpAuditEntry,
@@ -69,6 +70,8 @@ const api = {
     detectOs: (id: string) => invoke<OsInfo>(IPC.sessionDetectOs, [id]),
     metrics: (id: string) => invoke<ServerMetrics>(IPC.sessionMetrics, [id]),
     serverInfo: (id: string) => invoke<ServerInfo>(IPC.sessionServerInfo, [id]),
+    killProc: (id: string, pid: number) => invoke<void>(IPC.sessionKillProc, [id, pid]),
+    docker: (id: string) => invoke<DockerInfo>(IPC.sessionDocker, [id]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

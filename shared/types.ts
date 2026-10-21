@@ -100,6 +100,34 @@ export interface ServerInfo {
   wanIp: string
 }
 
+/** 一次 Docker 采集，与 Go 端 sshx.DockerInfo 对应。available 为假表示没装 docker。 */
+export interface DockerInfo {
+  available: boolean
+  containers: DockerContainer[]
+  images: DockerImage[]
+}
+
+export interface DockerContainer {
+  id: string
+  name: string
+  image: string
+  /** running / exited 等原始状态 */
+  state: string
+  /** 人读格式：Up 2 hours / Exited (0) 3 days ago */
+  status: string
+  ports: string
+}
+
+export interface DockerImage {
+  repository: string
+  tag: string
+  id: string
+  /** 人读格式：187MB */
+  size: string
+  /** 人读格式：2 weeks ago */
+  created: string
+}
+
 /** 一个挂载点的用量，字节数 */
 export interface DiskUsage {
   mount: string

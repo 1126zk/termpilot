@@ -102,6 +102,33 @@ type ServerInfo struct {
 	WanIp    string   `json:"wanIp"`
 }
 
+// DockerInfo 一次 Docker 采集。Available 为假表示服务器没装 docker。
+type DockerInfo struct {
+	Available  bool              `json:"available"`
+	Containers []DockerContainer `json:"containers"`
+	Images     []DockerImage     `json:"images"`
+}
+
+// DockerContainer 一个容器。State 是 running/exited 等原始状态，Status 是给人看的
+// （Up 2 hours / Exited (0) 3 days ago）。
+type DockerContainer struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	State  string `json:"state"`
+	Status string `json:"status"`
+	Ports  string `json:"ports"`
+}
+
+// DockerImage 一个镜像。Size、Created 直接用 docker 的人读格式（187MB、2 weeks ago）。
+type DockerImage struct {
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	ID         string `json:"id"`
+	Size       string `json:"size"`
+	Created    string `json:"created"`
+}
+
 // DiskUsage 一个挂载点的用量，字节数。
 type DiskUsage struct {
 	Mount      string  `json:"mount"`

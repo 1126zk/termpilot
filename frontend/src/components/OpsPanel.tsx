@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import type { ServerMetrics } from '../../../shared/types'
+import { RefreshCw, X } from 'lucide-react'
+import type { DockerInfo, ProcInfo, ServerMetrics } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { terminalPool } from '../terminal/TerminalPool'
 import { useAppStore } from '../stores/useAppStore'
 
@@ -46,6 +48,27 @@ export function OpsPanel() {
   // 终端是主角，吃剩余空间；左栏信息区固定宽度，默认就是最窄宽度，用分隔条加宽
   const [leftWidth, setLeftWidth] = useState(520)
   const containerRef = useRef<HTMLDivElement>(null)
+  const setNotice = useAppStore((s) => s.setNotice)
+  // 两个榜各先显示 5 个，可展开到 10 个
+  const [cpuShown, setCpuShown] = useState(5)
+  const [memShown, setMemShown] = useState(5)
+  // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
+  const [confirmKill, setConfirmKill] = useState<number | null>(null)
+  // 内容区选项卡：进程 / Docker，以后再加
+  const [opsTab, setOpsTab] = useState<'proc' | 'docker'>('proc')
+
+  const killProc = (pid: number) => {
+    if (confirmKill !== pid) {
+      setConfirmKill(pid)
+      window.setTimeout(() => setConfirmKill((cur) => (cur === pid ? null : cur)), 3000)
+      return
+    }
+    setConfirmKill(null)
+    if (!sessionId) return
+    void window.api.sessions.killProc(sessionId, pid).catch((e) => {
+      setNotice(e instanceof Error ? e.message : String(e))
+    })
+  }
 
   // 按住分隔条左右拖：左栏在 520 ~（容器宽 - 240，给终端保底）之间调整
   const startDrag = (e: ReactPointerEvent) => {
@@ -102,6 +125,9 @@ export function OpsPanel() {
   const memPercent = metrics && metrics.memTotal > 0 ? (memUsed / metrics.memTotal) * 100 : 0
   const rootDisk = metrics?.disks.find((d) => d.mount === '/') ?? metrics?.disks[0] ?? null
   const loadPercent = metrics && metrics.cores > 0 ? (metrics.load1 / metrics.cores) * 100 : 0
+  // Go 端给的是 CPU top30 ∪ 内存 top30 的合集，两个榜各自排序取用
+  const cpuProcs = metrics ? [...metrics.procs].sort((a, b) => b.cpu - a.cpu) : []
+  const memProcs = metrics ? [...metrics.procs].sort((a, b) => b.mem - a.mem) : []
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1">
@@ -111,7 +137,7 @@ export function OpsPanel() {
         style={{ width: leftWidth }}
       >
         {metrics ? (
-          <div className="flex flex-col gap-0.5 text-xs">
+          <div className="flex flex-col gap-0.5 text-sm">
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
               <InfoItem label="主机名" value={serverInfo?.hostname ?? '…'} />
               <InfoItem label="系统" value={serverInfo?.osPretty ?? '…'} />
@@ -124,9 +150,9 @@ export function OpsPanel() {
             </div>
           </div>
         ) : (
-          !error && <div className="text-xs text-muted-foreground">正在采集…</div>
+          !error && <div className="text-sm text-muted-foreground">正在采集…</div>
         )}
-        {error && <p className="text-xs text-destructive">采集失败：{error}</p>}
+        {error && <p className="text-sm text-destructive">采集失败：{error}</p>}
 
         {metrics && (
           <>
@@ -165,46 +191,53 @@ export function OpsPanel() {
               </Ring>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
-              {/* 定宽列给死窄宽度，剩下的全给命令列，长命令能多看一截 */}
-              <table className="w-full table-fixed text-xs">
-                <thead className="sticky top-0 bg-background">
-                  <tr className="border-b text-muted-foreground">
-                    <th className="w-20 px-3 py-2 text-right font-medium">PID</th>
-                    <th className="w-20 px-3 py-2 text-left font-medium">USER</th>
-                    <th className="w-16 px-3 py-2 text-right font-medium">%CPU</th>
-                    <th className="w-16 px-3 py-2 text-right font-medium">%MEM</th>
-                    <th className="w-16 px-3 py-2 text-right font-medium">RSS</th>
-                    <th className="px-3 py-2 text-left font-medium">命令</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {metrics.procs.map((p) => (
-                    <tr key={p.pid} className="border-b border-border/50 last:border-0">
-                      <td className="px-3 py-1.5 text-right tabular-nums">{p.pid}</td>
-                      <td className="max-w-24 truncate px-3 py-1.5">{p.user}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{p.cpu.toFixed(1)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{p.mem.toFixed(1)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{formatRss(p.rss)}</td>
-                      <td className="max-w-0 truncate px-3 py-1.5 text-muted-foreground" title={p.cmd}>
-                        {p.cmd}
-                      </td>
-                    </tr>
-                  ))}
-                  {metrics.procs.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
-                        没有采集到进程
-                      </td>
-                    </tr>
+            {/* 内容切换：进程 / Docker，以后加网络/服务/日志等 */}
+            <div className="flex items-center gap-1 text-sm">
+              {([
+                ['proc', '进程'],
+                ['docker', 'Docker']
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={cn(
+                    'rounded-md px-2.5 py-1',
+                    opsTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
                   )}
-                </tbody>
-              </table>
+                  onClick={() => setOpsTab(key)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+
+            {opsTab === 'proc' ? (
+              <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+                <ProcSection
+                  title="CPU 占用最高"
+                  procs={cpuProcs}
+                  shown={cpuShown}
+                  onToggle={() => setCpuShown(cpuShown === 5 ? 10 : 5)}
+                  confirmKill={confirmKill}
+                  onKill={killProc}
+                />
+                <ProcSection
+                  title="内存占用最高"
+                  procs={memProcs}
+                  shown={memShown}
+                  onToggle={() => setMemShown(memShown === 5 ? 10 : 5)}
+                  confirmKill={confirmKill}
+                  onKill={killProc}
+                  divider
+                />
+              </div>
+            ) : (
+              <DockerSection sessionId={sessionId} />
+            )}
           </>
         )}
       </div>
-      {/* 分隔条：按住左右拖，调整右侧终端栏宽度 */}
+      {/* 分隔条：按住左右拖，调整左侧信息区宽度 */}
       <div
         className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
         onPointerDown={startDrag}
@@ -255,6 +288,227 @@ function OpsTerminal(props: { sessionId: string }) {
   return <div ref={ref} className="min-h-0 flex-1 p-1" style={{ background: 'var(--terminal-background)' }} />
 }
 
+/** 进程榜一节：标题栏（含展开/收起）+ 前 N 名表格。杀进程按钮两步确认。
+    高度跟着内容走，卡片外壳和滚动由父级统一提供，divider 给第二节加分隔线。 */
+function ProcSection(props: {
+  title: string
+  procs: ProcInfo[]
+  shown: number
+  onToggle: () => void
+  confirmKill: number | null
+  onKill: (pid: number) => void
+  divider?: boolean
+}) {
+  const list = props.procs.slice(0, props.shown)
+  return (
+    <div>
+      <div
+        className={cn(
+          'flex items-center justify-between border-b bg-accent/40 px-3 py-1.5',
+          props.divider && 'border-t'
+        )}
+      >
+        <span className="text-sm text-muted-foreground">{props.title}</span>
+        {props.procs.length > 5 && (
+          <button
+            type="button"
+            className="text-sm text-muted-foreground hover:text-foreground"
+            onClick={props.onToggle}
+          >
+            {props.shown === 5 ? '展开到 10 个' : '收起'}
+          </button>
+        )}
+      </div>
+      <div>
+        {/* 定宽列给死窄宽度，剩下的全给命令列，长命令能多看一截 */}
+        <table className="w-full table-fixed text-sm">
+          <thead className="sticky top-0 bg-background">
+            <tr className="border-b text-muted-foreground">
+              <th className="w-20 px-3 py-1.5 text-right font-medium">PID</th>
+              <th className="w-20 px-3 py-1.5 text-left font-medium">USER</th>
+              <th className="w-16 px-3 py-1.5 text-right font-medium">%CPU</th>
+              <th className="w-16 px-3 py-1.5 text-right font-medium">%MEM</th>
+              <th className="w-16 px-3 py-1.5 text-right font-medium">RSS</th>
+              <th className="px-3 py-1.5 text-left font-medium">命令</th>
+              <th className="w-10 px-1 py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((p) => (
+              <tr key={p.pid} className="border-b border-border/50 last:border-0">
+                <td className="px-3 py-1.5 text-right tabular-nums">{p.pid}</td>
+                <td className="truncate px-3 py-1.5">{p.user}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{p.cpu.toFixed(1)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{p.mem.toFixed(1)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{formatRss(p.rss)}</td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  <Tip text={formatCmd(p.cmd)}>{p.cmd}</Tip>
+                </td>
+                <td className="px-1 py-1.5 text-center">
+                  <button
+                    type="button"
+                    title={props.confirmKill === p.pid ? '再点一次确认杀死' : '杀死进程（SIGTERM）'}
+                    className={cn(
+                      'inline-flex h-6 min-w-6 items-center justify-center rounded px-0.5 text-sm',
+                      props.confirmKill === p.pid
+                        ? 'bg-destructive/15 text-destructive'
+                        : 'text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive'
+                    )}
+                    onClick={() => props.onKill(p.pid)}
+                  >
+                    {props.confirmKill === p.pid ? '确认' : <X className="size-3.5" />}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {list.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                  没有采集到进程
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/** Docker 页：一个大卡片，上容器下镜像，中间分隔线。结果走 store 缓存，
+    切进来先显示缓存；页面开着每 15 秒后台更新，右上角图标手动刷新。 */
+function DockerSection(props: { sessionId: string }) {
+  const cached = useAppStore((s) => s.dockerBySession[props.sessionId])
+  const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
+
+  useEffect(() => {
+    loadDockerInfo(props.sessionId)
+    const timer = window.setInterval(() => loadDockerInfo(props.sessionId), 15000)
+    return () => window.clearInterval(timer)
+  }, [props.sessionId, loadDockerInfo])
+
+  const info = cached?.info ?? null
+  if (!info) {
+    return <div className="text-sm text-muted-foreground">正在采集…</div>
+  }
+  if (!info.available) {
+    return <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker</div>
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+      <div className="flex items-center justify-between border-b bg-accent/40 px-3 py-1.5">
+        <span className="text-sm text-muted-foreground">容器</span>
+        <button
+          type="button"
+          title="刷新"
+          className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          onClick={() => loadDockerInfo(props.sessionId, true)}
+        >
+          <RefreshCw className="size-3" />
+        </button>
+      </div>
+      <div>
+        <table className="w-full table-fixed text-sm">
+          <thead className="sticky top-0 bg-background">
+            <tr className="border-b text-muted-foreground">
+              <th className="w-28 px-3 py-1.5 text-left font-medium">名称</th>
+              <th className="px-3 py-1.5 text-left font-medium">镜像</th>
+              <th className="w-28 px-3 py-1.5 text-left font-medium">状态</th>
+              <th className="w-32 px-3 py-1.5 text-left font-medium">端口</th>
+            </tr>
+          </thead>
+          <tbody>
+            {info.containers.map((c) => (
+              <tr key={c.id} className="border-b border-border/50 last:border-0">
+                <td className="px-3 py-1.5">
+                  <Tip text={c.name}>{c.name}</Tip>
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  <Tip text={c.image}>{c.image}</Tip>
+                </td>
+                <td className="px-3 py-1.5">
+                  <Tip text={c.status}>
+                    <span className={c.state === 'running' ? 'text-primary' : 'text-muted-foreground'}>
+                      {c.status}
+                    </span>
+                  </Tip>
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  <Tip text={c.ports || '—'}>{c.ports || '—'}</Tip>
+                </td>
+              </tr>
+            ))}
+            {info.containers.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                  没有容器
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="border-y bg-accent/40 px-3 py-1.5 text-sm text-muted-foreground">镜像</div>
+      <div>
+        <table className="w-full table-fixed text-sm">
+          <thead className="sticky top-0 bg-background">
+            <tr className="border-b text-muted-foreground">
+              <th className="px-3 py-1.5 text-left font-medium">仓库</th>
+              <th className="w-20 px-3 py-1.5 text-left font-medium">标签</th>
+              <th className="w-20 px-3 py-1.5 text-right font-medium">大小</th>
+              <th className="w-28 px-3 py-1.5 text-left font-medium">创建</th>
+            </tr>
+          </thead>
+          <tbody>
+            {info.images.map((im) => (
+              <tr key={`${im.repository}:${im.tag}@${im.id}`} className="border-b border-border/50 last:border-0">
+                <td className="px-3 py-1.5">
+                  <Tip text={im.repository}>{im.repository}</Tip>
+                </td>
+                <td className="truncate px-3 py-1.5 text-muted-foreground">{im.tag}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{im.size}</td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  <Tip text={im.created}>{im.created}</Tip>
+                </td>
+              </tr>
+            ))}
+            {info.images.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                  没有镜像
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/** 截断文本的悬停提示，替代丑陋的原生 title：主题色浮层、下方弹出、零延迟。 */
+function Tip(props: { text: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="block cursor-default truncate">{props.children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" sideOffset={4} className="max-w-md break-words whitespace-pre-wrap">
+        {props.text}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** 命令行格式化：程序路径一行，每个参数独占一行并缩进，比一坨硬折行好读。 */
+function formatCmd(cmd: string): string {
+  const parts = cmd.split(/\s+/)
+  if (parts.length <= 1) return cmd
+  return parts[0] + '\n' + parts.slice(1).map((p) => '  ' + p).join('\n')
+}
+
 /** 信息条一项：弱色标签 + 值。值为空不渲染。 */
 function InfoItem(props: { label: string; value: string }) {
   if (!props.value) return null
@@ -266,7 +520,8 @@ function InfoItem(props: { label: string; value: string }) {
   )
 }
 
-/** 环形进度：圆环弧度=百分比，中间放数值，≥85% 变红。hover 弹出细节浮层。 */function Ring(props: { label: string; percent: number; center: string; children: ReactNode }) {
+/** 环形进度：圆环弧度=百分比，中间放数值，≥85% 变红。hover 弹出细节浮层。 */
+function Ring(props: { label: string; percent: number; center: string; children: ReactNode }) {
   const hot = props.percent >= 85
   const r = 26
   const c = 2 * Math.PI * r
@@ -290,16 +545,16 @@ function InfoItem(props: { label: string; value: string }) {
           </svg>
           <div
             className={cn(
-              'absolute inset-0 flex items-center justify-center text-[11px] font-semibold tabular-nums',
+              'absolute inset-0 flex items-center justify-center text-sm font-semibold tabular-nums',
               hot && 'text-destructive'
             )}
           >
             {props.center}
           </div>
         </div>
-        <div className="text-xs text-muted-foreground">{props.label}</div>
+        <div className="text-sm text-muted-foreground">{props.label}</div>
       </div>
-      <div className="invisible absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 rounded-lg border bg-popover px-3 py-2 text-xs whitespace-nowrap shadow-md group-hover:visible">
+      <div className="invisible absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 rounded-lg border bg-popover px-3 py-2 text-sm whitespace-nowrap shadow-md group-hover:visible">
         {props.children}
       </div>
     </div>

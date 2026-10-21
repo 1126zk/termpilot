@@ -3,6 +3,7 @@ import {
   MCP_DEFAULT_PORT,
   unifiedTheme,
   type Appearance,
+  type DockerInfo,
   type LocalShell,
   type LocalShellInfo,
   type McpOpenTab,
@@ -53,6 +54,8 @@ interface AppState {
   localShells: LocalShellInfo[]
   /** 服务器静态身份缓存（主机名/系统/内核/IP），按会话存，带采集时间戳 */
   serverInfoBySession: Record<string, { info: ServerInfo; at: number }>
+  /** Docker 采集缓存，按会话存。at 在采集开始时就写，兼作在途标记 */
+  dockerBySession: Record<string, { info: DockerInfo | null; at: number }>
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
   hostNotes: Record<string, string>
   sessionStatus: Record<string, SessionStatus>
@@ -102,6 +105,8 @@ interface AppState {
   onSessionsChanged: (sessions: SessionConfig[]) => void
   /** 取服务器静态身份：有缓存且 10 分钟内就直接用，否则重新采一次 */
   loadServerInfo: (sessionId: string) => void
+  /** 取 Docker 列表：15 秒内有缓存（含在途）就直接用，force 强制重采 */
+  loadDockerInfo: (sessionId: string, force?: boolean) => void
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setNotice: (notice: string | null) => void
@@ -174,6 +179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessions: [],
   localShells: [],
   serverInfoBySession: {},
+  dockerBySession: {},
   hostNotes: {},
   sessionStatus: {},
   termState: {},
@@ -277,6 +283,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           serverInfoBySession: { ...get().serverInfoBySession, [sessionId]: { info, at: Date.now() } }
         })
+      )
+      .catch(() => undefined)
+  },
+
+  loadDockerInfo: (sessionId, force = false) => {
+    const cached = get().dockerBySession[sessionId]
+    const now = Date.now()
+    // at 开始时就写：15 秒内的重复调用（含还在跑的）都跳过
+    if (!force && cached && now - cached.at < 15 * 1000) return
+    set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info: cached?.info ?? null, at: now } } })
+    void window.api.sessions
+      .docker(sessionId)
+      .then((info) =>
+        set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info, at: Date.now() } } })
       )
       .catch(() => undefined)
   },

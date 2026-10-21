@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -175,7 +176,7 @@ func parseDf(text string) []DiskUsage {
 
 // parsePs 解析 ps aux（procps 与 busybox 同列序）：
 // USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND，COMMAND 从第 11 列起拼接。
-// 按 %CPU 降序留前 30，面板只看最吃资源的。
+// 按 %CPU 和 %MEM 各留前 30 再合并去重：面板一节看 CPU 一节看内存，只按一种排会漏另一种。
 func parsePs(text string) []ProcInfo {
 	procs := []ProcInfo{}
 	for _, line := range strings.Split(text, "\n") {
@@ -204,11 +205,40 @@ func parsePs(text string) []ProcInfo {
 			Cmd:  strings.Join(fields[10:], " "),
 		})
 	}
-	sort.SliceStable(procs, func(i, j int) bool { return procs[i].Cpu > procs[j].Cpu })
-	if len(procs) > 30 {
-		procs = procs[:30]
+	top := func(more func(a, b ProcInfo) bool) []ProcInfo {
+		sorted := make([]ProcInfo, len(procs))
+		copy(sorted, procs)
+		sort.SliceStable(sorted, func(i, j int) bool { return more(sorted[i], sorted[j]) })
+		if len(sorted) > 30 {
+			sorted = sorted[:30]
+		}
+		return sorted
 	}
-	return procs
+	seen := map[int]bool{}
+	merged := []ProcInfo{}
+	for _, p := range top(func(a, b ProcInfo) bool { return a.Cpu > b.Cpu }) {
+		seen[p.Pid] = true
+		merged = append(merged, p)
+	}
+	for _, p := range top(func(a, b ProcInfo) bool { return a.Mem > b.Mem }) {
+		if !seen[p.Pid] {
+			merged = append(merged, p)
+		}
+	}
+	return merged
+}
+
+// KillProcess 给远端进程发 SIGTERM（温和杀）。面板杀进程按钮用；
+// 通道失败或对端拒绝（权限不够等）都返回 error。
+func (s *ExecService) KillProcess(sessionID string, pid int) error {
+	res, err := s.Exec(sessionID, ExecOptions{Command: "kill " + strconv.Itoa(pid), TimeoutMs: 5000})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("kill 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
 }
 
 // serverInfoScript 一次性采集静态身份：主机名、系统、内核、内网 IPv4、外网出口 IP。
