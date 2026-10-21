@@ -100,6 +100,23 @@ func (a *App) hSessionDocker(args []interface{}) (interface{}, error) {
 	return a.exec.CollectDocker(id)
 }
 
+func (a *App) hSessionDockerAction(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	action, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	target, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	name, _ := argStr(args, 3) // save 导出文件名用，可空
+	return a.exec.DockerAction(id, action, target, name)
+}
+
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

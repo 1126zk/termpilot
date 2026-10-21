@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { RefreshCw, X } from 'lucide-react'
+import { MoreHorizontal, RefreshCw, X } from 'lucide-react'
 import type { DockerInfo, ProcInfo, ServerMetrics } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { terminalPool } from '../terminal/TerminalPool'
 import { useAppStore } from '../stores/useAppStore'
 
@@ -136,105 +142,121 @@ export function OpsPanel() {
         className="flex shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
         style={{ width: leftWidth }}
       >
-        {metrics ? (
-          <div className="flex flex-col gap-0.5 text-sm">
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
-              <InfoItem label="主机名" value={serverInfo?.hostname ?? '…'} />
-              <InfoItem label="系统" value={serverInfo?.osPretty ?? '…'} />
-              <InfoItem label="内核" value={serverInfo?.kernel ?? '…'} />
-            </div>
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
-              {metrics.uptimeSec > 0 && <InfoItem label="已运行" value={formatUptime(metrics.uptimeSec)} />}
-              <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '…'} />
-              <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '…'} />
-            </div>
+        {/* 信息条：没采到的用 — 占位，有缓存的直接显示，不等第一笔数据 */}
+        <div className="flex flex-col gap-0.5 text-sm">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
+            <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} />
+            <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} />
+            <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} />
           </div>
-        ) : (
-          !error && <div className="text-sm text-muted-foreground">正在采集…</div>
-        )}
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
+            <InfoItem
+              label="已运行"
+              value={metrics && metrics.uptimeSec > 0 ? formatUptime(metrics.uptimeSec) : '—'}
+            />
+            <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '—'} />
+            <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '—'} />
+          </div>
+        </div>
         {error && <p className="text-sm text-destructive">采集失败：{error}</p>}
 
-        {metrics && (
-          <>
-            <div className="flex items-start gap-6 px-1">
-              <Ring label="CPU" percent={metrics.cpuPercent} center={`${metrics.cpuPercent.toFixed(0)}%`}>
+        <div className="flex items-start gap-6 px-1">
+          <Ring label="CPU" percent={metrics?.cpuPercent ?? 0} center={metrics ? `${metrics.cpuPercent.toFixed(0)}%` : '—'}>
+            {metrics ? (
+              <>
                 <div>使用率 {metrics.cpuPercent.toFixed(1)}%</div>
                 <div className="text-muted-foreground">{metrics.cores} 核</div>
-              </Ring>
-              <Ring label="内存" percent={memPercent} center={`${memPercent.toFixed(0)}%`}>
+              </>
+            ) : (
+              <div className="text-muted-foreground">—</div>
+            )}
+          </Ring>
+          <Ring label="内存" percent={memPercent} center={metrics ? `${memPercent.toFixed(0)}%` : '—'}>
+            {metrics ? (
+              <>
                 <div>
                   {formatBytes(memUsed)} / {formatBytes(metrics.memTotal)}
                 </div>
                 <div className="text-muted-foreground">已用 {memPercent.toFixed(1)}%</div>
-              </Ring>
-              <Ring
-                label={rootDisk ? `磁盘 ${rootDisk.mount}` : '磁盘'}
-                percent={rootDisk?.usePercent ?? 0}
-                center={rootDisk ? `${rootDisk.usePercent.toFixed(0)}%` : '—'}
-              >
-                {rootDisk ? (
-                  <>
-                    <div>
-                      {formatBytes(rootDisk.used)} / {formatBytes(rootDisk.total)}
-                    </div>
-                    <div className="text-muted-foreground">挂载点 {rootDisk.mount} · 已用 {rootDisk.usePercent.toFixed(1)}%</div>
-                  </>
-                ) : (
-                  <div className="text-muted-foreground">没有采集到</div>
-                )}
-              </Ring>
-              <Ring label="负载" percent={loadPercent} center={metrics.load1.toFixed(2)}>
+              </>
+            ) : (
+              <div className="text-muted-foreground">—</div>
+            )}
+          </Ring>
+          <Ring
+            label={rootDisk ? `磁盘 ${rootDisk.mount}` : '磁盘'}
+            percent={rootDisk?.usePercent ?? 0}
+            center={rootDisk ? `${rootDisk.usePercent.toFixed(0)}%` : '—'}
+          >
+            {rootDisk ? (
+              <>
+                <div>
+                  {formatBytes(rootDisk.used)} / {formatBytes(rootDisk.total)}
+                </div>
+                <div className="text-muted-foreground">挂载点 {rootDisk.mount} · 已用 {rootDisk.usePercent.toFixed(1)}%</div>
+              </>
+            ) : (
+              <div className="text-muted-foreground">—</div>
+            )}
+          </Ring>
+          <Ring label="负载" percent={loadPercent} center={metrics ? metrics.load1.toFixed(2) : '—'}>
+            {metrics ? (
+              <>
                 <div>
                   {metrics.load1.toFixed(2)} · {metrics.load5.toFixed(2)} · {metrics.load15.toFixed(2)}
                 </div>
                 <div className="text-muted-foreground">1 / 5 / 15 分钟 · {metrics.cores} 核</div>
-              </Ring>
-            </div>
-
-            {/* 内容切换：进程 / Docker，以后加网络/服务/日志等 */}
-            <div className="flex items-center gap-1 text-sm">
-              {([
-                ['proc', '进程'],
-                ['docker', 'Docker']
-              ] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={cn(
-                    'rounded-md px-2.5 py-1',
-                    opsTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
-                  )}
-                  onClick={() => setOpsTab(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {opsTab === 'proc' ? (
-              <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
-                <ProcSection
-                  title="CPU 占用最高"
-                  procs={cpuProcs}
-                  shown={cpuShown}
-                  onToggle={() => setCpuShown(cpuShown === 5 ? 10 : 5)}
-                  confirmKill={confirmKill}
-                  onKill={killProc}
-                />
-                <ProcSection
-                  title="内存占用最高"
-                  procs={memProcs}
-                  shown={memShown}
-                  onToggle={() => setMemShown(memShown === 5 ? 10 : 5)}
-                  confirmKill={confirmKill}
-                  onKill={killProc}
-                  divider
-                />
-              </div>
+              </>
             ) : (
-              <DockerSection sessionId={sessionId} />
+              <div className="text-muted-foreground">—</div>
             )}
-          </>
+          </Ring>
+        </div>
+
+        {/* 内容切换：进程 / Docker，以后加网络/服务/日志等 */}
+        <div className="flex items-center gap-1 text-sm">
+          {([
+            ['proc', '进程'],
+            ['docker', 'Docker']
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={cn(
+                'rounded-md px-2.5 py-1',
+                opsTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+              onClick={() => setOpsTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {opsTab === 'proc' ? (
+          <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+            <ProcSection
+              title="CPU 占用最高"
+              procs={cpuProcs}
+              shown={cpuShown}
+              onToggle={() => setCpuShown(cpuShown === 5 ? 10 : 5)}
+              confirmKill={confirmKill}
+              onKill={killProc}
+              loaded={metrics !== null}
+            />
+            <ProcSection
+              title="内存占用最高"
+              procs={memProcs}
+              shown={memShown}
+              onToggle={() => setMemShown(memShown === 5 ? 10 : 5)}
+              confirmKill={confirmKill}
+              onKill={killProc}
+              loaded={metrics !== null}
+              divider
+            />
+          </div>
+        ) : (
+          <DockerSection sessionId={sessionId} />
         )}
       </div>
       {/* 分隔条：按住左右拖，调整左侧信息区宽度 */}
@@ -297,6 +319,8 @@ function ProcSection(props: {
   onToggle: () => void
   confirmKill: number | null
   onKill: (pid: number) => void
+  /** 第一笔数据还没回来时是 false，空表先不显示「没有采集到」 */
+  loaded: boolean
   divider?: boolean
 }) {
   const list = props.procs.slice(0, props.shown)
@@ -361,7 +385,7 @@ function ProcSection(props: {
                 </td>
               </tr>
             ))}
-            {list.length === 0 && (
+            {props.loaded && list.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
                   没有采集到进程
@@ -375,11 +399,44 @@ function ProcSection(props: {
   )
 }
 
+/** 操作列单元格：平时是 ⋯ 下拉菜单；删除被选过后变成红色「确认」按钮，点了才真删。 */
+function ActionCell(props: { confirming: boolean; onConfirm: () => void; children: ReactNode }) {
+  if (props.confirming) {
+    return (
+      <button
+        type="button"
+        title="再点一次确认删除"
+        className="inline-flex h-6 min-w-6 items-center justify-center rounded bg-destructive/15 px-1 text-sm text-destructive"
+        onClick={props.onConfirm}
+      >
+        确认
+      </button>
+    )
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title="操作"
+          className="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-accent hover:text-foreground"
+        >
+          <MoreHorizontal className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">{props.children}</DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 /** Docker 页：一个大卡片，上容器下镜像，中间分隔线。结果走 store 缓存，
     切进来先显示缓存；页面开着每 15 秒后台更新，右上角图标手动刷新。 */
 function DockerSection(props: { sessionId: string }) {
   const cached = useAppStore((s) => s.dockerBySession[props.sessionId])
   const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
+  const setNotice = useAppStore((s) => s.setNotice)
+  // 删除两步确认：菜单里点了删除，该行 ⋯ 变成红色「确认」，3 秒不点恢复
+  const [confirmDel, setConfirmDel] = useState<{ action: string; id: string } | null>(null)
 
   useEffect(() => {
     loadDockerInfo(props.sessionId)
@@ -387,13 +444,34 @@ function DockerSection(props: { sessionId: string }) {
     return () => window.clearInterval(timer)
   }, [props.sessionId, loadDockerInfo])
 
-  const info = cached?.info ?? null
-  if (!info) {
-    return <div className="text-sm text-muted-foreground">正在采集…</div>
+  const act = (action: string, target: string, name = '') => {
+    const destructive = action === 'rm' || action === 'rmi'
+    if (destructive) {
+      if (confirmDel?.action === action && confirmDel.id === target) {
+        setConfirmDel(null)
+      } else {
+        setConfirmDel({ action, id: target })
+        window.setTimeout(
+          () => setConfirmDel((cur) => (cur?.action === action && cur.id === target ? null : cur)),
+          3000
+        )
+        return
+      }
+    }
+    void window.api.sessions
+      .dockerAction(props.sessionId, action, target, name)
+      .then((out) => {
+        if (action === 'save' && out) setNotice(`已导出到服务器 ${out}，从文件面板下载`)
+        loadDockerInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
   }
-  if (!info.available) {
+
+  const info = cached?.info ?? null
+  if (info && !info.available) {
     return <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker</div>
   }
+  // 没缓存也直接渲染卡片，表格先空着，第一笔数据到了填上
 
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
@@ -412,14 +490,15 @@ function DockerSection(props: { sessionId: string }) {
         <table className="w-full table-fixed text-sm">
           <thead className="sticky top-0 bg-background">
             <tr className="border-b text-muted-foreground">
-              <th className="w-28 px-3 py-1.5 text-left font-medium">名称</th>
-              <th className="px-3 py-1.5 text-left font-medium">镜像</th>
-              <th className="w-28 px-3 py-1.5 text-left font-medium">状态</th>
-              <th className="w-32 px-3 py-1.5 text-left font-medium">端口</th>
+              <th className="w-[18%] px-3 py-1.5 text-left font-medium">名称</th>
+              <th className="w-[30%] px-3 py-1.5 text-left font-medium">镜像</th>
+              <th className="w-[24%] px-3 py-1.5 text-left font-medium">状态</th>
+              <th className="w-[18%] px-3 py-1.5 text-left font-medium">端口</th>
+              <th className="w-10 px-1 py-1.5" />
             </tr>
           </thead>
           <tbody>
-            {info.containers.map((c) => (
+            {(info?.containers ?? []).map((c) => (
               <tr key={c.id} className="border-b border-border/50 last:border-0">
                 <td className="px-3 py-1.5">
                   <Tip text={c.name}>{c.name}</Tip>
@@ -437,11 +516,29 @@ function DockerSection(props: { sessionId: string }) {
                 <td className="px-3 py-1.5 text-muted-foreground">
                   <Tip text={c.ports || '—'}>{c.ports || '—'}</Tip>
                 </td>
+                <td className="px-1 py-1.5 text-center">
+                  <ActionCell
+                    confirming={confirmDel?.action === 'rm' && confirmDel.id === c.id}
+                    onConfirm={() => act('rm', c.id)}
+                  >
+                    {c.state === 'running' ? (
+                      <>
+                        <DropdownMenuItem onSelect={() => act('stop', c.id)}>停止</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => act('restart', c.id)}>重启</DropdownMenuItem>
+                      </>
+                    ) : (
+                      <DropdownMenuItem onSelect={() => act('start', c.id)}>启动</DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem variant="destructive" onSelect={() => act('rm', c.id)}>
+                      删除
+                    </DropdownMenuItem>
+                  </ActionCell>
+                </td>
               </tr>
             ))}
-            {info.containers.length === 0 && (
+            {info && info.containers.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
                   没有容器
                 </td>
               </tr>
@@ -455,14 +552,15 @@ function DockerSection(props: { sessionId: string }) {
         <table className="w-full table-fixed text-sm">
           <thead className="sticky top-0 bg-background">
             <tr className="border-b text-muted-foreground">
-              <th className="px-3 py-1.5 text-left font-medium">仓库</th>
-              <th className="w-20 px-3 py-1.5 text-left font-medium">标签</th>
-              <th className="w-20 px-3 py-1.5 text-right font-medium">大小</th>
-              <th className="w-28 px-3 py-1.5 text-left font-medium">创建</th>
+              <th className="w-[38%] px-3 py-1.5 text-left font-medium">仓库</th>
+              <th className="w-[14%] px-3 py-1.5 text-left font-medium">标签</th>
+              <th className="w-[14%] px-3 py-1.5 text-right font-medium">大小</th>
+              <th className="w-[24%] px-3 py-1.5 text-left font-medium">创建</th>
+              <th className="w-10 px-1 py-1.5" />
             </tr>
           </thead>
           <tbody>
-            {info.images.map((im) => (
+            {(info?.images ?? []).map((im) => (
               <tr key={`${im.repository}:${im.tag}@${im.id}`} className="border-b border-border/50 last:border-0">
                 <td className="px-3 py-1.5">
                   <Tip text={im.repository}>{im.repository}</Tip>
@@ -472,11 +570,24 @@ function DockerSection(props: { sessionId: string }) {
                 <td className="px-3 py-1.5 text-muted-foreground">
                   <Tip text={im.created}>{im.created}</Tip>
                 </td>
+                <td className="px-1 py-1.5 text-center">
+                  <ActionCell
+                    confirming={confirmDel?.action === 'rmi' && confirmDel.id === im.id}
+                    onConfirm={() => act('rmi', im.id)}
+                  >
+                    <DropdownMenuItem onSelect={() => act('save', im.id, `${im.repository}_${im.tag}`)}>
+                      导出
+                    </DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onSelect={() => act('rmi', im.id)}>
+                      删除
+                    </DropdownMenuItem>
+                  </ActionCell>
+                </td>
               </tr>
             ))}
-            {info.images.length === 0 && (
+            {info && info.images.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
                   没有镜像
                 </td>
               </tr>

@@ -2,6 +2,8 @@ package sshx
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -81,4 +83,48 @@ func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 		})
 	}
 	return info, nil
+}
+
+// dockerIDRe 容器/镜像 id 只接受十六进制（sha256: 前缀先剥掉），防命令注入。
+var dockerIDRe = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
+
+// dockerNameRe 导出文件名只留字母数字和 ._-，其余折叠成下划线。
+var dockerNameRe = regexp.MustCompile(`[^\w.-]+`)
+
+// DockerAction 对容器/镜像执行动作。action 只认白名单里的子命令；save 把镜像
+// 导出到远端 $HOME 下（下载走文件面板），返回导出文件的绝对路径，其他动作返回空串。
+func (s *ExecService) DockerAction(sessionID, action, target, name string) (string, error) {
+	target = strings.TrimPrefix(target, "sha256:")
+	if !dockerIDRe.MatchString(target) {
+		return "", fmt.Errorf("非法的 id：%q", target)
+	}
+	timeoutMs := 15000
+	var cmd string
+	switch action {
+	case "start", "stop", "restart", "rmi":
+		cmd = "docker " + action + " " + target
+	case "rm":
+		// 运行中的容器也能删，面板操作就不用先停了
+		cmd = "docker rm -f " + target
+	case "save":
+		base := dockerNameRe.ReplaceAllString(name, "_")
+		if base == "" || base == "." || base == ".." {
+			base = target
+		}
+		cmd = fmt.Sprintf(`docker save %s -o "$HOME/%s.tar" && echo "$HOME/%s.tar"`, target, base, base)
+		timeoutMs = 120000 // 大镜像导出慢
+	default:
+		return "", fmt.Errorf("不支持的动作：%q", action)
+	}
+	res, err := s.Exec(sessionID, ExecOptions{Command: cmd, TimeoutMs: timeoutMs})
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return "", fmt.Errorf("docker %s 失败（退出码 %d）：%s", action, *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	if action == "save" {
+		return strings.TrimSpace(res.Stdout), nil
+	}
+	return "", nil
 }
