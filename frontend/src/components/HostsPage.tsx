@@ -62,7 +62,7 @@ export function HostsPage() {
             {kw ? '没有匹配的主机' : '还没有主机，点上面的 + 新建'}
           </p>
         ) : (
-          <div className="grid max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div className="grid max-w-5xl grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((session) => (
               <HostCard key={session.id} session={session} />
             ))}
