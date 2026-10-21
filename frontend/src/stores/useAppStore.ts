@@ -9,6 +9,7 @@ import {
   type McpRuntime,
   type McpSettings,
   type McpSettingsInput,
+  type ServerInfo,
   type SessionConfig,
   type SessionStatus,
   type Tab,
@@ -50,6 +51,8 @@ export type RightPanelPane = 'files' | 'snippets' | 'history' | 'theme'
 interface AppState {
   sessions: SessionConfig[]
   localShells: LocalShellInfo[]
+  /** 服务器静态身份缓存（主机名/系统/内核/IP），按会话存，带采集时间戳 */
+  serverInfoBySession: Record<string, { info: ServerInfo; at: number }>
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
   hostNotes: Record<string, string>
   sessionStatus: Record<string, SessionStatus>
@@ -97,6 +100,8 @@ interface AppState {
   onMcpOpenTab: (tab: McpOpenTab) => void
   onMcpCloseTab: (termId: string) => void
   onSessionsChanged: (sessions: SessionConfig[]) => void
+  /** 取服务器静态身份：有缓存且 10 分钟内就直接用，否则重新采一次 */
+  loadServerInfo: (sessionId: string) => void
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setNotice: (notice: string | null) => void
@@ -168,6 +173,7 @@ function cleanLabel(text: string, max: number): string {
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: [],
   localShells: [],
+  serverInfoBySession: {},
   hostNotes: {},
   sessionStatus: {},
   termState: {},
@@ -260,6 +266,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     for (const tab of get().tabs) {
       if (tab.sessionId && !ids.has(tab.sessionId)) get().closeTab(tab.id)
     }
+  },
+
+  loadServerInfo: (sessionId) => {
+    const cached = get().serverInfoBySession[sessionId]
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) return
+    void window.api.sessions
+      .serverInfo(sessionId)
+      .then((info) =>
+        set({
+          serverInfoBySession: { ...get().serverInfoBySession, [sessionId]: { info, at: Date.now() } }
+        })
+      )
+      .catch(() => undefined)
   },
 
   setSettingsOpen: (open) =>

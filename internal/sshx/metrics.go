@@ -1,23 +1,19 @@
 package sshx
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// metricsScript 一条 POSIX sh 命令采完面板要的全部数据，段之间用 #TP-名字# 标记行
+// metricsScript 一条 POSIX sh 命令采完面板要的动态数据，段之间用 #TP-名字# 标记行
 // 分隔，Go 端按标记切段解析。每段命令独立加 2>/dev/null，一段失败只是那段没数据，
 // 不拖垮整体。CPU 行采两次（中间 sleep 1），用差值算使用率，比采瞬时值稳。
 // 进程用 ps aux 而不是 ps --sort，busybox 的 ps 不认 --sort。
+// 主机名/系统/内核/IP 是静态身份，不在这里，由 serverInfoScript 一次性采集。
 const metricsScript = `
-echo '#TP-HOST#'
-hostname 2>/dev/null
-echo '#TP-OS#'
-(PRETTY_NAME=; [ -r /etc/os-release ] && . /etc/os-release; echo "$PRETTY_NAME")
-echo '#TP-KERNEL#'
-uname -r 2>/dev/null
 echo '#TP-CPU1#'
 grep '^cpu ' /proc/stat 2>/dev/null
 grep -c '^cpu[0-9]' /proc/stat 2>/dev/null
@@ -50,9 +46,6 @@ func (s *ExecService) CollectMetrics(sessionID string) (*ServerMetrics, error) {
 		Procs:       []ProcInfo{},
 		CollectedAt: time.Now().UnixMilli(),
 	}
-	m.Hostname = strings.TrimSpace(sec["HOST"])
-	m.OsPretty = strings.TrimSpace(sec["OS"])
-	m.Kernel = strings.TrimSpace(sec["KERNEL"])
 
 	// CPU1 段两行：一行 cpu 汇总，一行核数。
 	var stat1, stat2 *cpuStat
@@ -216,4 +209,50 @@ func parsePs(text string) []ProcInfo {
 		procs = procs[:30]
 	}
 	return procs
+}
+
+// serverInfoScript 一次性采集静态身份：主机名、系统、内核、内网 IPv4、外网出口 IP。
+// 内网用 ip 命令并滤掉 docker/veth 等虚拟网桥，没有 ip 就退回 hostname -I。
+// 外网要服务器发一次出站请求，curl 两个服务互备、wget 兜底，3 秒拿不到就放弃。
+const serverInfoScript = `
+echo '#TP-HOST#'
+hostname 2>/dev/null
+echo '#TP-OS#'
+(PRETTY_NAME=; [ -r /etc/os-release ] && . /etc/os-release; echo "$PRETTY_NAME")
+echo '#TP-KERNEL#'
+uname -r 2>/dev/null
+echo '#TP-LAN#'
+lan=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 !~ /^(lo|docker|br-|veth)/ {sub(/\/.*$/, "", $4); print $4}')
+[ -z "$lan" ] && lan=$(hostname -I 2>/dev/null)
+echo "$lan"
+echo '#TP-WAN#'
+curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || wget -qO- --timeout=3 https://ifconfig.me 2>/dev/null
+echo '#TP-END#'
+`
+
+// ipv4Re 从外网服务的响应里捞 IPv4。有的服务会回 HTML 页面，不能直接当 IP 用。
+var ipv4Re = regexp.MustCompile(`(\d{1,3}\.){3}\d{1,3}`)
+
+// CollectServerInfo 采一次静态身份（主机名/系统/内核/内网/外网 IP）。这些基本不变，
+// 面板打开时采一次并缓存，不进 3 秒轮询——外网那次出站请求每轮都发就太慢太吵了。
+func (s *ExecService) CollectServerInfo(sessionID string) (*ServerInfo, error) {
+	res, err := s.Exec(sessionID, ExecOptions{Command: serverInfoScript, TimeoutMs: 12000})
+	if err != nil {
+		return nil, err
+	}
+	sec := splitSections(res.Stdout)
+	info := &ServerInfo{
+		Hostname: strings.TrimSpace(sec["HOST"]),
+		OsPretty: strings.TrimSpace(sec["OS"]),
+		Kernel:   strings.TrimSpace(sec["KERNEL"]),
+		LanIps:   []string{},
+	}
+	for _, f := range strings.Fields(sec["LAN"]) {
+		// 只留 IPv4 全局地址，滤掉 IPv6 和回环（hostname -I 兜底路径会带进来）
+		if strings.Count(f, ".") == 3 && !strings.HasPrefix(f, "127.") {
+			info.LanIps = append(info.LanIps, f)
+		}
+	}
+	info.WanIp = ipv4Re.FindString(sec["WAN"])
+	return info, nil
 }

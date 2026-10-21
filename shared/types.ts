@@ -73,11 +73,8 @@ export interface OsInfo {
   distro?: string
 }
 
-/** 运维面板的一次采集快照，字段与 Go 端 sshx.ServerMetrics 一一对应。 */
+/** 运维面板的一次动态采集快照，字段与 Go 端 sshx.ServerMetrics 一一对应。 */
 export interface ServerMetrics {
-  hostname: string
-  osPretty: string
-  kernel: string
   uptimeSec: number
   cores: number
   cpuPercent: number
@@ -92,6 +89,15 @@ export interface ServerMetrics {
   procs: ProcInfo[]
   /** 毫秒时间戳 */
   collectedAt: number
+}
+
+/** 服务器的静态身份，与 Go 端 sshx.ServerInfo 对应。外网 IP 拿不到时是空串。 */
+export interface ServerInfo {
+  hostname: string
+  osPretty: string
+  kernel: string
+  lanIps: string[]
+  wanIp: string
 }
 
 /** 一个挂载点的用量，字节数 */

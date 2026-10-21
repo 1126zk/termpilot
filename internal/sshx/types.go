@@ -74,12 +74,10 @@ type OsInfo struct {
 	Distro string `json:"distro,omitempty"`
 }
 
-// ServerMetrics 运维面板的一次采集快照。内存、磁盘都是字节数；
+// ServerMetrics 运维面板的一次动态采集快照。内存、磁盘都是字节数；
 // 远端某段采集失败时对应字段留零值，只有 exec 通道本身失败才返回 error。
+// 主机名/系统/内核/IP 这些静态身份在 ServerInfo，不在这里。
 type ServerMetrics struct {
-	Hostname    string      `json:"hostname"`
-	OsPretty    string      `json:"osPretty"`
-	Kernel      string      `json:"kernel"`
 	UptimeSec   int64       `json:"uptimeSec"`
 	Cores       int         `json:"cores"`
 	CpuPercent  float64     `json:"cpuPercent"`
@@ -91,6 +89,17 @@ type ServerMetrics struct {
 	Disks       []DiskUsage `json:"disks"`
 	Procs       []ProcInfo  `json:"procs"`
 	CollectedAt int64       `json:"collectedAt"` // 毫秒时间戳
+}
+
+// ServerInfo 服务器的静态身份，基本不变，面板打开时采一次并缓存。
+// LanIps 是内网 IPv4（可能多个），WanIp 是外网出口 IP，拿不到时为空串。
+// 外网要服务器发一次出站请求，不该进轮询。
+type ServerInfo struct {
+	Hostname string   `json:"hostname"`
+	OsPretty string   `json:"osPretty"`
+	Kernel   string   `json:"kernel"`
+	LanIps   []string `json:"lanIps"`
+	WanIp    string   `json:"wanIp"`
 }
 
 // DiskUsage 一个挂载点的用量，字节数。

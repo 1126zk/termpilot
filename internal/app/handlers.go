@@ -72,6 +72,14 @@ func (a *App) hSessionMetrics(args []interface{}) (interface{}, error) {
 	return a.exec.CollectMetrics(id)
 }
 
+func (a *App) hSessionServerInfo(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.CollectServerInfo(id)
+}
+
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

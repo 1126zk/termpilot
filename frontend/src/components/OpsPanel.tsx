@@ -40,16 +40,21 @@ export function OpsPanel() {
   const [error, setError] = useState('')
   // 上一次采集没回来就不发下一次，避免请求在慢链路上叠起来
   const inFlight = useRef(false)
-  // 右侧终端栏宽度，用分隔条拖拽调整
-  const [termWidth, setTermWidth] = useState(340)
+  // 静态身份（主机名/系统/内核/IP）走 store 缓存：同一会话 10 分钟内只采一次
+  const loadServerInfo = useAppStore((s) => s.loadServerInfo)
+  const serverInfo = useAppStore((s) => (sessionId ? s.serverInfoBySession[sessionId]?.info : undefined))
+  // 终端是主角，吃剩余空间；左栏信息区固定宽度，默认就是最窄宽度，用分隔条加宽
+  const [leftWidth, setLeftWidth] = useState(520)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  // 按住分隔条左右拖：记下起点，移动多少改多少，限制在 240~640 之间
+  // 按住分隔条左右拖：左栏在 520 ~（容器宽 - 240，给终端保底）之间调整
   const startDrag = (e: ReactPointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
-    const startWidth = termWidth
+    const startWidth = leftWidth
+    const maxLeft = (containerRef.current?.clientWidth ?? 1440) - 240
     const onMove = (ev: PointerEvent) => {
-      setTermWidth(Math.min(640, Math.max(240, startWidth + (startX - ev.clientX))))
+      setLeftWidth(Math.min(maxLeft, Math.max(520, startWidth + (ev.clientX - startX))))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -85,6 +90,10 @@ export function OpsPanel() {
     }
   }, [sessionId])
 
+  useEffect(() => {
+    if (sessionId) loadServerInfo(sessionId)
+  }, [sessionId, loadServerInfo])
+
   if (!sessionId) {
     return <div className="flex min-h-0 flex-1" />
   }
@@ -95,12 +104,24 @@ export function OpsPanel() {
   const loadPercent = metrics && metrics.cores > 0 ? (metrics.load1 / metrics.cores) * 100 : 0
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden p-4">
+    <div ref={containerRef} className="flex min-h-0 flex-1">
+      {/* 左栏是给人读的信息，允许选中复制；右栏终端的选择归 xterm 管 */}
+      <div
+        className="flex shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
+        style={{ width: leftWidth }}
+      >
         {metrics ? (
-          <div className="truncate text-xs text-muted-foreground">
-            {[metrics.hostname, metrics.osPretty, metrics.kernel].filter(Boolean).join(' · ')}
-            {metrics.uptimeSec > 0 ? ` · 已运行 ${formatUptime(metrics.uptimeSec)}` : ''}
+          <div className="flex flex-col gap-0.5 text-xs">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
+              <InfoItem label="主机名" value={serverInfo?.hostname ?? '…'} />
+              <InfoItem label="系统" value={serverInfo?.osPretty ?? '…'} />
+              <InfoItem label="内核" value={serverInfo?.kernel ?? '…'} />
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
+              {metrics.uptimeSec > 0 && <InfoItem label="已运行" value={formatUptime(metrics.uptimeSec)} />}
+              <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '…'} />
+              <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '…'} />
+            </div>
           </div>
         ) : (
           !error && <div className="text-xs text-muted-foreground">正在采集…</div>
@@ -145,14 +166,15 @@ export function OpsPanel() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
-              <table className="w-full text-xs">
+              {/* 定宽列给死窄宽度，剩下的全给命令列，长命令能多看一截 */}
+              <table className="w-full table-fixed text-xs">
                 <thead className="sticky top-0 bg-background">
                   <tr className="border-b text-muted-foreground">
-                    <th className="px-3 py-2 text-right font-medium">PID</th>
-                    <th className="px-3 py-2 text-left font-medium">USER</th>
-                    <th className="px-3 py-2 text-right font-medium">%CPU</th>
-                    <th className="px-3 py-2 text-right font-medium">%MEM</th>
-                    <th className="px-3 py-2 text-right font-medium">RSS</th>
+                    <th className="w-20 px-3 py-2 text-right font-medium">PID</th>
+                    <th className="w-20 px-3 py-2 text-left font-medium">USER</th>
+                    <th className="w-16 px-3 py-2 text-right font-medium">%CPU</th>
+                    <th className="w-16 px-3 py-2 text-right font-medium">%MEM</th>
+                    <th className="w-16 px-3 py-2 text-right font-medium">RSS</th>
                     <th className="px-3 py-2 text-left font-medium">命令</th>
                   </tr>
                 </thead>
@@ -188,7 +210,7 @@ export function OpsPanel() {
         onPointerDown={startDrag}
       />
       {/* 右侧命令区：同一台服务器再开一路真终端，面板关掉就断开销毁 */}
-      <div className="flex shrink-0 flex-col" style={{ width: termWidth }}>
+      <div className="flex min-w-0 flex-1 flex-col">
         <OpsTerminal sessionId={sessionId} />
       </div>
     </div>
@@ -233,8 +255,18 @@ function OpsTerminal(props: { sessionId: string }) {
   return <div ref={ref} className="min-h-0 flex-1 p-1" style={{ background: 'var(--terminal-background)' }} />
 }
 
-/** 环形进度：圆环弧度=百分比，中间放数值，≥85% 变红。hover 弹出细节浮层。 */
-function Ring(props: { label: string; percent: number; center: string; children: ReactNode }) {
+/** 信息条一项：弱色标签 + 值。值为空不渲染。 */
+function InfoItem(props: { label: string; value: string }) {
+  if (!props.value) return null
+  return (
+    <span className="whitespace-nowrap">
+      <span className="text-muted-foreground/60">{props.label} </span>
+      <span className="text-muted-foreground">{props.value}</span>
+    </span>
+  )
+}
+
+/** 环形进度：圆环弧度=百分比，中间放数值，≥85% 变红。hover 弹出细节浮层。 */function Ring(props: { label: string; percent: number; center: string; children: ReactNode }) {
   const hot = props.percent >= 85
   const r = 26
   const c = 2 * Math.PI * r
