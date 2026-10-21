@@ -513,9 +513,37 @@ function TextEditor(props: { tab: EditorTab }) {
   )
 }
 
+/**
+ * 向 Typora 的宽松习惯对齐：Typora 里任何数字都能打断段落开始一个列表，
+ * CommonMark 只认 1.。给紧跟在文字行后面的「数字. 」行补一个空行，
+ * 让 marked 也认。上一行已经是列表项或空行时不动，引用块和代码围栏里不动。
+ */
+function loosenLists(md: string): string {
+  const lines = md.split('\n')
+  const out: string[] = []
+  let inFence = false
+  for (const line of lines) {
+    if (/^\s{0,3}(```|~~~)/.test(line)) inFence = !inFence
+    const prev = out[out.length - 1]
+    if (
+      !inFence &&
+      /^\d{1,9}[.)]\s/.test(line) &&
+      prev !== undefined &&
+      prev.trim() !== '' &&
+      !/^\s*([-*+]|\d{1,9}[.)])\s/.test(prev) &&
+      !/^\s*>/.test(prev)
+    ) {
+      out.push('')
+    }
+    out.push(line)
+  }
+  return out.join('\n')
+}
+
 function MarkdownPreview(props: { text: string }) {
   const html = useMemo(
-    () => DOMPurify.sanitize(marked.parse(props.text, { async: false, gfm: true })),
+    // gfm + breaks 对齐 Typora：单个换行就换行，不用行尾两个空格
+    () => DOMPurify.sanitize(marked.parse(loosenLists(props.text), { async: false, gfm: true, breaks: true })),
     [props.text]
   )
   // 链接默认会把整个应用窗口导航走，外链交给系统浏览器，其他链接不响应
