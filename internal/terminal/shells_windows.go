@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 // 本机 shell 探测（Windows），照搬 TS localShellExe / detectLocalShells 的顺序与判定。
@@ -34,7 +36,7 @@ func fileExists(p string) bool {
 func findExe(name string, pathHint *regexp.Regexp, fallbacks ...string) string {
 	cmd := exec.Command("where.exe", name)
 	// GUI 程序起控制台子进程会闪黑窗，藏掉（同 sshx hideWindow）。
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	out, err := cmd.Output()
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {

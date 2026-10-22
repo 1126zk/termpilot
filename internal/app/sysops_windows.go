@@ -8,13 +8,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 func isWindows() bool { return true }
 
 // hideConsole 藏掉控制台子进程的黑窗（powershell 等），同 sshx hideWindow。
 func hideConsole(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 }
 
 // ensureWindowsPath 把 bin 目录写进当前用户 PATH（对应 install-cli.ts 的 PowerShell 脚本）。

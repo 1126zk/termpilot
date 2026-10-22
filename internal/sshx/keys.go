@@ -67,7 +67,11 @@ func identityFilesFor(host, user string, port int) (files []string, identitiesOn
 	if port <= 0 {
 		port = 22
 	}
-	out, err := exec.CommandContext(ctx, "ssh", "-G", "-p", strconv.Itoa(port), "-l", user, "--", host).Output()
+	// ssh 是控制台程序，TermPilot 自己没有控制台，不藏窗口的话 Windows 会给它
+	// 新配一个控制台，ssh -G 几十毫秒退出去，黑窗就闪一下。
+	cmd := exec.CommandContext(ctx, "ssh", "-G", "-p", strconv.Itoa(port), "-l", user, "--", host)
+	hideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return expandIdentityPaths(fallbackIdentityFiles), false
 	}
