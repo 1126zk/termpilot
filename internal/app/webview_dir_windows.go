@@ -14,17 +14,21 @@ import (
 //
 // 不设这个选项时两扇窗口共用同一目录，也就是共用同一个浏览器进程。
 // Chromium 的输入法桥是浏览器进程里的单例，两窗来回切之后微软拼音可能
-// 拿不到光标位置，候选框钉在窗口左上角自绘。额外窗口各占一个槽位目录，
+// 拿不到光标位置，候选框钉在窗口左上角自绘。每扇窗口各占一个数据目录，
 // 浏览器进程随之分开，输入法各管各的。
 //
-// 首个窗口沿用 go-webview2 的默认路径，老用户的 localStorage 不丢。
-func WebviewDataDir(args []string) string {
+// 不能靠启动参数（--extra-window）判断要不要隔离：双击 exe、任务栏、
+// 右键菜单等入口都不带参数，一样会开出第二扇窗。所以一律按实际占用抢锁：
+// 先抢基础目录（槽位 0），抢到就用它——首个窗口沿用 go-webview2 的默认
+// 路径，老用户的 localStorage 不丢；抢不到说明已有窗口在跑，再抢
+// windows\1..16 的槽位目录。
+func WebviewDataDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "" // 走 go-webview2 默认
 	}
 	base := filepath.Join(os.Getenv("AppData"), filepath.Base(exe))
-	if !extraWindow(args) {
+	if tryLockSlot(base) {
 		return base
 	}
 	// 槽位目录：抢第一个空闲槽。槽上的文件锁随进程退出自动释放，
@@ -35,7 +39,7 @@ func WebviewDataDir(args []string) string {
 			return dir
 		}
 	}
-	// 槽全占满（16 扇窗）就退回共用，至少窗口还能开。
+	// 槽全占满（17 扇窗）就退回共用，至少窗口还能开。
 	return base
 }
 

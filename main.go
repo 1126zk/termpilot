@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"os"
 	"runtime"
 
 	"termpilot/internal/app"
@@ -41,10 +40,11 @@ func main() {
 		},
 		// 与 Electron 版默认深色底色一致，避免浅色主题外的白屏首帧。
 		BackgroundColour: &options.RGBA{R: 30, G: 30, B: 30, A: 1},
-		// 额外窗口各用一个 WebView2 数据目录。共用时两窗挤在同一个浏览器进程里，
-		// 切窗口后微软拼音拿不到光标位置，候选框钉在左上角（详见 tmp/ime-候选框问题.md）。
+		// 每扇窗口各用一个 WebView2 数据目录（按占用抢锁分配）。共用时两窗挤在
+		// 同一个浏览器进程里，切窗口后微软拼音拿不到光标位置，候选框钉在左上角
+		// （详见 docs/ime-候选框问题.md）。
 		Windows: &windows.Options{
-			WebviewUserDataPath: app.WebviewDataDir(os.Args),
+			WebviewUserDataPath: app.WebviewDataDir(),
 		},
 		OnStartup:  a.Startup,
 		OnDomReady: a.DomReady,
