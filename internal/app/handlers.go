@@ -117,6 +117,26 @@ func (a *App) hSessionDockerAction(args []interface{}) (interface{}, error) {
 	return a.exec.DockerAction(id, action, target, name)
 }
 
+func (a *App) hSessionWeb(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.CollectWeb(id)
+}
+
+func (a *App) hSessionWebInstall(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	name, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.WebInstall(id, name)
+}
+
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

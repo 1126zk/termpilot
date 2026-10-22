@@ -3,6 +3,7 @@ import { MoreHorizontal, RefreshCw, X } from 'lucide-react'
 import type { DockerInfo, ProcInfo, ServerMetrics } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -60,8 +61,8 @@ export function OpsPanel() {
   const [memShown, setMemShown] = useState(5)
   // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
-  // 内容区选项卡：进程 / Docker，以后再加
-  const [opsTab, setOpsTab] = useState<'proc' | 'docker'>('proc')
+  // 内容区选项卡：进程 / Docker / 网站（网站页内容还没做，先空着）
+  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web'>('proc')
 
   const killProc = (pid: number) => {
     if (confirmKill !== pid) {
@@ -213,11 +214,12 @@ export function OpsPanel() {
           </Ring>
         </div>
 
-        {/* 内容切换：进程 / Docker，以后加网络/服务/日志等 */}
+        {/* 内容切换：进程 / Docker / 网站，网站页还没做 */}
         <div className="flex items-center gap-1 text-sm">
           {([
             ['proc', '进程'],
-            ['docker', 'Docker']
+            ['docker', 'Docker'],
+            ['web', '网站']
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -255,8 +257,10 @@ export function OpsPanel() {
               divider
             />
           </div>
-        ) : (
+        ) : opsTab === 'docker' ? (
           <DockerSection sessionId={sessionId} />
+        ) : (
+          <WebSection sessionId={sessionId} />
         )}
       </div>
       {/* 分隔条：按住左右拖，调整左侧信息区宽度 */}
@@ -522,7 +526,8 @@ function DockerSection(props: { sessionId: string }) {
                     confirming={confirmDel?.action === 'rm' && confirmDel.id === c.id}
                     onConfirm={() => act('rm', c.id)}
                   >
-                    {c.state === 'running' ? (
+                    {/* restarting（崩溃循环）也算在运行：这时要的是停止打断循环，不是启动 */}
+                    {c.state === 'running' || c.state === 'restarting' ? (
                       <>
                         <DropdownMenuItem onSelect={() => act('stop', c.id)}>停止</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => act('restart', c.id)}>重启</DropdownMenuItem>
@@ -689,6 +694,94 @@ function DockerSection(props: { sessionId: string }) {
           info && <p className="py-2 text-center text-sm text-muted-foreground">没有 /etc/docker/daemon.json</p>
         )}
       </div>
+    </div>
+  )
+}
+
+/** 网站页：nginx / caddy 左右切换。只管容器化的实例（固定容器名），宿主机直装的不管。
+    没装时给一键安装（alpine 小镜像，配置收在 ~/.termpilot/<名字>/ 下）；装了显示配置原文。
+    结果走 store 缓存；页面开着每 15 秒后台更新。 */
+function WebSection(props: { sessionId: string }) {
+  const [webTab, setWebTab] = useState<'nginx' | 'caddy'>('nginx')
+  const [installing, setInstalling] = useState(false)
+  const cached = useAppStore((s) => s.webBySession[props.sessionId])
+  const loadWebInfo = useAppStore((s) => s.loadWebInfo)
+  const setNotice = useAppStore((s) => s.setNotice)
+
+  useEffect(() => {
+    loadWebInfo(props.sessionId)
+    const timer = window.setInterval(() => loadWebInfo(props.sessionId), 15000)
+    return () => window.clearInterval(timer)
+  }, [props.sessionId, loadWebInfo])
+
+  const install = () => {
+    setInstalling(true)
+    setNotice(`正在拉取 ${webTab}:alpine 并启动容器，镜像要下载一会…`, true)
+    void window.api.sessions
+      .webInstall(props.sessionId, webTab)
+      .then(() => {
+        setNotice(`${webTab} 容器已启动，配置在 ~/.termpilot/${webTab}/ 下`)
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setInstalling(false))
+  }
+
+  const info = cached?.info ?? null
+  const svc = info?.[webTab]
+  const file = webTab === 'nginx' ? '~/.termpilot/nginx/conf.d/*.conf' : '~/.termpilot/caddy/Caddyfile'
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col rounded-xl border">
+      <div className="flex items-center gap-1 border-b px-3 py-2 text-sm">
+        {([
+          ['nginx', 'nginx'],
+          ['caddy', 'caddy']
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={cn(
+              'rounded-md px-2.5 py-1',
+              webTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+            )}
+            onClick={() => setWebTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {info && !info.dockerAvailable ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker，网站服务依赖容器运行</div>
+      ) : info && svc && !svc.state ? (
+        <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
+          <p>还没有安装 {webTab}</p>
+          <Button size="sm" disabled={installing} onClick={install}>
+            {installing ? '安装中…' : `一键安装 ${webTab}:alpine`}
+          </Button>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-mono text-sm text-muted-foreground">{file}</p>
+            {svc && svc.state !== '' && svc.state !== 'running' && (
+              <p className="shrink-0 text-sm text-muted-foreground">容器状态：{svc.state}</p>
+            )}
+          </div>
+          {svc?.conf ? (
+            <pre className="mt-2 rounded-md bg-muted p-2 font-mono text-sm break-all whitespace-pre-wrap select-text">
+              {svc.conf}
+            </pre>
+          ) : (
+            info &&
+            svc && (
+              <p className="py-2 text-center text-sm text-muted-foreground">
+                {svc.hasConf ? '（空文件）' : webTab === 'nginx' ? '还没有 .conf 配置文件' : `读取不到 ${file}`}
+              </p>
+            )
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -147,6 +147,22 @@ type DockerNetwork struct {
 	Scope  string `json:"scope"`
 }
 
+// WebInfo 一次网站服务采集。网站服务一律容器化（固定容器名 nginx/caddy），
+// 宿主机直装的不在管理范围内。DockerAvailable 为假表示服务器没装 docker。
+type WebInfo struct {
+	DockerAvailable bool           `json:"dockerAvailable"`
+	Nginx           WebServiceInfo `json:"nginx"`
+	Caddy           WebServiceInfo `json:"caddy"`
+}
+
+// WebServiceInfo 一个网站服务。State 是容器状态（running/exited 等），空串 = 还没装；
+// HasConf 区分配置文件"不存在"和"存在但为空"；Conf 是配置原文。
+type WebServiceInfo struct {
+	State   string `json:"state"`
+	HasConf bool   `json:"hasConf"`
+	Conf    string `json:"conf"`
+}
+
 // DiskUsage 一个挂载点的用量，字节数。
 type DiskUsage struct {
 	Mount      string  `json:"mount"`

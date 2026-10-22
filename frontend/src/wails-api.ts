@@ -26,7 +26,8 @@ import type {
   TermMetaEvent,
   TermModeReply,
   TermModeRun,
-  TermStatusEvent
+  TermStatusEvent,
+  WebInfo
 } from '../../shared/types'
 
 /**
@@ -74,6 +75,8 @@ const api = {
     docker: (id: string) => invoke<DockerInfo>(IPC.sessionDocker, [id]),
     dockerAction: (id: string, action: string, target: string, name = '') =>
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
+    web: (id: string) => invoke<WebInfo>(IPC.sessionWeb, [id]),
+    webInstall: (id: string, name: string) => invoke<void>(IPC.sessionWebInstall, [id, name]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

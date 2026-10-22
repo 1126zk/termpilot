@@ -145,6 +145,23 @@ export interface DockerNetwork {
   scope: string
 }
 
+/** 一次网站服务采集，与 Go 端 sshx.WebInfo 对应。网站服务一律容器化（固定容器名
+    nginx/caddy），宿主机直装的不管。dockerAvailable 为假表示服务器没装 docker。 */
+export interface WebInfo {
+  dockerAvailable: boolean
+  nginx: WebServiceInfo
+  caddy: WebServiceInfo
+}
+
+export interface WebServiceInfo {
+  /** 容器状态：running / exited 等；空串 = 还没装 */
+  state: string
+  /** 配置文件是否存在（区分"读不到"和"空文件"） */
+  hasConf: boolean
+  /** 配置原文（~/.termpilot/<名字>/ 下的配置） */
+  conf: string
+}
+
 /** 一个挂载点的用量，字节数 */
 export interface DiskUsage {
   mount: string

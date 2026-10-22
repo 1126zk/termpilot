@@ -43,6 +43,8 @@ func (b *Bridge) routes() map[string]handler {
 		"session:kill-proc":     a.hSessionKillProc,
 		"session:docker":        a.hSessionDocker,
 		"session:docker-action": a.hSessionDockerAction,
+		"session:web":           a.hSessionWeb,
+		"session:web-install":   a.hSessionWebInstall,
 		"session:set-os":        a.hSessionSetOs,
 		"session:reveal-secret": a.hSessionRevealSecret,
 		"host:note-list":        func(_ []interface{}) (interface{}, error) { return a.store.ListHostNotes() },

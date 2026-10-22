@@ -14,7 +14,8 @@ import {
   type SessionConfig,
   type SessionStatus,
   type Tab,
-  type TermStatusEvent
+  type TermStatusEvent,
+  type WebInfo
 } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { osIconProps } from '../components/OsIcon'
@@ -56,6 +57,8 @@ interface AppState {
   serverInfoBySession: Record<string, { info: ServerInfo; at: number }>
   /** Docker 采集缓存，按会话存。at 在采集开始时就写，兼作在途标记 */
   dockerBySession: Record<string, { info: DockerInfo | null; at: number }>
+  /** 网站服务（nginx/caddy）配置采集缓存，按会话存，at 用法同 dockerBySession */
+  webBySession: Record<string, { info: WebInfo | null; at: number }>
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
   hostNotes: Record<string, string>
   sessionStatus: Record<string, SessionStatus>
@@ -107,6 +110,7 @@ interface AppState {
   loadServerInfo: (sessionId: string) => void
   /** 取 Docker 列表：15 秒内有缓存（含在途）就直接用，force 强制重采 */
   loadDockerInfo: (sessionId: string, force?: boolean) => void
+  loadWebInfo: (sessionId: string, force?: boolean) => void
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   /** sticky 为真时不自动消失（长时间任务的进行态），等下一条提示顶掉 */
@@ -181,6 +185,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   localShells: [],
   serverInfoBySession: {},
   dockerBySession: {},
+  webBySession: {},
   hostNotes: {},
   sessionStatus: {},
   termState: {},
@@ -298,6 +303,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       .docker(sessionId)
       .then((info) =>
         set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info, at: Date.now() } } })
+      )
+      .catch(() => undefined)
+  },
+
+  loadWebInfo: (sessionId, force = false) => {
+    const cached = get().webBySession[sessionId]
+    const now = Date.now()
+    // at 开始时就写：15 秒内的重复调用（含还在跑的）都跳过
+    if (!force && cached && now - cached.at < 15 * 1000) return
+    set({ webBySession: { ...get().webBySession, [sessionId]: { info: cached?.info ?? null, at: now } } })
+    void window.api.sessions
+      .web(sessionId)
+      .then((info) =>
+        set({ webBySession: { ...get().webBySession, [sessionId]: { info, at: Date.now() } } })
       )
       .catch(() => undefined)
   },
