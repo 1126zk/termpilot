@@ -105,6 +105,8 @@ export interface DockerInfo {
   available: boolean
   containers: DockerContainer[]
   images: DockerImage[]
+  volumes: DockerVolume[]
+  networks: DockerNetwork[]
 }
 
 export interface DockerContainer {
@@ -126,6 +128,19 @@ export interface DockerImage {
   size: string
   /** 人读格式：2 weeks ago */
   created: string
+}
+
+export interface DockerVolume {
+  name: string
+  driver: string
+}
+
+export interface DockerNetwork {
+  id: string
+  name: string
+  driver: string
+  /** local / swarm / global */
+  scope: string
 }
 
 /** 一个挂载点的用量，字节数 */

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// dockerScript 一次性采集容器和镜像。先探测有没有 docker，没有就标记出来，
+// dockerScript 一次性采集容器、镜像、卷和网络。先探测有没有 docker，没有就标记出来，
 // 前端显示占位而不是报错。--format json 逐行输出，比按列解析稳。
 const dockerScript = `
 echo '#TP-HAVE#'
@@ -16,10 +16,14 @@ echo '#TP-PS#'
 docker ps -a --format '{{json .}}' 2>/dev/null
 echo '#TP-IMAGES#'
 docker images --format '{{json .}}' 2>/dev/null
+echo '#TP-VOLUMES#'
+docker volume ls --format '{{json .}}' 2>/dev/null
+echo '#TP-NETWORKS#'
+docker network ls --format '{{json .}}' 2>/dev/null
 echo '#TP-END#'
 `
 
-// CollectDocker 采一次 Docker 容器和镜像列表，只在面板 Docker 页激活时调用。
+// CollectDocker 采一次 Docker 容器、镜像、卷和网络列表，只在面板 Docker 页激活时调用。
 func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 	res, err := s.Exec(sessionID, ExecOptions{Command: dockerScript, TimeoutMs: 10000})
 	if err != nil {
@@ -30,6 +34,8 @@ func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 		Available:  strings.TrimSpace(sec["HAVE"]) == "yes",
 		Containers: []DockerContainer{},
 		Images:     []DockerImage{},
+		Volumes:    []DockerVolume{},
+		Networks:   []DockerNetwork{},
 	}
 	if !info.Available {
 		return info, nil
@@ -82,20 +88,66 @@ func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 			Created:    row.CreatedSince,
 		})
 	}
+	for _, line := range strings.Split(sec["VOLUMES"], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var row struct {
+			Name   string `json:"Name"`
+			Driver string `json:"Driver"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		info.Volumes = append(info.Volumes, DockerVolume{
+			Name:   row.Name,
+			Driver: row.Driver,
+		})
+	}
+	for _, line := range strings.Split(sec["NETWORKS"], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var row struct {
+			ID     string `json:"ID"`
+			Name   string `json:"Name"`
+			Driver string `json:"Driver"`
+			Scope  string `json:"Scope"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		info.Networks = append(info.Networks, DockerNetwork{
+			ID:     row.ID,
+			Name:   row.Name,
+			Driver: row.Driver,
+			Scope:  row.Scope,
+		})
+	}
 	return info, nil
 }
 
 // dockerIDRe 容器/镜像 id 只接受十六进制（sha256: 前缀先剥掉），防命令注入。
 var dockerIDRe = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
 
+// dockerObjNameRe 卷/网络按名字操作，走 docker 命名规则（字母数字开头，可含 ._-），防命令注入。
+var dockerObjNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
 // dockerNameRe 导出文件名只留字母数字和 ._-，其余折叠成下划线。
 var dockerNameRe = regexp.MustCompile(`[^\w.-]+`)
 
-// DockerAction 对容器/镜像执行动作。action 只认白名单里的子命令；save 把镜像
-// 导出到远端 $HOME 下（下载走文件面板），返回导出文件的绝对路径，其他动作返回空串。
+// DockerAction 对容器/镜像/卷/网络执行动作。action 只认白名单里的子命令；容器和镜像按
+// id（纯十六进制），卷和网络按名字（docker 命名规则）。save 把镜像导出到远端 $HOME
+// 下（下载走文件面板），返回导出文件的绝对路径，其他动作返回空串。
 func (s *ExecService) DockerAction(sessionID, action, target, name string) (string, error) {
 	target = strings.TrimPrefix(target, "sha256:")
-	if !dockerIDRe.MatchString(target) {
+	if action == "volume-rm" || action == "network-rm" {
+		if !dockerObjNameRe.MatchString(target) {
+			return "", fmt.Errorf("非法的名字：%q", target)
+		}
+	} else if !dockerIDRe.MatchString(target) {
 		return "", fmt.Errorf("非法的 id：%q", target)
 	}
 	timeoutMs := 15000
@@ -106,6 +158,10 @@ func (s *ExecService) DockerAction(sessionID, action, target, name string) (stri
 	case "rm":
 		// 运行中的容器也能删，面板操作就不用先停了
 		cmd = "docker rm -f " + target
+	case "volume-rm":
+		cmd = "docker volume rm " + target
+	case "network-rm":
+		cmd = "docker network rm " + target
 	case "save":
 		base := dockerNameRe.ReplaceAllString(name, "_")
 		if base == "" || base == "." || base == ".." {

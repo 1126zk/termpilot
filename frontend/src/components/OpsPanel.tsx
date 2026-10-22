@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { MoreHorizontal, RefreshCw, X } from 'lucide-react'
 import type { DockerInfo, ProcInfo, ServerMetrics } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
@@ -429,7 +429,7 @@ function ActionCell(props: { confirming: boolean; onConfirm: () => void; childre
   )
 }
 
-/** Docker 页：一个大卡片，上容器下镜像，中间分隔线。结果走 store 缓存，
+/** Docker 页：一个大卡片，容器、镜像、卷、网络四节，中间分隔线。结果走 store 缓存，
     切进来先显示缓存；页面开着每 15 秒后台更新，右上角图标手动刷新。 */
 function DockerSection(props: { sessionId: string }) {
   const cached = useAppStore((s) => s.dockerBySession[props.sessionId])
@@ -445,7 +445,7 @@ function DockerSection(props: { sessionId: string }) {
   }, [props.sessionId, loadDockerInfo])
 
   const act = (action: string, target: string, name = '') => {
-    const destructive = action === 'rm' || action === 'rmi'
+    const destructive = ['rm', 'rmi', 'volume-rm', 'network-rm'].includes(action)
     if (destructive) {
       if (confirmDel?.action === action && confirmDel.id === target) {
         setConfirmDel(null)
@@ -596,17 +596,111 @@ function DockerSection(props: { sessionId: string }) {
           </tbody>
         </table>
       </div>
+
+      <div className="border-y bg-accent/40 px-3 py-1.5 text-sm text-muted-foreground">卷</div>
+      <div>
+        <table className="w-full table-fixed text-sm">
+          <thead className="sticky top-0 bg-background">
+            <tr className="border-b text-muted-foreground">
+              <th className="w-[70%] px-3 py-1.5 text-left font-medium">名称</th>
+              <th className="px-3 py-1.5 text-left font-medium">驱动</th>
+              <th className="w-10 px-1 py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {(info?.volumes ?? []).map((v) => (
+              <tr key={v.name} className="border-b border-border/50 last:border-0">
+                <td className="px-3 py-1.5">
+                  <Tip text={v.name}>{v.name}</Tip>
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground">{v.driver}</td>
+                <td className="px-1 py-1.5 text-center">
+                  <ActionCell
+                    confirming={confirmDel?.action === 'volume-rm' && confirmDel.id === v.name}
+                    onConfirm={() => act('volume-rm', v.name)}
+                  >
+                    <DropdownMenuItem variant="destructive" onSelect={() => act('volume-rm', v.name)}>
+                      删除
+                    </DropdownMenuItem>
+                  </ActionCell>
+                </td>
+              </tr>
+            ))}
+            {info && info.volumes.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-3 py-4 text-center text-muted-foreground">
+                  没有卷
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="border-y bg-accent/40 px-3 py-1.5 text-sm text-muted-foreground">网络</div>
+      <div>
+        <table className="w-full table-fixed text-sm">
+          <thead className="sticky top-0 bg-background">
+            <tr className="border-b text-muted-foreground">
+              <th className="w-[45%] px-3 py-1.5 text-left font-medium">名称</th>
+              <th className="w-[22%] px-3 py-1.5 text-left font-medium">驱动</th>
+              <th className="w-[22%] px-3 py-1.5 text-left font-medium">范围</th>
+              <th className="w-10 px-1 py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {(info?.networks ?? []).map((n) => (
+              <tr key={n.id} className="border-b border-border/50 last:border-0">
+                <td className="px-3 py-1.5">
+                  <Tip text={n.name}>{n.name}</Tip>
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground">{n.driver}</td>
+                <td className="px-3 py-1.5 text-muted-foreground">{n.scope}</td>
+                <td className="px-1 py-1.5 text-center">
+                  <ActionCell
+                    confirming={confirmDel?.action === 'network-rm' && confirmDel.id === n.name}
+                    onConfirm={() => act('network-rm', n.name)}
+                  >
+                    <DropdownMenuItem variant="destructive" onSelect={() => act('network-rm', n.name)}>
+                      删除
+                    </DropdownMenuItem>
+                  </ActionCell>
+                </td>
+              </tr>
+            ))}
+            {info && info.networks.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                  没有网络
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
 
-/** 截断文本的悬停提示，替代丑陋的原生 title：主题色浮层、下方弹出、零延迟。 */
+/** 截断文本的悬停提示，替代丑陋的原生 title：主题色浮层、下方弹出、零延迟。
+    触发区用 w-fit 收缩到文字本身，浮层锚在文字左下角向右展开；
+    只给被截断的文本弹，完整可见时不重复显示（同 TabBar 的 MenuLabel）。 */
 function Tip(props: { text: string; children: ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [truncated, setTruncated] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) setTruncated(el.scrollWidth > el.clientWidth + 1)
+  }, [props.text])
+  const label = (
+    <span ref={ref} className="block w-fit max-w-full cursor-default truncate">
+      {props.children}
+    </span>
+  )
+  if (!truncated) return label
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="block cursor-default truncate">{props.children}</span>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{label}</TooltipTrigger>
       <TooltipContent side="bottom" align="start" sideOffset={4} className="max-w-md break-words whitespace-pre-wrap">
         {props.text}
       </TooltipContent>

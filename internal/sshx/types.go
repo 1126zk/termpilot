@@ -107,6 +107,8 @@ type DockerInfo struct {
 	Available  bool              `json:"available"`
 	Containers []DockerContainer `json:"containers"`
 	Images     []DockerImage     `json:"images"`
+	Volumes    []DockerVolume    `json:"volumes"`
+	Networks   []DockerNetwork   `json:"networks"`
 }
 
 // DockerContainer 一个容器。State 是 running/exited 等原始状态，Status 是给人看的
@@ -127,6 +129,20 @@ type DockerImage struct {
 	ID         string `json:"id"`
 	Size       string `json:"size"`
 	Created    string `json:"created"`
+}
+
+// DockerVolume 一个卷。docker volume ls 有用的就名字和驱动两列。
+type DockerVolume struct {
+	Name   string `json:"name"`
+	Driver string `json:"driver"`
+}
+
+// DockerNetwork 一个网络。Scope 是 local / swarm / global。
+type DockerNetwork struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Driver string `json:"driver"`
+	Scope  string `json:"scope"`
 }
 
 // DiskUsage 一个挂载点的用量，字节数。
