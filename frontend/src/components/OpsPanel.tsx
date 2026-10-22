@@ -429,7 +429,7 @@ function ActionCell(props: { confirming: boolean; onConfirm: () => void; childre
   )
 }
 
-/** Docker 页：一个大卡片，容器、镜像、卷、网络四节，中间分隔线。结果走 store 缓存，
+/** Docker 页：一个大卡片，容器、镜像、卷、网络、daemon.json 五节，中间分隔线。结果走 store 缓存，
     切进来先显示缓存；页面开着每 15 秒后台更新，右上角图标手动刷新。 */
 function DockerSection(props: { sessionId: string }) {
   const cached = useAppStore((s) => s.dockerBySession[props.sessionId])
@@ -677,6 +677,17 @@ function DockerSection(props: { sessionId: string }) {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="border-y bg-accent/40 px-3 py-1.5 font-mono text-sm text-muted-foreground">/etc/docker/daemon.json</div>
+      <div className="px-3 py-2">
+        {info?.daemonJson ? (
+          <pre className="max-h-60 overflow-auto rounded-md bg-muted p-2 font-mono text-sm break-all whitespace-pre-wrap select-text">
+            {info.daemonJson}
+          </pre>
+        ) : (
+          info && <p className="py-2 text-center text-sm text-muted-foreground">没有 /etc/docker/daemon.json</p>
+        )}
       </div>
     </div>
   )

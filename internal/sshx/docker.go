@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// dockerScript 一次性采集容器、镜像、卷和网络。先探测有没有 docker，没有就标记出来，
+// dockerScript 一次性采集容器、镜像、卷、网络和 daemon.json。先探测有没有 docker，没有就标记出来，
 // 前端显示占位而不是报错。--format json 逐行输出，比按列解析稳。
 const dockerScript = `
 echo '#TP-HAVE#'
@@ -20,10 +20,12 @@ echo '#TP-VOLUMES#'
 docker volume ls --format '{{json .}}' 2>/dev/null
 echo '#TP-NETWORKS#'
 docker network ls --format '{{json .}}' 2>/dev/null
+echo '#TP-DAEMON#'
+cat /etc/docker/daemon.json 2>/dev/null
 echo '#TP-END#'
 `
 
-// CollectDocker 采一次 Docker 容器、镜像、卷和网络列表，只在面板 Docker 页激活时调用。
+// CollectDocker 采一次 Docker 容器、镜像、卷、网络列表和 daemon.json，只在面板 Docker 页激活时调用。
 func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 	res, err := s.Exec(sessionID, ExecOptions{Command: dockerScript, TimeoutMs: 10000})
 	if err != nil {
@@ -40,6 +42,7 @@ func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 	if !info.Available {
 		return info, nil
 	}
+	info.DaemonJson = strings.TrimSpace(sec["DAEMON"])
 	for _, line := range strings.Split(sec["PS"], "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {

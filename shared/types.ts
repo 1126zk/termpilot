@@ -107,6 +107,8 @@ export interface DockerInfo {
   images: DockerImage[]
   volumes: DockerVolume[]
   networks: DockerNetwork[]
+  /** /etc/docker/daemon.json 原文；没装 docker 或文件不存在时是空串 */
+  daemonJson: string
 }
 
 export interface DockerContainer {

@@ -109,6 +109,8 @@ type DockerInfo struct {
 	Images     []DockerImage     `json:"images"`
 	Volumes    []DockerVolume    `json:"volumes"`
 	Networks   []DockerNetwork   `json:"networks"`
+	// DaemonJson /etc/docker/daemon.json 原文；没装 docker 或文件不存在时是空串。
+	DaemonJson string `json:"daemonJson"`
 }
 
 // DockerContainer 一个容器。State 是 running/exited 等原始状态，Status 是给人看的
