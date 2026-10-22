@@ -42,7 +42,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 30, G: 30, B: 30, A: 1},
 		// 每扇窗口各用一个 WebView2 数据目录（按占用抢锁分配）。共用时两窗挤在
 		// 同一个浏览器进程里，切窗口后微软拼音拿不到光标位置，候选框钉在左上角
-		// （详见 docs/ime-候选框问题.md）。
+		// （详见 docs/经验记录.md 2026-10-22 条目）。
 		Windows: &windows.Options{
 			WebviewUserDataPath: app.WebviewDataDir(),
 		},
