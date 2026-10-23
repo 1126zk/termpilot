@@ -3,6 +3,7 @@ package sshx
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -80,6 +81,15 @@ const caddyPlaceholder = `# 占位站点：加一个真实站点后可以删除
     respond "caddy is running"
 }`
 
+// caddySiteAddr caddy 站点地址：默认 80 只写域名（HTTP 80 + 自动 HTTPS 443）；
+// 指定其他端口时带 http:// 前缀生成纯 HTTP 站点，非标准端口不去签证书。
+func caddySiteAddr(domain, port string) string {
+	if port == "80" {
+		return domain
+	}
+	return "http://" + domain + ":" + port
+}
+
 // webInstallScript 一键安装脚本：备目录、补种子文件、拉镜像、起容器。
 // 固定命令无拼接，不存在注入面。pull 慢，超时给足。
 func webInstallScript(name string) (string, bool) {
@@ -156,20 +166,30 @@ func (s *ExecService) WebInstall(sessionID, name string) error {
 	return nil
 }
 
-// 站点表单字段的白名单：全部会进文件名或 Caddyfile 内容，必须防注入。
+// 站点表单字段的白名单：全部会进文件名或配置内容，必须防注入。
 var (
 	webDomainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
 	webTargetRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+:[0-9]{1,5}$`)
 	webDirRe    = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	webPortRe   = regexp.MustCompile(`^[0-9]{1,5}$`)
 )
 
-// WebSite 增删网站站点，service 只认 nginx/caddy。
-// nginx 站点在 conf.d/<域名>.conf（只生成 HTTP 站点，HTTPS 留手写），
-// caddy 站点在 sites/<域名>.caddy（HTTPS 自动）。容器在跑就先校验再热加载，
+// WebSite 增删网站站点，service 只认 nginx/caddy。port 留空 = 80（caddy 还会自动占 443
+// 签证书）；非 80 端口是纯 HTTP 站点。nginx 站点在 conf.d/<域名>.conf，caddy 在
+// sites/<域名>.caddy；同名文件已存在直接报错不覆盖。容器在跑就先校验再热加载，
 // 校验失败删掉刚写的文件并把报错抛给前端；没在跑就只落盘，下次启动生效。
-func (s *ExecService) WebSite(sessionID, service, action, domain, siteType, target string) error {
+func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType, target string) error {
 	if !webDomainRe.MatchString(domain) {
 		return fmt.Errorf("非法的域名：%q", domain)
+	}
+	if port == "" {
+		port = "80"
+	}
+	if !webPortRe.MatchString(port) {
+		return fmt.Errorf("非法的端口：%q", port)
+	}
+	if p, _ := strconv.Atoi(port); p < 1 || p > 65535 {
+		return fmt.Errorf("端口超出范围（1-65535）：%q", port)
 	}
 	var file, check, reload string
 	switch service {
@@ -194,35 +214,39 @@ func (s *ExecService) WebSite(sessionID, service, action, domain, siteType, targ
 			if !webTargetRe.MatchString(target) {
 				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
 			}
-			body = "server {\n    listen 80;\n    server_name " + domain + ";\n    location / {\n        proxy_pass http://" + target + ";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    }\n}"
+			body = "server {\n    listen " + port + ";\n    server_name " + domain + ";\n    location / {\n        proxy_pass http://" + target + ";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    }\n}"
 		case service == "nginx" && siteType == "static":
 			if !webDirRe.MatchString(target) {
 				return fmt.Errorf("非法的目录名：%q", target)
 			}
 			prepare = fmt.Sprintf(`mkdir -p "$HOME/.termpilot/nginx/www/%s"`, target)
-			body = "server {\n    listen 80;\n    server_name " + domain + ";\n    root /usr/share/nginx/html/" + target + ";\n    index index.html;\n}"
+			body = "server {\n    listen " + port + ";\n    server_name " + domain + ";\n    root /usr/share/nginx/html/" + target + ";\n    index index.html;\n}"
 		case service == "caddy" && siteType == "proxy":
 			if !webTargetRe.MatchString(target) {
 				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
 			}
-			body = domain + " {\n\treverse_proxy " + target + "\n}"
+			body = caddySiteAddr(domain, port) + " {\n\treverse_proxy " + target + "\n}"
 		case service == "caddy" && siteType == "static":
 			if !webDirRe.MatchString(target) {
 				return fmt.Errorf("非法的目录名：%q", target)
 			}
 			prepare = fmt.Sprintf(`mkdir -p "$HOME/.termpilot/caddy/www/%s"`, target)
-			body = domain + " {\n\troot * /srv/" + target + "\n\tfile_server\n}"
+			body = caddySiteAddr(domain, port) + " {\n\troot * /srv/" + target + "\n\tfile_server\n}"
 		default:
 			return fmt.Errorf("不支持的站点类型：%q", siteType)
 		}
-		// host 网络下 listen 80 只绑 IPv4：宿主机有 IPv6 协议栈就补一行 listen [::]:80，
+		// host 网络下 listen <port> 只绑 IPv4：宿主机有 IPv6 协议栈就补一行 listen [::]:<port>，
 		// 没有就不写（避免绑 [::] 失败起不来）。caddy 默认双栈不用管。
 		v6 := ""
 		if service == "nginx" {
-			v6 = fmt.Sprintf(`[ -f /proc/net/if_inet6 ] && sed -i 's/    listen 80;/    listen 80;\n    listen [::]:80;/' %s`, file)
+			v6 = fmt.Sprintf(`[ -f /proc/net/if_inet6 ] && sed -i 's/    listen %s;/    listen %s;\n    listen [::]:%s;/' %s`, port, port, port, file)
 		}
 		script = fmt.Sprintf(`
 %s
+if [ -f %s ]; then
+  echo "站点已存在，先删除再加" >&2
+  exit 1
+fi
 cat > %s <<'EOF'
 %s
 EOF
@@ -234,7 +258,7 @@ if %s; then
   fi
   %s
 fi
-`, prepare, file, body, v6, running, check, file, reload)
+`, prepare, file, file, body, v6, running, check, file, reload)
 	case "del":
 		if service == "caddy" {
 			// 删空了就补回占位站点，防止 caddy 拿到空配置崩溃循环（nginx 没这问题）

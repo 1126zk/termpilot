@@ -154,9 +154,10 @@ func (a *App) hSessionWebSite(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	siteType, _ := argStr(args, 4) // del 时为空
-	target, _ := argStr(args, 5)
-	return nil, a.exec.WebSite(id, service, action, domain, siteType, target)
+	port, _ := argStr(args, 4) // del 时为空
+	siteType, _ := argStr(args, 5)
+	target, _ := argStr(args, 6)
+	return nil, a.exec.WebSite(id, service, action, domain, port, siteType, target)
 }
 
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {

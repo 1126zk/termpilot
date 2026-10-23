@@ -77,8 +77,8 @@ const api = {
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
     web: (id: string) => invoke<WebInfo>(IPC.sessionWeb, [id]),
     webInstall: (id: string, name: string) => invoke<void>(IPC.sessionWebInstall, [id, name]),
-    webSite: (id: string, service: string, action: string, domain: string, siteType = '', target = '') =>
-      invoke<void>(IPC.sessionWebSite, [id, service, action, domain, siteType, target]),
+    webSite: (id: string, service: string, action: string, domain: string, port = '', siteType = '', target = '') =>
+      invoke<void>(IPC.sessionWebSite, [id, service, action, domain, port, siteType, target]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

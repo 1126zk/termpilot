@@ -702,12 +702,16 @@ function DockerSection(props: { sessionId: string }) {
   )
 }
 
-/** 从采集到的文件列表解析站点：一文件一站点，文件名即域名。
+/** 从采集到的文件列表解析站点：文件是站点的身份（删除按文件名定位），显示名从内容解析
+    ——nginx 取 server_name + listen 端口，caddy 取块首行的站点地址（domain 或 http://domain:port）。
     nginx 剥掉注释行再识别（全注释的种子模板不算站点）；类型和目标尽力识别，认不出标自定义。 */
-function parseSites(files: WebConfFile[], svc: 'nginx' | 'caddy'): { domain: string; kind: string; target: string }[] {
+function parseSites(
+  files: WebConfFile[],
+  svc: 'nginx' | 'caddy'
+): { name: string; domain: string; port: string; kind: string; target: string }[] {
   const dir = svc === 'nginx' ? '/conf.d/' : '/sites/'
   const ext = svc === 'nginx' ? '.conf' : '.caddy'
-  const sites: { domain: string; kind: string; target: string }[] = []
+  const sites: { name: string; domain: string; port: string; kind: string; target: string }[] = []
   for (const f of files) {
     if (!f.path.includes(dir) || !f.path.endsWith(ext) || f.path.endsWith('/placeholder.caddy')) continue
     const body =
@@ -717,19 +721,32 @@ function parseSites(files: WebConfFile[], svc: 'nginx' | 'caddy'): { domain: str
             .filter((l) => !l.trim().startsWith('#'))
             .join('\n')
         : f.content
-    if (svc === 'nginx' && !body.includes('server_name')) continue
-    const domain = f.path.split('/').pop()!.slice(0, -ext.length)
+    if (!body.trim()) continue
+    const name = f.path.split('/').pop()!.slice(0, -ext.length)
+    let domain = ''
+    let port = '80'
+    if (svc === 'nginx') {
+      const sn = body.match(/server_name\s+([^;\s]+)/)
+      if (!sn) continue
+      domain = sn[1]
+      port = body.match(/listen\s+(?:\[::\]:)?(\d+)/)?.[1] ?? '80'
+    } else {
+      const addr = body.trimStart().split('\n')[0].replace(/\s*\{.*$/, '').replace(/^https?:\/\//, '')
+      const sep = addr.lastIndexOf(':')
+      domain = sep > 0 ? addr.slice(0, sep) : addr
+      port = sep > 0 ? addr.slice(sep + 1) : '80'
+    }
     const proxy = body.match(/reverse_proxy\s+(\S+)/) ?? body.match(/proxy_pass\s+https?:\/\/([^;\s]+)/)
     if (proxy) {
-      sites.push({ domain, kind: '反代', target: proxy[1] })
+      sites.push({ name, domain, port, kind: '反代', target: proxy[1] })
       continue
     }
     const root = body.match(/root\s+(?:\*\s+)?([^;\s]+)/)
     if (root && (svc === 'nginx' || body.includes('file_server'))) {
-      sites.push({ domain, kind: '静态', target: root[1] })
+      sites.push({ name, domain, port, kind: '静态', target: root[1] })
       continue
     }
-    sites.push({ domain, kind: '自定义', target: '' })
+    sites.push({ name, domain, port, kind: '自定义', target: '' })
   }
   return sites
 }
@@ -803,11 +820,15 @@ function WebSection(props: { sessionId: string }) {
   }
 
   const submitSite = () => {
-    const d = domain.trim()
+    // 域名和端口一体填写（example.com 或 example.com:8080），这里拆开
+    const raw = domain.trim()
+    const sep = raw.lastIndexOf(':')
+    const d = sep > 0 ? raw.slice(0, sep) : raw
+    const p = sep > 0 ? raw.slice(sep + 1) : ''
     const t = target.trim()
     setSubmitting(true)
     void window.api.sessions
-      .webSite(props.sessionId, webTab, 'add', d, siteType, t)
+      .webSite(props.sessionId, webTab, 'add', d, p, siteType, t)
       .then(() => {
         setNotice(`站点 ${d} 已保存${svc?.state === 'running' ? '并生效' : '，容器启动后生效'}`)
         setAddOpen(false)
@@ -827,7 +848,7 @@ function WebSection(props: { sessionId: string }) {
     }
     setConfirmDelSite(null)
     void window.api.sessions
-      .webSite(props.sessionId, webTab, 'del', siteDomain, '', '')
+      .webSite(props.sessionId, webTab, 'del', siteDomain)
       .then(() => loadWebInfo(props.sessionId, true))
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
   }
@@ -880,8 +901,10 @@ function WebSection(props: { sessionId: string }) {
                 <p className="py-1.5 text-sm text-muted-foreground">还没有站点</p>
               ) : (
                 sites.map((s) => (
-                  <div key={s.domain} className="flex items-center gap-2 py-1 text-sm">
-                    <span>{s.domain}</span>
+                  <div key={s.name} className="flex items-center gap-2 py-1 text-sm">
+                    <span>
+                      {s.domain}:{s.port}
+                    </span>
                     <span className="truncate text-muted-foreground">
                       {s.kind}
                       {s.target ? ` → ${s.target}` : ''}
@@ -890,13 +913,13 @@ function WebSection(props: { sessionId: string }) {
                       type="button"
                       className={cn(
                         'ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs',
-                        confirmDelSite === s.domain
+                        confirmDelSite === s.name
                           ? 'bg-destructive/15 text-destructive'
                           : 'text-muted-foreground/60 hover:text-destructive'
                       )}
-                      onClick={() => delSite(s.domain)}
+                      onClick={() => delSite(s.name)}
                     >
-                      {confirmDelSite === s.domain ? '确认' : '删除'}
+                      {confirmDelSite === s.name ? '确认' : '删除'}
                     </button>
                   </div>
                 ))
@@ -925,8 +948,8 @@ function WebSection(props: { sessionId: string }) {
                   <Input
                     value={domain}
                     onChange={(e) => setDomain(e.target.value)}
-                    placeholder="域名 example.com"
-                    className="h-7 w-36 text-sm"
+                    placeholder="域名 example.com:80"
+                    className="h-7 w-44 text-sm"
                   />
                   <div className="relative">
                     <Input
@@ -936,7 +959,7 @@ function WebSection(props: { sessionId: string }) {
                       onBlur={() => setTargetFocus(false)}
                       placeholder={siteType === 'proxy' ? '目标 127.0.0.1:8080' : '目录名 mysite'}
                       autoComplete="off"
-                      className="h-7 w-36 font-mono text-sm"
+                      className="h-7 w-48 font-mono text-sm"
                     />
                     {siteType === 'proxy' && targetFocus && filteredOptions.length > 0 && (
                       <div className="absolute left-0 top-full z-10 mt-1 max-h-40 w-max min-w-full max-w-72 overflow-auto rounded-md border bg-popover py-1 shadow-md">
