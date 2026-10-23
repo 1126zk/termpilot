@@ -137,6 +137,28 @@ func (a *App) hSessionWebInstall(args []interface{}) (interface{}, error) {
 	return nil, a.exec.WebInstall(id, name)
 }
 
+func (a *App) hSessionWebSite(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	service, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	action, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	domain, err := argStr(args, 3)
+	if err != nil {
+		return nil, err
+	}
+	siteType, _ := argStr(args, 4) // del 时为空
+	target, _ := argStr(args, 5)
+	return nil, a.exec.WebSite(id, service, action, domain, siteType, target)
+}
+
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

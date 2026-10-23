@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { MoreHorizontal, RefreshCw, X } from 'lucide-react'
-import type { DockerInfo, ProcInfo, ServerMetrics } from '../../../shared/types'
+import type { DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -438,6 +439,7 @@ function ActionCell(props: { confirming: boolean; onConfirm: () => void; childre
 function DockerSection(props: { sessionId: string }) {
   const cached = useAppStore((s) => s.dockerBySession[props.sessionId])
   const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
+  const loadWebInfo = useAppStore((s) => s.loadWebInfo)
   const setNotice = useAppStore((s) => s.setNotice)
   // 删除两步确认：菜单里点了删除，该行 ⋯ 变成红色「确认」，3 秒不点恢复
   const [confirmDel, setConfirmDel] = useState<{ action: string; id: string } | null>(null)
@@ -468,6 +470,8 @@ function DockerSection(props: { sessionId: string }) {
       .then((out) => {
         if (action === 'save' && out) setNotice(`已导出到服务器 ${out}，从文件面板下载`)
         loadDockerInfo(props.sessionId, true)
+        // 容器增删/启停直接影响网站页的"装没装、跑没跑"，顺手刷新它的缓存
+        if (['start', 'stop', 'restart', 'rm'].includes(action)) loadWebInfo(props.sessionId, true)
       })
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
   }
@@ -698,8 +702,41 @@ function DockerSection(props: { sessionId: string }) {
   )
 }
 
+/** 从采集到的文件列表解析站点：一文件一站点，文件名即域名。
+    nginx 剥掉注释行再识别（全注释的种子模板不算站点）；类型和目标尽力识别，认不出标自定义。 */
+function parseSites(files: WebConfFile[], svc: 'nginx' | 'caddy'): { domain: string; kind: string; target: string }[] {
+  const dir = svc === 'nginx' ? '/conf.d/' : '/sites/'
+  const ext = svc === 'nginx' ? '.conf' : '.caddy'
+  const sites: { domain: string; kind: string; target: string }[] = []
+  for (const f of files) {
+    if (!f.path.includes(dir) || !f.path.endsWith(ext) || f.path.endsWith('/placeholder.caddy')) continue
+    const body =
+      svc === 'nginx'
+        ? f.content
+            .split('\n')
+            .filter((l) => !l.trim().startsWith('#'))
+            .join('\n')
+        : f.content
+    if (svc === 'nginx' && !body.includes('server_name')) continue
+    const domain = f.path.split('/').pop()!.slice(0, -ext.length)
+    const proxy = body.match(/reverse_proxy\s+(\S+)/) ?? body.match(/proxy_pass\s+https?:\/\/([^;\s]+)/)
+    if (proxy) {
+      sites.push({ domain, kind: '反代', target: proxy[1] })
+      continue
+    }
+    const root = body.match(/root\s+(?:\*\s+)?([^;\s]+)/)
+    if (root && (svc === 'nginx' || body.includes('file_server'))) {
+      sites.push({ domain, kind: '静态', target: root[1] })
+      continue
+    }
+    sites.push({ domain, kind: '自定义', target: '' })
+  }
+  return sites
+}
+
 /** 网站页：nginx / caddy 左右切换。只管容器化的实例（固定容器名），宿主机直装的不管。
     没装时给一键安装（alpine 小镜像，配置收在 ~/.termpilot/<名字>/ 下）；装了显示配置原文。
+    两边都支持站点增删（一站点一文件，写盘 → 校验 → 热加载）；caddy 自动 HTTPS，nginx 只生成 HTTP。
     结果走 store 缓存；页面开着每 15 秒后台更新。 */
 function WebSection(props: { sessionId: string }) {
   const [webTab, setWebTab] = useState<'nginx' | 'caddy'>('nginx')
@@ -707,12 +744,50 @@ function WebSection(props: { sessionId: string }) {
   const cached = useAppStore((s) => s.webBySession[props.sessionId])
   const loadWebInfo = useAppStore((s) => s.loadWebInfo)
   const setNotice = useAppStore((s) => s.setNotice)
+  // 添加站点对话框
+  const [addOpen, setAddOpen] = useState(false)
+  const [siteType, setSiteType] = useState<'proxy' | 'static'>('proxy')
+  const [domain, setDomain] = useState('')
+  const [target, setTarget] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  // 删站点两步确认：点了变红「确认」，3 秒不点恢复
+  const [confirmDelSite, setConfirmDelSite] = useState<string | null>(null)
 
   useEffect(() => {
     loadWebInfo(props.sessionId)
     const timer = window.setInterval(() => loadWebInfo(props.sessionId), 15000)
     return () => window.clearInterval(timer)
   }, [props.sessionId, loadWebInfo])
+
+  const info = cached?.info ?? null
+  const svc = info?.[webTab]
+  const file = webTab === 'nginx' ? '~/.termpilot/nginx/conf.d/*.conf' : '~/.termpilot/caddy/Caddyfile + sites/*.caddy'
+  const sites = svc ? parseSites(svc.files, webTab) : []
+  // 反代目标的候选：host 网络下写 127.0.0.1:宿主机发布端口，只列发布了端口的容器
+  //（nginx/caddy 自己不列，IPv4/IPv6 重复映射去重）；name 仅用于显示，填入的是纯地址；
+  // Docker 页没采过就在打开表单时补采
+  const containers = useAppStore((s) => s.dockerBySession[props.sessionId]?.info?.containers)
+  const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
+  const containerOptions = Array.from(
+    new Map(
+      (containers ?? [])
+        .filter((c) => c.name !== 'nginx' && c.name !== 'caddy')
+        .flatMap((c) =>
+          Array.from(c.ports.matchAll(/(?:0\.0\.0\.0|\[::\]):(\d+)(?:-\d+)?->/g), (m) => [`127.0.0.1:${m[1]}`, c.name] as const)
+        )
+    ).entries()
+  ).map(([value, name]) => ({ value, name }))
+  // 候选下拉：聚焦时浮出，按输入过滤（地址和容器名都参与）；点选用 onMouseDown 抢在 blur 前落定
+  const [targetFocus, setTargetFocus] = useState(false)
+  const targetQuery = target.trim()
+  const filteredOptions = containerOptions.filter(
+    (o) => (o.value.includes(targetQuery) || o.name.includes(targetQuery)) && o.value !== targetQuery
+  )
+
+  const openAdd = () => {
+    setAddOpen(true)
+    if (!containers) loadDockerInfo(props.sessionId)
+  }
 
   const install = () => {
     setInstalling(true)
@@ -727,62 +802,202 @@ function WebSection(props: { sessionId: string }) {
       .finally(() => setInstalling(false))
   }
 
-  const info = cached?.info ?? null
-  const svc = info?.[webTab]
-  const file = webTab === 'nginx' ? '~/.termpilot/nginx/conf.d/*.conf' : '~/.termpilot/caddy/Caddyfile'
+  const submitSite = () => {
+    const d = domain.trim()
+    const t = target.trim()
+    setSubmitting(true)
+    void window.api.sessions
+      .webSite(props.sessionId, webTab, 'add', d, siteType, t)
+      .then(() => {
+        setNotice(`站点 ${d} 已保存${svc?.state === 'running' ? '并生效' : '，容器启动后生效'}`)
+        setAddOpen(false)
+        setDomain('')
+        setTarget('')
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSubmitting(false))
+  }
+
+  const delSite = (siteDomain: string) => {
+    if (confirmDelSite !== siteDomain) {
+      setConfirmDelSite(siteDomain)
+      window.setTimeout(() => setConfirmDelSite((cur) => (cur === siteDomain ? null : cur)), 3000)
+      return
+    }
+    setConfirmDelSite(null)
+    void window.api.sessions
+      .webSite(props.sessionId, webTab, 'del', siteDomain, '', '')
+      .then(() => loadWebInfo(props.sessionId, true))
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+  }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-xl border">
-      <div className="flex items-center gap-1 border-b px-3 py-2 text-sm">
-        {([
-          ['nginx', 'nginx'],
-          ['caddy', 'caddy']
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={cn(
-              'rounded-md px-2.5 py-1',
-              webTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-            onClick={() => setWebTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {info && !info.dockerAvailable ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker，网站服务依赖容器运行</div>
-      ) : info && svc && !svc.state ? (
-        <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
-          <p>还没有安装 {webTab}</p>
-          <Button size="sm" disabled={installing} onClick={install}>
-            {installing ? '安装中…' : `一键安装 ${webTab}:alpine`}
-          </Button>
+    <>
+      <div className="flex min-h-0 flex-1 flex-col rounded-xl border">
+        <div className="flex items-center gap-1 border-b px-3 py-2 text-sm">
+          {([
+            ['nginx', 'nginx'],
+            ['caddy', 'caddy']
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={cn(
+                'rounded-md px-2.5 py-1',
+                webTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+              onClick={() => setWebTab(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-mono text-sm text-muted-foreground">{file}</p>
-            {svc && svc.state !== '' && svc.state !== 'running' && (
-              <p className="shrink-0 text-sm text-muted-foreground">容器状态：{svc.state}</p>
-            )}
+        {info && !info.dockerAvailable ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker，网站服务依赖容器运行</div>
+        ) : info && svc && !svc.state ? (
+          <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
+            <p>还没有安装 {webTab}</p>
+            <Button size="sm" disabled={installing} onClick={install}>
+              {installing ? '安装中…' : `一键安装 ${webTab}:alpine`}
+            </Button>
           </div>
-          {svc?.conf ? (
-            <pre className="mt-2 rounded-md bg-muted p-2 font-mono text-sm break-all whitespace-pre-wrap select-text">
-              {svc.conf}
-            </pre>
-          ) : (
-            info &&
-            svc && (
-              <p className="py-2 text-center text-sm text-muted-foreground">
-                {svc.hasConf ? '（空文件）' : webTab === 'nginx' ? '还没有 .conf 配置文件' : `读取不到 ${file}`}
-              </p>
-            )
-          )}
-        </div>
-      )}
-    </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <div className="border-b px-3 py-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">站点</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-muted-foreground"
+                  onClick={() => (addOpen ? setAddOpen(false) : openAdd())}
+                >
+                  {addOpen ? '收起' : '+ 添加站点'}
+                </Button>
+              </div>
+              {sites.length === 0 ? (
+                <p className="py-1.5 text-sm text-muted-foreground">还没有站点</p>
+              ) : (
+                sites.map((s) => (
+                  <div key={s.domain} className="flex items-center gap-2 py-1 text-sm">
+                    <span>{s.domain}</span>
+                    <span className="truncate text-muted-foreground">
+                      {s.kind}
+                      {s.target ? ` → ${s.target}` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      className={cn(
+                        'ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs',
+                        confirmDelSite === s.domain
+                          ? 'bg-destructive/15 text-destructive'
+                          : 'text-muted-foreground/60 hover:text-destructive'
+                      )}
+                      onClick={() => delSite(s.domain)}
+                    >
+                      {confirmDelSite === s.domain ? '确认' : '删除'}
+                    </button>
+                  </div>
+                ))
+              )}
+              {/* 内联添加表单：就地展开一行，不用弹窗 */}
+              {addOpen && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
+                  <div className="flex gap-1 text-sm">
+                    {([
+                      ['proxy', '反代'],
+                      ['static', '静态']
+                    ] as const).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={cn(
+                          'rounded px-1.5 py-0.5',
+                          siteType === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setSiteType(key)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <Input
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    placeholder="域名 example.com"
+                    className="h-7 w-36 text-sm"
+                  />
+                  <div className="relative">
+                    <Input
+                      value={target}
+                      onChange={(e) => setTarget(e.target.value)}
+                      onFocus={() => setTargetFocus(true)}
+                      onBlur={() => setTargetFocus(false)}
+                      placeholder={siteType === 'proxy' ? '目标 127.0.0.1:8080' : '目录名 mysite'}
+                      autoComplete="off"
+                      className="h-7 w-36 font-mono text-sm"
+                    />
+                    {siteType === 'proxy' && targetFocus && filteredOptions.length > 0 && (
+                      <div className="absolute left-0 top-full z-10 mt-1 max-h-40 w-max min-w-full max-w-72 overflow-auto rounded-md border bg-popover py-1 shadow-md">
+                        {filteredOptions.map((o) => (
+                          <button
+                            key={o.value}
+                            type="button"
+                            className="block w-full px-2.5 py-1 text-left font-mono text-sm whitespace-nowrap hover:bg-accent"
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              setTarget(o.value)
+                              setTargetFocus(false)
+                            }}
+                          >
+                            {o.value}
+                            <span className="text-muted-foreground">（{o.name}）</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <Button size="sm" className="h-7 px-2" disabled={submitting || !domain.trim() || !target.trim()} onClick={submitSite}>
+                    {submitting ? '生效中…' : '确认'}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setAddOpen(false)}>
+                    取消
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-mono text-sm text-muted-foreground">{file}</p>
+                {svc && svc.state !== '' && svc.state !== 'running' && (
+                  <p className="shrink-0 text-sm text-muted-foreground">容器状态：{svc.state}</p>
+                )}
+              </div>
+              {svc && svc.files.length > 0 ? (
+                <div className="mt-2 rounded-md bg-muted p-2 font-mono text-sm">
+                  {svc.files.map((f, i) => (
+                    <div key={f.path}>
+                      {i > 0 && <div className="my-2 border-t border-border" />}
+                      {/* 路径用中性的白/深色，原文保持主题色 */}
+                      <p className="break-all text-neutral-600 select-text dark:text-neutral-200">{f.path}</p>
+                      <pre className="break-all whitespace-pre-wrap select-text">{f.content || '（空文件）'}</pre>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                info &&
+                svc && (
+                  <p className="py-2 text-center text-sm text-muted-foreground">
+                    {webTab === 'nginx' ? '还没有 .conf 配置文件' : '还没有配置文件'}
+                  </p>
+                )
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 

@@ -156,11 +156,16 @@ type WebInfo struct {
 }
 
 // WebServiceInfo 一个网站服务。State 是容器状态（running/exited 等），空串 = 还没装；
-// HasConf 区分配置文件"不存在"和"存在但为空"；Conf 是配置原文。
+// Files 是配置文件的（路径, 原文）列表，空 = 一个配置文件都没有。
 type WebServiceInfo struct {
-	State   string `json:"state"`
-	HasConf bool   `json:"hasConf"`
-	Conf    string `json:"conf"`
+	State string        `json:"state"`
+	Files []WebConfFile `json:"files"`
+}
+
+// WebConfFile 一份配置文件原文。Content 为空串 = 文件存在但内容是空的。
+type WebConfFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 // DiskUsage 一个挂载点的用量，字节数。

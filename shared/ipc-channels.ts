@@ -112,6 +112,7 @@ export const IPC = {
   sessionDockerAction: 'session:docker-action',
   sessionWeb: 'session:web',
   sessionWebInstall: 'session:web-install',
+  sessionWebSite: 'session:website',
   sessionSetOs: 'session:set-os',
   sessionRevealSecret: 'session:reveal-secret',
   shellsList: 'shells:list',

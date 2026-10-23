@@ -156,10 +156,14 @@ export interface WebInfo {
 export interface WebServiceInfo {
   /** 容器状态：running / exited 等；空串 = 还没装 */
   state: string
-  /** 配置文件是否存在（区分"读不到"和"空文件"） */
-  hasConf: boolean
-  /** 配置原文（~/.termpilot/<名字>/ 下的配置） */
-  conf: string
+  /** 配置文件列表（路径 + 原文）；空 = 一个配置文件都没有 */
+  files: WebConfFile[]
+}
+
+export interface WebConfFile {
+  path: string
+  /** 空串 = 文件存在但内容是空的 */
+  content: string
 }
 
 /** 一个挂载点的用量，字节数 */

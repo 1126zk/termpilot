@@ -2,6 +2,7 @@ package sshx
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -9,23 +10,20 @@ import (
 // 删容器后删掉对应目录即完全干净。宿主机上 apt 装的 nginx/caddy 面板不管。
 
 // webScript 一次性采集 nginx/caddy 容器状态和配置原文。先探测有没有 docker；
-// 容器用 docker inspect 按固定名字查，不存在则状态为空串。HASCONF 段区分
-// "配置文件不存在"和"存在但为空"，前端分开提示。
+// 容器用 docker inspect 按固定名字查，不存在则状态为空串。配置文件逐个输出，
+// 每份原文前面打一行 #TP-FILE:<路径> 标记，Go 侧按标记切成结构化列表。
 const webScript = `
 echo '#TP-DOCKER#'
 command -v docker >/dev/null 2>&1 && echo yes || echo no
 echo '#TP-NGINX-STATE#'
 docker inspect -f '{{.State.Status}}' nginx 2>/dev/null
-echo '#TP-NGINX-HASCONF#'
-ls "$HOME"/.termpilot/nginx/conf.d/*.conf >/dev/null 2>&1 && echo yes || echo no
 echo '#TP-NGINX-CONF#'
-for f in "$HOME"/.termpilot/nginx/conf.d/*.conf; do [ -f "$f" ] && echo "# ── $f" && cat "$f"; done
+for f in "$HOME"/.termpilot/nginx/conf.d/*.conf; do [ -f "$f" ] && echo "#TP-FILE:$f" && cat "$f"; done
 echo '#TP-CADDY-STATE#'
 docker inspect -f '{{.State.Status}}' caddy 2>/dev/null
-echo '#TP-CADDY-HASCONF#'
-[ -f "$HOME/.termpilot/caddy/Caddyfile" ] && echo yes || echo no
 echo '#TP-CADDY-CONF#'
-cat "$HOME/.termpilot/caddy/Caddyfile" 2>/dev/null
+f="$HOME/.termpilot/caddy/Caddyfile"; [ -f "$f" ] && echo "#TP-FILE:$f" && cat "$f"
+for f in "$HOME"/.termpilot/caddy/sites/*.caddy; do [ -f "$f" ] && echo "#TP-FILE:$f" && cat "$f"; done
 echo '#TP-END#'
 `
 
@@ -39,17 +37,48 @@ func (s *ExecService) CollectWeb(sessionID string) (*WebInfo, error) {
 	return &WebInfo{
 		DockerAvailable: strings.TrimSpace(sec["DOCKER"]) == "yes",
 		Nginx: WebServiceInfo{
-			State:   strings.TrimSpace(sec["NGINX-STATE"]),
-			HasConf: strings.TrimSpace(sec["NGINX-HASCONF"]) == "yes",
-			Conf:    strings.TrimSpace(sec["NGINX-CONF"]),
+			State: strings.TrimSpace(sec["NGINX-STATE"]),
+			Files: parseWebConfFiles(sec["NGINX-CONF"]),
 		},
 		Caddy: WebServiceInfo{
-			State:   strings.TrimSpace(sec["CADDY-STATE"]),
-			HasConf: strings.TrimSpace(sec["CADDY-HASCONF"]) == "yes",
-			Conf:    strings.TrimSpace(sec["CADDY-CONF"]),
+			State: strings.TrimSpace(sec["CADDY-STATE"]),
+			Files: parseWebConfFiles(sec["CADDY-CONF"]),
 		},
 	}, nil
 }
+
+// parseWebConfFiles 把采集输出按 #TP-FILE:<路径> 标记切成逐文件的（路径, 原文）列表。
+// 原文里的空行保留；标记行之前的输出（异常噪音）丢弃。
+func parseWebConfFiles(out string) []WebConfFile {
+	files := []WebConfFile{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(line, "#TP-FILE:") {
+			files = append(files, WebConfFile{Path: strings.TrimPrefix(line, "#TP-FILE:")})
+			continue
+		}
+		if len(files) == 0 {
+			continue
+		}
+		f := &files[len(files)-1]
+		if f.Content != "" {
+			f.Content += "\n"
+		}
+		f.Content += line
+	}
+	// 拼接时行尾多出来的换行修掉
+	for i := range files {
+		files[i].Content = strings.TrimRight(files[i].Content, "\n")
+	}
+	return files
+}
+
+// caddyPlaceholder 占位站点：sites 目录空了 = 空配置 = caddy 启动即退出，
+// 会被 restart 策略拉成崩溃循环，所以任何时刻保底要有一个站点。
+const caddyPlaceholder = `# 占位站点：加一个真实站点后可以删除
+:80 {
+    respond "caddy is running"
+}`
 
 // webInstallScript 一键安装脚本：备目录、补种子文件、拉镜像、起容器。
 // 固定命令无拼接，不存在注入面。pull 慢，超时给足。
@@ -57,9 +86,11 @@ func webInstallScript(name string) (string, bool) {
 	switch name {
 	case "nginx":
 		// conf.d 留空 nginx 也能跑（没有任何 server 块）；种子一份注释模板，
-		// 面板上有东西可看，也提示改完怎么 reload
+		// 面板上有东西可看，也提示改完怎么 reload。www 是静态站的网页目录（容器内 /usr/share/nginx/html）。
+		// 网关角色用 host 网络（同 1Panel 的 OpenResty）：直接占宿主机 80/443，
+		// 反代目标写 127.0.0.1:端口 即可，没有共享网络的心智负担
 		return `
-mkdir -p "$HOME/.termpilot/nginx/conf.d"
+mkdir -p "$HOME/.termpilot/nginx/conf.d" "$HOME/.termpilot/nginx/www"
 if [ ! -f "$HOME/.termpilot/nginx/conf.d/default.conf" ]; then
   cat > "$HOME/.termpilot/nginx/conf.d/default.conf" <<'EOF'
 # 站点配置写在这里，改完执行：docker exec nginx nginx -s reload
@@ -72,32 +103,38 @@ EOF
 fi
 docker pull nginx:alpine
 docker run -d --name nginx --restart unless-stopped \
-  -p 80:80 -p 443:443 \
+  --network host \
   -v "$HOME/.termpilot/nginx/conf.d:/etc/nginx/conf.d" \
+  -v "$HOME/.termpilot/nginx/www:/usr/share/nginx/html" \
   nginx:alpine
 `, true
 	case "caddy":
-		// 空配置 caddy 启动即退出，会被 restart 策略拉成崩溃循环（nginx 没这个问题），
-		// 所以播种一份最小可用配置；文件缺失或为空（! -s）都补。
-		// data（证书）和 config（autosave）也映射到目录，容器重建状态不丢
-		return `
-mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config"
+		// 主配置只做 import，站点一文件一个收在 sites/；网页文件放 www/（容器内 /srv）。
+		// data（证书）和 config（autosave）也映射到目录，容器重建状态不丢。
+		// 网络同 nginx 用 host 模式：直接占宿主机 80/443（含 UDP，HTTP/3 原生生效）
+		return fmt.Sprintf(`
+mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config" "$HOME/.termpilot/caddy/sites" "$HOME/.termpilot/caddy/www"
 if [ ! -s "$HOME/.termpilot/caddy/Caddyfile" ]; then
   cat > "$HOME/.termpilot/caddy/Caddyfile" <<'EOF'
-# 站点配置写在这里，改完执行：docker exec caddy caddy reload --config /etc/caddy/Caddyfile
-:80 {
-    respond "caddy is running"
-}
+# 站点在 sites/ 目录里，一站点一文件；面板可增删，改完执行：docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+import /etc/caddy/sites/*.caddy
+EOF
+fi
+if ! ls "$HOME"/.termpilot/caddy/sites/*.caddy >/dev/null 2>&1; then
+  cat > "$HOME/.termpilot/caddy/sites/placeholder.caddy" <<'EOF'
+%s
 EOF
 fi
 docker pull caddy:alpine
 docker run -d --name caddy --restart unless-stopped \
-  -p 80:80 -p 443:443 -p 443:443/udp \
+  --network host \
   -v "$HOME/.termpilot/caddy/Caddyfile:/etc/caddy/Caddyfile" \
+  -v "$HOME/.termpilot/caddy/sites:/etc/caddy/sites" \
+  -v "$HOME/.termpilot/caddy/www:/srv" \
   -v "$HOME/.termpilot/caddy/data:/data" \
   -v "$HOME/.termpilot/caddy/config:/config" \
   caddy:alpine
-`, true
+`, caddyPlaceholder), true
 	default:
 		return "", false
 	}
@@ -115,6 +152,120 @@ func (s *ExecService) WebInstall(sessionID, name string) error {
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return fmt.Errorf("安装 %s 失败（退出码 %d）：%s", name, *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
+// 站点表单字段的白名单：全部会进文件名或 Caddyfile 内容，必须防注入。
+var (
+	webDomainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
+	webTargetRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+:[0-9]{1,5}$`)
+	webDirRe    = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+)
+
+// WebSite 增删网站站点，service 只认 nginx/caddy。
+// nginx 站点在 conf.d/<域名>.conf（只生成 HTTP 站点，HTTPS 留手写），
+// caddy 站点在 sites/<域名>.caddy（HTTPS 自动）。容器在跑就先校验再热加载，
+// 校验失败删掉刚写的文件并把报错抛给前端；没在跑就只落盘，下次启动生效。
+func (s *ExecService) WebSite(sessionID, service, action, domain, siteType, target string) error {
+	if !webDomainRe.MatchString(domain) {
+		return fmt.Errorf("非法的域名：%q", domain)
+	}
+	var file, check, reload string
+	switch service {
+	case "nginx":
+		file = fmt.Sprintf(`"$HOME/.termpilot/nginx/conf.d/%s.conf"`, domain)
+		check = "docker exec nginx nginx -t"
+		reload = "docker exec nginx nginx -s reload"
+	case "caddy":
+		file = fmt.Sprintf(`"$HOME/.termpilot/caddy/sites/%s.caddy"`, domain)
+		check = "docker exec caddy caddy validate --config /etc/caddy/Caddyfile"
+		reload = "docker exec caddy caddy reload --config /etc/caddy/Caddyfile"
+	default:
+		return fmt.Errorf("不支持的服务：%q", service)
+	}
+	running := fmt.Sprintf(`[ "$(docker inspect -f '{{.State.Status}}' %s 2>/dev/null)" = "running" ]`, service)
+
+	var script string
+	switch action {
+	case "add":
+		var body, prepare string
+		switch {		case service == "nginx" && siteType == "proxy":
+			if !webTargetRe.MatchString(target) {
+				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
+			}
+			body = "server {\n    listen 80;\n    server_name " + domain + ";\n    location / {\n        proxy_pass http://" + target + ";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    }\n}"
+		case service == "nginx" && siteType == "static":
+			if !webDirRe.MatchString(target) {
+				return fmt.Errorf("非法的目录名：%q", target)
+			}
+			prepare = fmt.Sprintf(`mkdir -p "$HOME/.termpilot/nginx/www/%s"`, target)
+			body = "server {\n    listen 80;\n    server_name " + domain + ";\n    root /usr/share/nginx/html/" + target + ";\n    index index.html;\n}"
+		case service == "caddy" && siteType == "proxy":
+			if !webTargetRe.MatchString(target) {
+				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
+			}
+			body = domain + " {\n\treverse_proxy " + target + "\n}"
+		case service == "caddy" && siteType == "static":
+			if !webDirRe.MatchString(target) {
+				return fmt.Errorf("非法的目录名：%q", target)
+			}
+			prepare = fmt.Sprintf(`mkdir -p "$HOME/.termpilot/caddy/www/%s"`, target)
+			body = domain + " {\n\troot * /srv/" + target + "\n\tfile_server\n}"
+		default:
+			return fmt.Errorf("不支持的站点类型：%q", siteType)
+		}
+		// host 网络下 listen 80 只绑 IPv4：宿主机有 IPv6 协议栈就补一行 listen [::]:80，
+		// 没有就不写（避免绑 [::] 失败起不来）。caddy 默认双栈不用管。
+		v6 := ""
+		if service == "nginx" {
+			v6 = fmt.Sprintf(`[ -f /proc/net/if_inet6 ] && sed -i 's/    listen 80;/    listen 80;\n    listen [::]:80;/' %s`, file)
+		}
+		script = fmt.Sprintf(`
+%s
+cat > %s <<'EOF'
+%s
+EOF
+%s
+if %s; then
+  if ! %s; then
+    rm -f %s
+    exit 1
+  fi
+  %s
+fi
+`, prepare, file, body, v6, running, check, file, reload)
+	case "del":
+		if service == "caddy" {
+			// 删空了就补回占位站点，防止 caddy 拿到空配置崩溃循环（nginx 没这问题）
+			script = fmt.Sprintf(`
+rm -f %s
+if ! ls "$HOME"/.termpilot/caddy/sites/*.caddy >/dev/null 2>&1; then
+  cat > "$HOME/.termpilot/caddy/sites/placeholder.caddy" <<'EOF'
+%s
+EOF
+fi
+if %s; then
+  %s
+fi
+`, file, caddyPlaceholder, running, reload)
+		} else {
+			script = fmt.Sprintf(`
+rm -f %s
+if %s; then
+  %s
+fi
+`, file, running, reload)
+		}
+	default:
+		return fmt.Errorf("不支持的动作：%q", action)
+	}
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 30000})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("%s 站点失败（退出码 %d）：%s", action, *res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
