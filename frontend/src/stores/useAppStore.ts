@@ -109,7 +109,7 @@ interface AppState {
   /** 取服务器静态身份：有缓存且 10 分钟内就直接用，否则重新采一次 */
   loadServerInfo: (sessionId: string) => void
   /** 取 Docker 列表：15 秒内有缓存（含在途）就直接用，force 强制重采 */
-  loadDockerInfo: (sessionId: string, force?: boolean) => void
+  loadDockerInfo: (sessionId: string, force?: boolean) => Promise<void>
   loadWebInfo: (sessionId: string, force?: boolean) => void
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
@@ -297,9 +297,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const cached = get().dockerBySession[sessionId]
     const now = Date.now()
     // at 开始时就写：15 秒内的重复调用（含还在跑的）都跳过
-    if (!force && cached && now - cached.at < 15 * 1000) return
+    if (!force && cached && now - cached.at < 15 * 1000) return Promise.resolve()
     set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info: cached?.info ?? null, at: now } } })
-    void window.api.sessions
+    return window.api.sessions
       .docker(sessionId)
       .then((info) =>
         set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info, at: Date.now() } } })

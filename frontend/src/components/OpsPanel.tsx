@@ -469,6 +469,26 @@ function loadDockerMirrors(): DockerMirror[] {
   return DEFAULT_DOCKER_MIRRORS
 }
 
+/** 可点击的文件路径：点击切到现成的远程编辑器打开（可编辑、固定 tab），和文件面板同一通道。 */
+function PathLink(props: { sessionId: string; path: string; className?: string }) {
+  const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
+  const termId = useAppStore((s) => s.opsPanelTermId)
+  return (
+    <button
+      type="button"
+      title="点击编辑"
+      className={cn('cursor-pointer text-left hover:underline', props.className)}
+      onClick={() => {
+        if (!termId) return
+        const name = props.path.split('/').pop() ?? props.path
+        openRemoteEditor(termId, props.sessionId, { path: props.path, name }, true, false)
+      }}
+    >
+      {props.path}
+    </button>
+  )
+}
+
 /** 没装 Docker 的空态 + 一键安装。源列表可编辑（删/加/恢复默认），存面板本地，所有服务器共用。 */
 function DockerInstallSection(props: { sessionId: string }) {
   const [installing, setInstalling] = useState(false)
@@ -662,6 +682,8 @@ function DockerSection(props: { sessionId: string }) {
   const [confirmDel, setConfirmDel] = useState<{ action: string; id: string } | null>(null)
   // docker 服务操作（停止/重启/卸载）两步确认，同上
   const [confirmOp, setConfirmOp] = useState<string | null>(null)
+  // 手动刷新反馈：数据在飞就转圈
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     loadDockerInfo(props.sessionId)
@@ -745,10 +767,14 @@ function DockerSection(props: { sessionId: string }) {
         <button
           type="button"
           title="刷新"
-          className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-          onClick={() => loadDockerInfo(props.sessionId, true)}
+          disabled={refreshing}
+          className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-40"
+          onClick={() => {
+            setRefreshing(true)
+            void loadDockerInfo(props.sessionId, true).finally(() => setRefreshing(false))
+          }}
         >
-          <RefreshCw className="size-3" />
+          <RefreshCw className={cn('size-3', refreshing && 'animate-spin')} />
         </button>
       </div>
       <div>
@@ -945,7 +971,11 @@ function DockerSection(props: { sessionId: string }) {
       </div>
 
       <div className="flex items-center justify-between border-y bg-accent/40 px-3 py-1.5 font-mono text-sm text-muted-foreground">
-        <span>/etc/docker/daemon.json</span>
+        {info?.daemonJson ? (
+          <PathLink sessionId={props.sessionId} path="/etc/docker/daemon.json" />
+        ) : (
+          <span>/etc/docker/daemon.json</span>
+        )}
         <span className="flex items-center gap-1 font-sans">
           {info?.running
             ? [opBtn('restart', '重启'), opBtn('stop', '停止'), opBtn('uninstall', '删除')]
@@ -1370,8 +1400,12 @@ function WebSection(props: { sessionId: string }) {
                   {svc.files.map((f, i) => (
                     <div key={f.path}>
                       {i > 0 && <div className="my-2 border-t border-border" />}
-                      {/* 路径用中性的白/深色，原文保持主题色 */}
-                      <p className="break-all text-neutral-600 select-text dark:text-neutral-200">{f.path}</p>
+                      {/* 路径可点（点击进编辑器改）；原文保持主题色 */}
+                      <PathLink
+                        sessionId={props.sessionId}
+                        path={f.path}
+                        className="break-all text-neutral-600 select-text dark:text-neutral-200"
+                      />
                       <pre className="break-all whitespace-pre-wrap select-text">{f.content || '（空文件）'}</pre>
                     </div>
                   ))}
