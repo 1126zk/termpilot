@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { MoreHorizontal, RefreshCw, X } from 'lucide-react'
+import { CircleHelp, MoreHorizontal, RefreshCw, X } from 'lucide-react'
 import type { DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
@@ -928,7 +928,23 @@ function WebSection(props: { sessionId: string }) {
           <div className="min-h-0 flex-1 overflow-auto">
             <div className="border-b px-3 py-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">站点</span>
+                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                  站点
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <CircleHelp className="size-3.5 cursor-default text-muted-foreground/60 hover:text-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="start" sideOffset={4} className="w-max max-w-none whitespace-pre">
+                      {`HTTPS 证书：
+· IP 站点 → 自动自签（10 年有效），浏览器警告属正常
+· 域名站点 → Let's Encrypt 免费签发（域名需先解析过来），临期点"续期"
+· 买来的证书 → 传到 ~/.termpilot/nginx/ssl/certs/<域名>/ 后打开开关
+  例：~/.termpilot/nginx/ssl/certs/blog.example.com/
+      ├── fullchain.pem
+      └── privkey.pem`}
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
                 <Button
                   size="sm"
                   variant="ghost"
