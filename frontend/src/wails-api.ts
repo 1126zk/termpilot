@@ -84,6 +84,11 @@ const api = {
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
     web: (id: string) => invoke<WebInfo>(IPC.sessionWeb, [id]),
     webInstall: (id: string, name: string) => invoke<void>(IPC.sessionWebInstall, [id, name]),
+    /** 安装过程的逐行输出订阅；返回退订函数 */
+    onWebInstallProgress: (id: string, cb: (line: string) => void) =>
+      on<{ id: string; line: string }>(IPC.sessionWebInstallProgress, (p) => {
+        if (p.id === id) cb(p.line)
+      }),
     webSite: (id: string, service: string, action: string, domain: string, port = '', siteType = '', target = '') =>
       invoke<void>(IPC.sessionWebSite, [id, service, action, domain, port, siteType, target]),
     webSSL: (id: string, domain: string, op: 'on' | 'renew' | 'off' = 'on') =>

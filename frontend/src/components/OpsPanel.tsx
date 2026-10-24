@@ -1103,7 +1103,10 @@ function parseSites(
     结果走 store 缓存；页面开着每 15 秒后台更新。 */
 function WebSection(props: { sessionId: string }) {
   const [webTab, setWebTab] = useState<'nginx' | 'caddy'>('nginx')
-  const [installing, setInstalling] = useState(false)
+  // 正在安装的服务名（同一时间只跑一个）；按钮和日志只在对应子页显示，切页不串
+  const [installing, setInstalling] = useState<string | null>(null)
+  const [installLog, setInstallLog] = useState<string[]>([])
+  const installLogRef = useRef<HTMLDivElement>(null)
   const cached = useAppStore((s) => s.webBySession[props.sessionId])
   const loadWebInfo = useAppStore((s) => s.loadWebInfo)
   const setNotice = useAppStore((s) => s.setNotice)
@@ -1156,17 +1159,31 @@ function WebSection(props: { sessionId: string }) {
   }
 
   const install = () => {
-    setInstalling(true)
-    setNotice(`正在拉取 ${webTab}:alpine 并启动容器，镜像要下载一会…`, true)
+    const name = webTab
+    setInstalling(name)
+    setInstallLog([])
+    setNotice(`正在拉取 ${name}:alpine 并启动容器，镜像要下载一会…`, true)
     void window.api.sessions
-      .webInstall(props.sessionId, webTab)
+      .webInstall(props.sessionId, name)
       .then(() => {
-        setNotice(`${webTab} 容器已启动，配置在 ~/.termpilot/${webTab}/ 下`)
+        setNotice(`${name} 容器已启动，配置在 ~/.termpilot/${name}/ 下`)
         loadWebInfo(props.sessionId, true)
       })
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
-      .finally(() => setInstalling(false))
+      .finally(() => setInstalling(null))
   }
+
+  // 安装过程的逐行输出：安装期间订阅，退订随安装结束；最多留 200 行，自动滚到底
+  useEffect(() => {
+    if (installing === null) return
+    return window.api.sessions.onWebInstallProgress(props.sessionId, (line) =>
+      setInstallLog((cur) => [...cur.slice(-199), line])
+    )
+  }, [installing, props.sessionId])
+  useEffect(() => {
+    const el = installLogRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [installLog])
 
   const submitSite = () => {
     // 域名和端口一体填写（example.com 或 example.com:8080），这里拆开
@@ -1247,9 +1264,21 @@ function WebSection(props: { sessionId: string }) {
         ) : info && svc && !svc.state ? (
           <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
             <p>还没有安装 {webTab}</p>
-            <Button size="sm" disabled={installing} onClick={install}>
-              {installing ? '安装中…' : `一键安装 ${webTab}:alpine`}
+            <Button size="sm" disabled={installing !== null} onClick={install}>
+              {installing === webTab ? '安装中…' : `一键安装 ${webTab}:alpine`}
             </Button>
+            {installing === webTab && installLog.length > 0 && (
+              <div
+                ref={installLogRef}
+                className="max-h-44 w-full overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text"
+              >
+                {installLog.map((line, i) => (
+                  <div key={i} className="break-all whitespace-pre-wrap">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">

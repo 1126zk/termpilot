@@ -172,12 +172,13 @@ docker run -d --name caddy --restart unless-stopped \
 }
 
 // WebInstall 一键安装 nginx/caddy 容器。name 只认白名单里的两个。
-func (s *ExecService) WebInstall(sessionID, name string) error {
+// onLine 非空时 stdout 逐行回调（拉镜像进度实时下发）。
+func (s *ExecService) WebInstall(sessionID, name string, onLine func(string)) error {
 	script, ok := webInstallScript(name)
 	if !ok {
 		return fmt.Errorf("不支持的安装目标：%q", name)
 	}
-	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000})
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000, OnLine: onLine})
 	if err != nil {
 		return err
 	}

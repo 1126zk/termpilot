@@ -227,6 +227,9 @@ if [ ! -f /etc/docker/daemon.json ]; then
 EOF
 fi
 systemctl enable --now docker
+# apt 装包时 docker 已被启动，配置文件写在它启动之后——得 reload 才会读到
+#（registry-mirrors 是热加载配置，不用重启容器）
+systemctl reload docker 2>/dev/null || true
 docker info >/dev/null
 `
 

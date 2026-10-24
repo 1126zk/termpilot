@@ -166,7 +166,9 @@ func (a *App) hSessionWebInstall(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, a.exec.WebInstall(id, name)
+	return nil, a.exec.WebInstall(id, name, func(line string) {
+		a.emit("session:web-install-progress", map[string]string{"id": id, "line": line})
+	})
 }
 
 func (a *App) hSessionWebSite(args []interface{}) (interface{}, error) {

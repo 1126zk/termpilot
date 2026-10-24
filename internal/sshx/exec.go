@@ -156,19 +156,22 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 	var copyWg sync.WaitGroup
 	copyWg.Add(2)
 	if opts.OnLine != nil {
-		// 流式输出：TeeReader 照常写满缓冲，Scanner 按行回调
-		go func() {
+		// 流式输出：TeeReader 照常写满缓冲，Scanner 按行回调。
+		// docker/apt 这类工具的进度都写在 stderr，两路都要接
+		scan := func(r io.Reader, w io.Writer) {
 			defer copyWg.Done()
-			scanner := bufio.NewScanner(io.TeeReader(stdout, outBuf))
+			scanner := bufio.NewScanner(io.TeeReader(r, w))
 			scanner.Buffer(make([]byte, 64*1024), 64*1024)
 			for scanner.Scan() {
 				opts.OnLine(scanner.Text())
 			}
-		}()
+		}
+		go scan(stdout, outBuf)
+		go scan(stderr, errBuf)
 	} else {
 		go func() { defer copyWg.Done(); _, _ = io.Copy(outBuf, stdout) }()
+		go func() { defer copyWg.Done(); _, _ = io.Copy(errBuf, stderr) }()
 	}
-	go func() { defer copyWg.Done(); _, _ = io.Copy(errBuf, stderr) }()
 
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- session.Wait() }()

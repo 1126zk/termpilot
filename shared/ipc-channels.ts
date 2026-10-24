@@ -115,6 +115,7 @@ export const IPC = {
   sessionDockerService: 'session:docker-service',
   sessionWeb: 'session:web',
   sessionWebInstall: 'session:web-install',
+  sessionWebInstallProgress: 'session:web-install-progress',
   sessionWebSite: 'session:website',
   sessionWebSSL: 'session:web-ssl',
   sessionSetOs: 'session:set-os',
