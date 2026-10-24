@@ -326,33 +326,46 @@ fi
 // webIPv4Re 站点是 IPv4 地址时走自签：公网 CA 不给 IP 签证书。
 var webIPv4Re = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
 
-// WebSSL 给 nginx 站点开启 HTTPS：已有证书直接用，没有就签——域名走 acme.sh 一次性容器
+// WebSSL nginx 站点的 HTTPS 开关：op=on 开启（没有证书先签），renew 强制续期重签，
+// off 关闭（删 443 块，证书文件保留，再开直接用）。签发：域名走 acme.sh 一次性容器
 // 的 ACME（webroot 挑战，80 端口），IP 走宿主机 openssl 自签（10 年期带 SAN，秒级）。
-// 签完往站点配置追加 443 ssl 块（从现有配置认 proxy_pass/root，认不出的报错让手改），
-// nginx -t 通过才 reload。域名证书写 /etc/cron.d 续期任务；自签不续。只支持 80 端口站点。
-func (s *ExecService) WebSSL(sessionID, domain string) error {
+// 443 块从现有配置认 proxy_pass/root 追加，认不出的报错让手改；nginx -t 通过才 reload。
+// 续期靠面板手动，不写定时任务。只支持 80 端口站点——挑战固定走 80。
+func (s *ExecService) WebSSL(sessionID, domain, op string) error {
 	if !webDomainRe.MatchString(domain) {
 		return fmt.Errorf("非法的域名：%q", domain)
 	}
+	if op == "off" {
+		return s.webSSLOff(sessionID, domain)
+	}
+	force := op == "renew"
 	certsDir := "$HOME/.termpilot/nginx/ssl/certs/" + domain
 	var issue string
 	if webIPv4Re.MatchString(domain) {
-		// IP：openssl 本地自签，不拉镜像不联网
+		// IP：openssl 本地自签覆盖旧的，不拉镜像不联网
 		issue = `openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "` + certsDir + `/privkey.pem" \
   -out "` + certsDir + `/fullchain.pem" \
   -days 3650 -subj "/CN=` + domain + `" -addext "subjectAltName=IP:` + domain + `"`
 	} else {
-		// 域名：acme.sh 一次性容器签发 + 装到统一约定路径
+		// 域名：acme.sh 一次性容器签发（续期带 --force 强制重签）+ 装到统一约定路径
+		forceFlag := ""
+		if force {
+			forceFlag = " --force"
+		}
 		issue = `docker run --rm \
   -v "$HOME/.termpilot/nginx/www:/acme" \
   -v "$HOME/.termpilot/nginx/ssl:/acme.sh" \
-  neilpang/acme.sh --issue -d ` + domain + ` -w /acme --home /acme.sh --server letsencrypt && \
+  neilpang/acme.sh --issue -d ` + domain + ` -w /acme --home /acme.sh --server letsencrypt` + forceFlag + ` && \
 docker run --rm \
   -v "$HOME/.termpilot/nginx/ssl:/acme.sh" \
   neilpang/acme.sh --install-cert -d ` + domain + ` --home /acme.sh \
   --key-file /acme.sh/certs/` + domain + `/privkey.pem \
   --fullchain-file /acme.sh/certs/` + domain + `/fullchain.pem`
+	}
+	forceShell := "0"
+	if force {
+		forceShell = "1"
 	}
 	script := fmt.Sprintf(`
 conf="$HOME/.termpilot/nginx/conf.d/%[1]s.conf"
@@ -360,7 +373,7 @@ conf="$HOME/.termpilot/nginx/conf.d/%[1]s.conf"
 [ "$(docker inspect -f '{{.State.Status}}' nginx 2>/dev/null)" = "running" ] || { echo "nginx 没在运行，先启动容器" >&2; exit 1; }
 docker exec nginx test -d /etc/nginx/ssl || { echo "nginx 容器缺少 ssl 挂载，删掉重装一次一键安装即可" >&2; exit 1; }
 mkdir -p "%[2]s" "$HOME/.termpilot/nginx/www"
-if [ ! -f "%[2]s/fullchain.pem" ]; then
+if [ ! -f "%[2]s/fullchain.pem" ] || [ "%[4]s" = "1" ]; then
 %[3]s || exit 1
 fi
 if ! grep -q 'listen 443 ssl' "$conf"; then
@@ -404,21 +417,46 @@ if ! grep -q 'listen \[::\]:443' "$conf" && [ -f /proc/net/if_inet6 ]; then
 fi
 docker exec nginx nginx -t || exit 1
 docker exec nginx nginx -s reload || exit 1
-if [ -d /etc/cron.d ]; then
-  cat > /etc/cron.d/termpilot-nginx-ssl <<EOF
-# TermPilot：nginx 域名证书续期，每月 1 号 03:37 跑（自签的 10 年期不续）
-37 3 1 * * $(whoami) docker run --rm -v $HOME/.termpilot/nginx/www:/acme -v $HOME/.termpilot/nginx/ssl:/acme.sh neilpang/acme.sh --cron --home /acme.sh && docker exec nginx nginx -s reload
-EOF
-else
-  echo "提示：服务器没有 cron，域名证书到期前要手动续期" >&2
-fi
-`, domain, certsDir, issue)
+`, domain, certsDir, issue, forceShell)
 	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000})
 	if err != nil {
 		return err
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return fmt.Errorf("开启 HTTPS 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
+// webSSLOff 关掉站点的 HTTPS：把配置里带 listen 443 ssl 的 server 块整个删掉再 reload。
+// 证书文件留着不动，重新开启直接用。awk 按块扫：块以行首 server { 开始、行首 } 结束，
+// 不含 443 listen 的块原样保留。
+func (s *ExecService) webSSLOff(sessionID, domain string) error {
+	script := fmt.Sprintf(`
+conf="$HOME/.termpilot/nginx/conf.d/%[1]s.conf"
+[ -f "$conf" ] || { echo "站点不存在：%[1]s" >&2; exit 1; }
+grep -q 'listen 443 ssl' "$conf" || exit 0
+awk '
+/^server \{/ { inblk=1; ssl=0; buf=$0; next }
+inblk {
+  buf = buf ORS $0
+  if ($0 ~ /listen 443 ssl/) ssl=1
+  if ($0 ~ /^}/) { if (!ssl) print buf; inblk=0 }
+  next
+}
+{ print }
+' "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
+if [ "$(docker inspect -f '{{.State.Status}}' nginx 2>/dev/null)" = "running" ]; then
+  docker exec nginx nginx -t || exit 1
+  docker exec nginx nginx -s reload || exit 1
+fi
+`, domain)
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 30000})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("关闭 HTTPS 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }

@@ -169,7 +169,13 @@ func (a *App) hSessionWebSSL(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, a.exec.WebSSL(id, domain)
+	op := "on" // on 开启 / renew 强制续期 / off 关闭
+	if len(args) > 2 {
+		if v, ok := args[2].(string); ok && v != "" {
+			op = v
+		}
+	}
+	return nil, a.exec.WebSSL(id, domain, op)
 }
 
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {

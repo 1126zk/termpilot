@@ -5,6 +5,7 @@ import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -861,13 +862,20 @@ function WebSection(props: { sessionId: string }) {
       .finally(() => setSubmitting(false))
   }
 
-  const enableHTTPS = (d: string) => {
+  const setHTTPS = (d: string, op: 'on' | 'renew' | 'off') => {
     setSslBusy(d)
-    setNotice(`正在为 ${d} 签发证书，要去 Let's Encrypt 走一轮验证…`, true)
+    setNotice(
+      op === 'off'
+        ? `正在关闭 ${d} 的 HTTPS…`
+        : op === 'renew'
+          ? `正在为 ${d} 重新签发证书…`
+          : `正在为 ${d} 签发证书，要去 Let's Encrypt 走一轮验证…`,
+      true
+    )
     void window.api.sessions
-      .webSSL(props.sessionId, d)
+      .webSSL(props.sessionId, d, op)
       .then(() => {
-        setNotice(`${d} 的 HTTPS 已开启`)
+        setNotice(op === 'off' ? `${d} 的 HTTPS 已关闭` : op === 'renew' ? `${d} 的证书已续期` : `${d} 的 HTTPS 已开启`)
         loadWebInfo(props.sessionId, true)
       })
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
@@ -935,10 +943,10 @@ function WebSection(props: { sessionId: string }) {
               ) : (
                 sites.map((s) => (
                   <div key={s.name} className="flex items-center gap-2 py-1 text-sm">
-                    <span>
+                    <span className="w-44 shrink-0 truncate">
                       {s.domain}:{s.port}
                     </span>
-                    <span className="truncate text-muted-foreground">
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
                       {s.kind}
                       {s.target ? ' → ' : ''}
                       {s.target &&
@@ -955,34 +963,54 @@ function WebSection(props: { sessionId: string }) {
                           s.target
                         ))}
                     </span>
-                    {webTab === 'nginx' && s.proto === 'http' && svc?.state === 'running' && (
+                    {/* Switch 在 http/https 前面；仅 nginx 的 80 端口站点可开关，其余占位对齐 */}
+                    <span className="flex w-8 shrink-0 justify-center">
+                      {webTab === 'nginx' && s.port === '80' && (
+                        <Switch
+                          size="sm"
+                          checked={s.proto === 'https'}
+                          disabled={sslBusy === s.domain || (s.proto === 'http' && svc?.state !== 'running')}
+                          onCheckedChange={(checked) => setHTTPS(s.domain, checked ? 'on' : 'off')}
+                        />
+                      )}
+                    </span>
+                    <span className="w-10 shrink-0 text-left text-muted-foreground">{s.proto}</span>
+                    <span
+                      className={cn(
+                        'w-24 shrink-0 text-right text-xs',
+                        s.proto === 'https' && certs[s.domain] !== undefined && certs[s.domain] < 30
+                          ? 'text-amber-500'
+                          : 'text-muted-foreground'
+                      )}
+                    >
+                      {s.proto === 'https' && certs[s.domain] !== undefined ? `证书剩 ${certs[s.domain]} 天` : ''}
+                    </span>
+                    <span className="w-10 shrink-0 text-center">
+                      {webTab === 'nginx' && s.proto === 'https' && certs[s.domain] !== undefined && (
+                        <button
+                          type="button"
+                          className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
+                          disabled={sslBusy === s.domain}
+                          onClick={() => setHTTPS(s.domain, 'renew')}
+                        >
+                          续期
+                        </button>
+                      )}
+                    </span>
+                    <span className="w-10 shrink-0 text-center">
                       <button
                         type="button"
-                        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
-                        disabled={sslBusy === s.domain}
-                        onClick={() => enableHTTPS(s.domain)}
+                        className={cn(
+                          'rounded px-1 text-xs',
+                          confirmDelSite === s.name
+                            ? 'bg-destructive/15 text-destructive'
+                            : 'text-muted-foreground/60 hover:text-destructive'
+                        )}
+                        onClick={() => delSite(s.name)}
                       >
-                        {sslBusy === s.domain ? '签发中…' : '开启 HTTPS'}
+                        {confirmDelSite === s.name ? '确认' : '删除'}
                       </button>
-                    )}
-                    <span className="ml-auto shrink-0 text-muted-foreground">{s.proto}</span>
-                    {s.proto === 'https' && certs[s.domain] !== undefined && (
-                      <span className={cn('shrink-0', certs[s.domain] < 30 ? 'text-amber-500' : 'text-muted-foreground')}>
-                        证书剩 {certs[s.domain]} 天
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      className={cn(
-                        'shrink-0 rounded px-1.5 py-0.5 text-xs',
-                        confirmDelSite === s.name
-                          ? 'bg-destructive/15 text-destructive'
-                          : 'text-muted-foreground/60 hover:text-destructive'
-                      )}
-                      onClick={() => delSite(s.name)}
-                    >
-                      {confirmDelSite === s.name ? '确认' : '删除'}
-                    </button>
+                    </span>
                   </div>
                 ))
               )}
