@@ -56,6 +56,7 @@ export function TerminalView(props: { termId: string }) {
     }
   }
 
+  // 截图：选区裁剪（右键菜单「截取选区」）
   const shoot = () => {
     if (!selection) return
     const range = selection
@@ -71,6 +72,24 @@ export function TerminalView(props: { termId: string }) {
           endLine: range.endLine,
           cropOnly: true
         })
+        setNotice(null)
+        setShot(done)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setNotice(message)
+        setShotError(message)
+      }
+    })()
+  }
+
+  // 整屏截图：当前画面 / 整个滚动缓冲（顶栏的两个按钮撤了，挪进右键菜单）
+  const capture = (mode: 'viewport' | 'scrollback') => {
+    setShotError(null)
+    setNotice('正在截图…')
+    void (async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      try {
+        const done = await captureTerminalView({ termId: props.termId, mode })
         setNotice(null)
         setShot(done)
       } catch (error) {
@@ -129,8 +148,10 @@ export function TerminalView(props: { termId: string }) {
             <ContextMenuShortcut>{window.api.platform === 'darwin' ? '⌘C' : 'Ctrl+C'}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem disabled={!selection} onClick={shoot}>
-            截图
+            截取选区
           </ContextMenuItem>
+          <ContextMenuItem onClick={() => capture('viewport')}>截取当前画面</ContextMenuItem>
+          <ContextMenuItem onClick={() => capture('scrollback')}>截取滚动缓冲</ContextMenuItem>
           <ContextMenuItem onClick={() => void paste()}>
             粘贴
             <ContextMenuShortcut>{window.api.platform === 'darwin' ? '⌘V' : 'Ctrl+V'}</ContextMenuShortcut>

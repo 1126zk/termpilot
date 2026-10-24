@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Bot, Camera, ChevronLeft, ChevronRight, GalleryVertical, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { AppWindow, Bot, ChevronLeft, ChevronRight, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,9 +22,7 @@ import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } f
 import { applyOrder, readMenuOrder, writeMenuOrder } from '../menuOrder'
 import { useMenuAction } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
-import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { terminalPool } from '../terminal/TerminalPool'
-import { CaptureDialog } from './CaptureDialog'
 import { OsIcon, osIconProps } from './OsIcon'
 import type { LocalShell } from '../../../shared/types'
 
@@ -98,6 +96,9 @@ function WindowControls(props: { terminalActive: boolean }) {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
+      <button type="button" className={topBtn} title="新窗口" onClick={() => void window.api.win.newWindow()}>
+        <AppWindow className="size-4" strokeWidth={2} />
+      </button>
       {opsOk && activeTab && (
         <button
           type="button"
@@ -162,8 +163,6 @@ export function TabBar() {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
   const setNotice = useAppStore((s) => s.setNotice)
-  const [shot, setShot] = useState<CaptureDone | null>(null)
-  const [shotError, setShotError] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   // 右键选重命名后，菜单关闭时阻止 Radix 把焦点还给标签按钮，否则原地输入框会被顶得失焦
   const renameMenu = useMenuAction()
@@ -391,25 +390,6 @@ export function TabBar() {
 
   const scrollStrip = (dir: -1 | 1) => {
     stripRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' })
-  }
-
-  const shoot = (mode: 'viewport' | 'scrollback') => {
-    if (!activeTabId) return
-    const termId = activeTabId
-    setShotError(null)
-    setNotice('正在截图…')
-    void (async () => {
-      await new Promise((resolve) => requestAnimationFrame(resolve))
-      try {
-        const done = await captureTerminalView({ termId, mode })
-        setNotice(null)
-        setShot(done)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        setNotice(message)
-        setShotError(message)
-      }
-    })()
   }
 
   return (
@@ -649,38 +629,8 @@ export function TabBar() {
           <ChevronRight className="size-4" strokeWidth={2} />
         </button>
       )}
-      {terminalActive && (
-        <>
-          <button
-            type="button"
-            className={topBtn}
-            style={noDrag}
-            title="截取当前终端画面"
-            onClick={() => shoot('viewport')}
-          >
-            <Camera className="size-4" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            className={topBtn}
-            style={noDrag}
-            title="截取滚动缓冲"
-            onClick={() => shoot('scrollback')}
-          >
-            <GalleryVertical className="size-4" strokeWidth={2} />
-          </button>
-        </>
-      )}
       {window.api.platform === 'win32' && <WindowControls terminalActive={terminalActive} />}
     </div>
-    <CaptureDialog
-      shot={shot}
-      error={shotError}
-      onClose={() => {
-        setShot(null)
-        setShotError(null)
-      }}
-    />
     </>
   )
 }
