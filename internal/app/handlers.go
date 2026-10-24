@@ -115,7 +115,9 @@ func (a *App) hSessionDockerInstall(args []interface{}) (interface{}, error) {
 			}
 		}
 	}
-	return nil, a.exec.InstallDocker(id, mirrors)
+	return nil, a.exec.InstallDocker(id, mirrors, func(line string) {
+		a.emit("session:docker-install-progress", map[string]string{"id": id, "line": line})
+	})
 }
 
 func (a *App) hSessionDockerService(args []interface{}) (interface{}, error) {

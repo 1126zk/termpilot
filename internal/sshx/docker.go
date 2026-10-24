@@ -213,6 +213,19 @@ for base in %s; do
   try_repo "$base" && { ok=1; break; }
 done
 [ -n "$ok" ] || { echo "所有源都装不上，看上面输出找原因" >&2; exit 1; }
+# 顺手生成 daemon.json 带上社区镜像源；已存在（用户自己配过）就不动
+if [ ! -f /etc/docker/daemon.json ]; then
+  mkdir -p /etc/docker
+  cat > /etc/docker/daemon.json <<'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io",
+    "https://docker.xuanyuan.me"
+  ]
+}
+EOF
+fi
 systemctl enable --now docker
 docker info >/dev/null
 `
@@ -264,7 +277,8 @@ func (s *ExecService) DockerService(sessionID, op string) error {
 }
 
 // InstallDocker 一键装 docker：按传入的源列表顺序尝试，装系统包慢，超时给足。
-func (s *ExecService) InstallDocker(sessionID string, mirrors []string) error {
+// onLine 非空时 stdout 逐行回调（进度展示用）。
+func (s *ExecService) InstallDocker(sessionID string, mirrors []string, onLine func(string)) error {
 	if len(mirrors) == 0 {
 		mirrors = dockerDefaultMirrors
 	}
@@ -276,7 +290,7 @@ func (s *ExecService) InstallDocker(sessionID string, mirrors []string) error {
 		quoted = append(quoted, `"`+m+`"`)
 	}
 	script := fmt.Sprintf(dockerInstallScript, strings.Join(quoted, " "))
-	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 600000})
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 600000, OnLine: onLine})
 	if err != nil {
 		return err
 	}

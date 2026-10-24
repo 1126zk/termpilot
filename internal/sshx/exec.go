@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"bufio"
 	"errors"
 	"io"
 	"regexp"
@@ -24,6 +25,8 @@ type ExecOptions struct {
 	Prelude   string
 	TimeoutMs int
 	MaxBytes  int
+	// OnLine 非空时 stdout 逐行回调（装包/拉镜像的进度实时下发）；nil 时行为不变
+	OnLine func(line string)
 }
 
 // ExecResult 一次自动化执行的结果。截断保留开头和结尾。
@@ -152,7 +155,19 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 	errBuf := &cappedWriter{cap: execStreamCap}
 	var copyWg sync.WaitGroup
 	copyWg.Add(2)
-	go func() { defer copyWg.Done(); _, _ = io.Copy(outBuf, stdout) }()
+	if opts.OnLine != nil {
+		// 流式输出：TeeReader 照常写满缓冲，Scanner 按行回调
+		go func() {
+			defer copyWg.Done()
+			scanner := bufio.NewScanner(io.TeeReader(stdout, outBuf))
+			scanner.Buffer(make([]byte, 64*1024), 64*1024)
+			for scanner.Scan() {
+				opts.OnLine(scanner.Text())
+			}
+		}()
+	} else {
+		go func() { defer copyWg.Done(); _, _ = io.Copy(outBuf, stdout) }()
+	}
 	go func() { defer copyWg.Done(); _, _ = io.Copy(errBuf, stderr) }()
 
 	waitDone := make(chan error, 1)

@@ -74,6 +74,11 @@ const api = {
     killProc: (id: string, pid: number) => invoke<void>(IPC.sessionKillProc, [id, pid]),
     docker: (id: string) => invoke<DockerInfo>(IPC.sessionDocker, [id]),
     dockerInstall: (id: string, mirrors: string[]) => invoke<void>(IPC.sessionDockerInstall, [id, mirrors]),
+    /** 安装过程的逐行输出订阅；返回退订函数 */
+    onDockerInstallProgress: (id: string, cb: (line: string) => void) =>
+      on<{ id: string; line: string }>(IPC.sessionDockerInstallProgress, (p) => {
+        if (p.id === id) cb(p.line)
+      }),
     dockerService: (id: string, op: string) => invoke<void>(IPC.sessionDockerService, [id, op]),
     dockerAction: (id: string, action: string, target: string, name = '') =>
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),

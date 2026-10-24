@@ -492,6 +492,8 @@ function PathLink(props: { sessionId: string; path: string; className?: string }
 /** 没装 Docker 的空态 + 一键安装。源列表可编辑（删/加/恢复默认），存面板本地，所有服务器共用。 */
 function DockerInstallSection(props: { sessionId: string }) {
   const [installing, setInstalling] = useState(false)
+  const [log, setLog] = useState<string[]>([])
+  const logRef = useRef<HTMLDivElement>(null)
   const [mirrors, setMirrors] = useState<DockerMirror[]>(loadDockerMirrors)
   const [newName, setNewName] = useState('')
   const [newUrl, setNewUrl] = useState('')
@@ -606,6 +608,7 @@ function DockerInstallSection(props: { sessionId: string }) {
   }
   const install = () => {
     setInstalling(true)
+    setLog([])
     setNotice('正在安装 Docker（按源顺序尝试），装系统包要等一会…', true)
     void window.api.sessions
       .dockerInstall(props.sessionId, mirrors.map((m) => m.url))
@@ -617,12 +620,36 @@ function DockerInstallSection(props: { sessionId: string }) {
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
       .finally(() => setInstalling(false))
   }
+
+  // 安装过程的逐行输出：安装期间订阅，退订随安装结束；最多留 200 行，自动滚到底
+  useEffect(() => {
+    if (!installing) return
+    return window.api.sessions.onDockerInstallProgress(props.sessionId, (line) =>
+      setLog((cur) => [...cur.slice(-199), line])
+    )
+  }, [installing, props.sessionId])
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [log])
   return (
     <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
       <p>这台服务器没有安装 Docker</p>
       <Button size="sm" disabled={installing || mirrors.length === 0} onClick={install}>
         {installing ? '安装中…' : '一键安装 Docker'}
       </Button>
+      {log.length > 0 && (
+        <div
+          ref={logRef}
+          className="max-h-44 w-full max-w-md overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text"
+        >
+          {log.map((line, i) => (
+            <div key={i} className="break-all whitespace-pre-wrap">
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="mt-4 w-full max-w-md text-sm">
         <div className="mb-1 flex items-center justify-between">
           <span>源（按顺序尝试）</span>
@@ -682,6 +709,8 @@ function DockerSection(props: { sessionId: string }) {
   const [confirmDel, setConfirmDel] = useState<{ action: string; id: string } | null>(null)
   // docker 服务操作（停止/重启/卸载）两步确认，同上
   const [confirmOp, setConfirmOp] = useState<string | null>(null)
+  // 操作在飞时的反馈：提示条常驻 + 按钮禁用
+  const [opBusy, setOpBusy] = useState<string | null>(null)
   // 手动刷新反馈：数据在飞就转圈
   const [refreshing, setRefreshing] = useState(false)
 
@@ -727,6 +756,7 @@ function DockerSection(props: { sessionId: string }) {
   }
 
   // docker 服务操作：启动直接跑；停止/重启/卸载两步确认（会动到所有容器/整个引擎）
+  const dockerOpLabels: Record<string, string> = { start: '启动', stop: '停止', restart: '重启', uninstall: '卸载' }
   const dockerOp = (op: string) => {
     if (op !== 'start') {
       if (confirmOp !== op) {
@@ -736,26 +766,31 @@ function DockerSection(props: { sessionId: string }) {
       }
       setConfirmOp(null)
     }
+    const label = dockerOpLabels[op] ?? op
+    setOpBusy(op)
+    setNotice(`正在${label} Docker…`, true)
     void window.api.sessions
       .dockerService(props.sessionId, op)
       .then(() => {
-        if (op === 'uninstall') setNotice('Docker 已卸载')
+        setNotice(`Docker 已${label}`)
         loadDockerInfo(props.sessionId, true)
         loadWebInfo(props.sessionId, true)
       })
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setOpBusy(null))
   }
   const opBtn = (op: string, label: string) => (
     <button
       key={op}
       type="button"
+      disabled={opBusy !== null}
       className={cn(
-        'rounded px-1.5 py-0.5 text-xs',
+        'rounded px-1.5 py-0.5 text-xs disabled:opacity-40',
         confirmOp === op ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground/70 hover:text-foreground'
       )}
       onClick={() => dockerOp(op)}
     >
-      {confirmOp === op ? '确认' : label}
+      {opBusy === op ? '进行中…' : confirmOp === op ? '确认' : label}
     </button>
   )
   // 没缓存也直接渲染卡片，表格先空着，第一笔数据到了填上
