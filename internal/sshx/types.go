@@ -92,8 +92,7 @@ type ServerMetrics struct {
 }
 
 // ServerInfo 服务器的静态身份，基本不变，面板打开时采一次并缓存。
-// LanIps 是内网 IPv4（可能多个），WanIp 是外网出口 IP，拿不到时为空串。
-// 外网要服务器发一次出站请求，不该进轮询。
+// LanIps 是内网 IPv4（可能多个），WanIp 是公网 IP（先问云厂商元数据，外部服务兜底），拿不到时为空串。
 type ServerInfo struct {
 	Hostname string   `json:"hostname"`
 	OsPretty string   `json:"osPretty"`

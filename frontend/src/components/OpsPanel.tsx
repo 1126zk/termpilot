@@ -1186,8 +1186,8 @@ function WebSection(props: { sessionId: string }) {
   }, [installLog])
 
   const submitSite = () => {
-    // 域名和端口一体填写（example.com 或 example.com:8080），这里拆开
-    const raw = domain.trim()
+    // 归一化：剥掉 http(s):// 前缀和结尾斜杠，再拆 域名:端口（域名 example.com:80 一体填写）
+    const raw = domain.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
     const sep = raw.lastIndexOf(':')
     const d = sep > 0 ? raw.slice(0, sep) : raw
     const p = sep > 0 ? raw.slice(sep + 1) : ''

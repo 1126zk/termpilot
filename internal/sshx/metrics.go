@@ -243,7 +243,8 @@ func (s *ExecService) KillProcess(sessionID string, pid int) error {
 
 // serverInfoScript 一次性采集静态身份：主机名、系统、内核、内网 IPv4、外网出口 IP。
 // 内网用 ip 命令并滤掉 docker/veth 等虚拟网桥，没有 ip 就退回 hostname -I。
-// 外网要服务器发一次出站请求，curl 两个服务互备、wget 兜底，3 秒拿不到就放弃。
+// 外网 IP：先问云厂商元数据服务（虚拟化层本地应答，不出机房，毫秒级）——阿里云/腾讯云/AWS 通用；
+// 答不上才出站问外部服务（curl 两个互备、wget 兜底）。超时预算总和压在采集超时（10s）以内。
 const serverInfoScript = `
 echo '#TP-HOST#'
 hostname 2>/dev/null
@@ -256,7 +257,7 @@ lan=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 !~ /^(lo|docker|br-|
 [ -z "$lan" ] && lan=$(hostname -I 2>/dev/null)
 echo "$lan"
 echo '#TP-WAN#'
-curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || wget -qO- --timeout=3 https://ifconfig.me 2>/dev/null
+curl -fsS --max-time 1 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || curl -fsS --max-time 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || wget -qO- --timeout=3 https://ifconfig.me 2>/dev/null
 echo '#TP-END#'
 `
 
