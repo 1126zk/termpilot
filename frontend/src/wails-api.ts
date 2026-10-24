@@ -79,6 +79,7 @@ const api = {
     webInstall: (id: string, name: string) => invoke<void>(IPC.sessionWebInstall, [id, name]),
     webSite: (id: string, service: string, action: string, domain: string, port = '', siteType = '', target = '') =>
       invoke<void>(IPC.sessionWebSite, [id, service, action, domain, port, siteType, target]),
+    webSSL: (id: string, domain: string) => invoke<void>(IPC.sessionWebSSL, [id, domain]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

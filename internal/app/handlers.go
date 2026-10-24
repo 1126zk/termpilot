@@ -160,6 +160,18 @@ func (a *App) hSessionWebSite(args []interface{}) (interface{}, error) {
 	return nil, a.exec.WebSite(id, service, action, domain, port, siteType, target)
 }
 
+func (a *App) hSessionWebSSL(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	domain, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.WebSSL(id, domain)
+}
+
 func (a *App) hSessionSetOs(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

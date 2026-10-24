@@ -113,6 +113,7 @@ export const IPC = {
   sessionWeb: 'session:web',
   sessionWebInstall: 'session:web-install',
   sessionWebSite: 'session:website',
+  sessionWebSSL: 'session:web-ssl',
   sessionSetOs: 'session:set-os',
   sessionRevealSecret: 'session:reveal-secret',
   shellsList: 'shells:list',

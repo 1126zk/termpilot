@@ -151,6 +151,8 @@ export interface WebInfo {
   dockerAvailable: boolean
   nginx: WebServiceInfo
   caddy: WebServiceInfo
+  /** 各域名证书的剩余有效天数（nginx 的；caddy 自动续不跟踪）。负数 = 已过期 */
+  certs: Record<string, number>
 }
 
 export interface WebServiceInfo {

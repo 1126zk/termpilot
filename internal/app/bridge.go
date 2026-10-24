@@ -46,6 +46,7 @@ func (b *Bridge) routes() map[string]handler {
 		"session:web":           a.hSessionWeb,
 		"session:web-install":   a.hSessionWebInstall,
 		"session:website":       a.hSessionWebSite,
+		"session:web-ssl":       a.hSessionWebSSL,
 		"session:set-os":        a.hSessionSetOs,
 		"session:reveal-secret": a.hSessionRevealSecret,
 		"host:note-list":        func(_ []interface{}) (interface{}, error) { return a.store.ListHostNotes() },

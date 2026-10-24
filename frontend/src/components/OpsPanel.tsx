@@ -708,10 +708,10 @@ function DockerSection(props: { sessionId: string }) {
 function parseSites(
   files: WebConfFile[],
   svc: 'nginx' | 'caddy'
-): { name: string; domain: string; port: string; kind: string; target: string }[] {
+): { name: string; domain: string; port: string; proto: 'http' | 'https'; kind: string; target: string; targetTitle: string }[] {
   const dir = svc === 'nginx' ? '/conf.d/' : '/sites/'
   const ext = svc === 'nginx' ? '.conf' : '.caddy'
-  const sites: { name: string; domain: string; port: string; kind: string; target: string }[] = []
+  const sites: { name: string; domain: string; port: string; proto: 'http' | 'https'; kind: string; target: string; targetTitle: string }[] = []
   for (const f of files) {
     if (!f.path.includes(dir) || !f.path.endsWith(ext) || f.path.endsWith('/placeholder.caddy')) continue
     const body =
@@ -725,28 +725,46 @@ function parseSites(
     const name = f.path.split('/').pop()!.slice(0, -ext.length)
     let domain = ''
     let port = '80'
+    let proto: 'http' | 'https' = 'http'
     if (svc === 'nginx') {
       const sn = body.match(/server_name\s+([^;\s]+)/)
       if (!sn) continue
       domain = sn[1]
       port = body.match(/listen\s+(?:\[::\]:)?(\d+)/)?.[1] ?? '80'
+      proto = /listen\s+(?:\[::\]:)?\d+\s+ssl\b/.test(body) ? 'https' : 'http'
     } else {
-      const addr = body.trimStart().split('\n')[0].replace(/\s*\{.*$/, '').replace(/^https?:\/\//, '')
+      // caddy 站点地址是块首行：domain（自动 HTTPS）或 http://domain:port（纯 HTTP）
+      const firstLine = body.trimStart().split('\n')[0].replace(/\s*\{.*$/, '')
+      proto = /^http:\/\//.test(firstLine) ? 'http' : 'https'
+      const addr = firstLine.replace(/^https?:\/\//, '')
       const sep = addr.lastIndexOf(':')
       domain = sep > 0 ? addr.slice(0, sep) : addr
       port = sep > 0 ? addr.slice(sep + 1) : '80'
     }
     const proxy = body.match(/reverse_proxy\s+(\S+)/) ?? body.match(/proxy_pass\s+https?:\/\/([^;\s]+)/)
     if (proxy) {
-      sites.push({ name, domain, port, kind: '反代', target: proxy[1] })
+      sites.push({ name, domain, port, proto, kind: '反代', target: proxy[1], targetTitle: '' })
       continue
     }
     const root = body.match(/root\s+(?:\*\s+)?([^;\s]+)/)
     if (root && (svc === 'nginx' || body.includes('file_server'))) {
-      sites.push({ name, domain, port, kind: '静态', target: root[1] })
+      // 静态站显示宿主机挂载路径（hover 显示容器内路径）；认不出挂载的手写路径原样显示
+      const containerPath = root[1]
+      const prefix = svc === 'nginx' ? '/usr/share/nginx/html/' : '/srv/'
+      const hostRoot = svc === 'nginx' ? '~/.termpilot/nginx/www/' : '~/.termpilot/caddy/www/'
+      const mapped = containerPath.startsWith(prefix) ? hostRoot + containerPath.slice(prefix.length) : containerPath
+      sites.push({
+        name,
+        domain,
+        port,
+        proto,
+        kind: '静态',
+        target: mapped,
+        targetTitle: mapped === containerPath ? '' : containerPath
+      })
       continue
     }
-    sites.push({ name, domain, port, kind: '自定义', target: '' })
+    sites.push({ name, domain, port, proto, kind: '自定义', target: '', targetTitle: '' })
   }
   return sites
 }
@@ -761,7 +779,7 @@ function WebSection(props: { sessionId: string }) {
   const cached = useAppStore((s) => s.webBySession[props.sessionId])
   const loadWebInfo = useAppStore((s) => s.loadWebInfo)
   const setNotice = useAppStore((s) => s.setNotice)
-  // 添加站点对话框
+  // 添加站点内联表单
   const [addOpen, setAddOpen] = useState(false)
   const [siteType, setSiteType] = useState<'proxy' | 'static'>('proxy')
   const [domain, setDomain] = useState('')
@@ -769,6 +787,8 @@ function WebSection(props: { sessionId: string }) {
   const [submitting, setSubmitting] = useState(false)
   // 删站点两步确认：点了变红「确认」，3 秒不点恢复
   const [confirmDelSite, setConfirmDelSite] = useState<string | null>(null)
+  // 开启 HTTPS：签发中标记（按钮变「签发中…」）
+  const [sslBusy, setSslBusy] = useState<string | null>(null)
 
   useEffect(() => {
     loadWebInfo(props.sessionId)
@@ -778,6 +798,7 @@ function WebSection(props: { sessionId: string }) {
 
   const info = cached?.info ?? null
   const svc = info?.[webTab]
+  const certs = info?.certs ?? {}
   const file = webTab === 'nginx' ? '~/.termpilot/nginx/conf.d/*.conf' : '~/.termpilot/caddy/Caddyfile + sites/*.caddy'
   const sites = svc ? parseSites(svc.files, webTab) : []
   // 反代目标的候选：host 网络下写 127.0.0.1:宿主机发布端口，只列发布了端口的容器
@@ -840,8 +861,20 @@ function WebSection(props: { sessionId: string }) {
       .finally(() => setSubmitting(false))
   }
 
-  const delSite = (siteDomain: string) => {
-    if (confirmDelSite !== siteDomain) {
+  const enableHTTPS = (d: string) => {
+    setSslBusy(d)
+    setNotice(`正在为 ${d} 签发证书，要去 Let's Encrypt 走一轮验证…`, true)
+    void window.api.sessions
+      .webSSL(props.sessionId, d)
+      .then(() => {
+        setNotice(`${d} 的 HTTPS 已开启`)
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSslBusy(null))
+  }
+
+  const delSite = (siteDomain: string) => {    if (confirmDelSite !== siteDomain) {
       setConfirmDelSite(siteDomain)
       window.setTimeout(() => setConfirmDelSite((cur) => (cur === siteDomain ? null : cur)), 3000)
       return
@@ -907,12 +940,41 @@ function WebSection(props: { sessionId: string }) {
                     </span>
                     <span className="truncate text-muted-foreground">
                       {s.kind}
-                      {s.target ? ` → ${s.target}` : ''}
+                      {s.target ? ' → ' : ''}
+                      {s.target &&
+                        (s.targetTitle ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-default">{s.target}</span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" align="start" sideOffset={4}>
+                              {s.targetTitle}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          s.target
+                        ))}
                     </span>
+                    {webTab === 'nginx' && s.proto === 'http' && svc?.state === 'running' && (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded px-1.5 py-0.5 text-xs text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
+                        disabled={sslBusy === s.domain}
+                        onClick={() => enableHTTPS(s.domain)}
+                      >
+                        {sslBusy === s.domain ? '签发中…' : '开启 HTTPS'}
+                      </button>
+                    )}
+                    <span className="ml-auto shrink-0 text-muted-foreground">{s.proto}</span>
+                    {s.proto === 'https' && certs[s.domain] !== undefined && (
+                      <span className={cn('shrink-0', certs[s.domain] < 30 ? 'text-amber-500' : 'text-muted-foreground')}>
+                        证书剩 {certs[s.domain]} 天
+                      </span>
+                    )}
                     <button
                       type="button"
                       className={cn(
-                        'ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs',
+                        'shrink-0 rounded px-1.5 py-0.5 text-xs',
                         confirmDelSite === s.name
                           ? 'bg-destructive/15 text-destructive'
                           : 'text-muted-foreground/60 hover:text-destructive'

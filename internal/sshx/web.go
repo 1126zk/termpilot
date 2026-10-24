@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // 面板管的网站服务一律容器化，配置和数据统一收在 $HOME/.termpilot/<名字>/ 下，
@@ -20,6 +21,11 @@ echo '#TP-NGINX-STATE#'
 docker inspect -f '{{.State.Status}}' nginx 2>/dev/null
 echo '#TP-NGINX-CONF#'
 for f in "$HOME"/.termpilot/nginx/conf.d/*.conf; do [ -f "$f" ] && echo "#TP-FILE:$f" && cat "$f"; done
+echo '#TP-CERTS#'
+for c in "$HOME"/.termpilot/nginx/ssl/certs/*/fullchain.pem; do
+  [ -f "$c" ] || continue
+  echo "$(basename "$(dirname "$c")")|$(openssl x509 -enddate -noout -in "$c" 2>/dev/null | cut -d= -f2)"
+done
 echo '#TP-CADDY-STATE#'
 docker inspect -f '{{.State.Status}}' caddy 2>/dev/null
 echo '#TP-CADDY-CONF#'
@@ -29,12 +35,24 @@ echo '#TP-END#'
 `
 
 // CollectWeb 采一次网站服务（容器化 nginx/caddy）的状态和配置，只在面板网站页激活时调用。
+// Certs：nginx ssl 目录下各证书域名的剩余有效天数（openssl 读到期日换算），caddy 自动续不跟踪。
 func (s *ExecService) CollectWeb(sessionID string) (*WebInfo, error) {
 	res, err := s.Exec(sessionID, ExecOptions{Command: webScript, TimeoutMs: 10000})
 	if err != nil {
 		return nil, err
 	}
 	sec := splitSections(res.Stdout)
+	certs := map[string]int{}
+	for _, line := range strings.Split(sec["CERTS"], "\n") {
+		line = strings.TrimSpace(line)
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if t, err := time.Parse("Jan 2 15:04:05 2006 MST", parts[1]); err == nil {
+			certs[parts[0]] = int(time.Until(t).Hours() / 24)
+		}
+	}
 	return &WebInfo{
 		DockerAvailable: strings.TrimSpace(sec["DOCKER"]) == "yes",
 		Nginx: WebServiceInfo{
@@ -45,6 +63,7 @@ func (s *ExecService) CollectWeb(sessionID string) (*WebInfo, error) {
 			State: strings.TrimSpace(sec["CADDY-STATE"]),
 			Files: parseWebConfFiles(sec["CADDY-CONF"]),
 		},
+		Certs: certs,
 	}, nil
 }
 
@@ -100,7 +119,7 @@ func webInstallScript(name string) (string, bool) {
 		// 网关角色用 host 网络（同 1Panel 的 OpenResty）：直接占宿主机 80/443，
 		// 反代目标写 127.0.0.1:端口 即可，没有共享网络的心智负担
 		return `
-mkdir -p "$HOME/.termpilot/nginx/conf.d" "$HOME/.termpilot/nginx/www"
+mkdir -p "$HOME/.termpilot/nginx/conf.d" "$HOME/.termpilot/nginx/www" "$HOME/.termpilot/nginx/ssl"
 if [ ! -f "$HOME/.termpilot/nginx/conf.d/default.conf" ]; then
   cat > "$HOME/.termpilot/nginx/conf.d/default.conf" <<'EOF'
 # 站点配置写在这里，改完执行：docker exec nginx nginx -s reload
@@ -112,10 +131,12 @@ if [ ! -f "$HOME/.termpilot/nginx/conf.d/default.conf" ]; then
 EOF
 fi
 docker pull nginx:alpine
+docker pull neilpang/acme.sh
 docker run -d --name nginx --restart unless-stopped \
   --network host \
   -v "$HOME/.termpilot/nginx/conf.d:/etc/nginx/conf.d" \
   -v "$HOME/.termpilot/nginx/www:/usr/share/nginx/html" \
+  -v "$HOME/.termpilot/nginx/ssl:/etc/nginx/ssl" \
   nginx:alpine
 `, true
 	case "caddy":
@@ -191,14 +212,20 @@ func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType
 	if p, _ := strconv.Atoi(port); p < 1 || p > 65535 {
 		return fmt.Errorf("端口超出范围（1-65535）：%q", port)
 	}
+	// 同域名多端口共存：add 时非 80 端口的文件名带端口后缀；
+	// del 时前端传的 domain 就是文件名本体（可能已带端口后缀），直接用
+	base := domain
+	if action == "add" && port != "80" {
+		base = domain + "." + port
+	}
 	var file, check, reload string
 	switch service {
 	case "nginx":
-		file = fmt.Sprintf(`"$HOME/.termpilot/nginx/conf.d/%s.conf"`, domain)
+		file = fmt.Sprintf(`"$HOME/.termpilot/nginx/conf.d/%s.conf"`, base)
 		check = "docker exec nginx nginx -t"
 		reload = "docker exec nginx nginx -s reload"
 	case "caddy":
-		file = fmt.Sprintf(`"$HOME/.termpilot/caddy/sites/%s.caddy"`, domain)
+		file = fmt.Sprintf(`"$HOME/.termpilot/caddy/sites/%s.caddy"`, base)
 		check = "docker exec caddy caddy validate --config /etc/caddy/Caddyfile"
 		reload = "docker exec caddy caddy reload --config /etc/caddy/Caddyfile"
 	default:
@@ -214,13 +241,15 @@ func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType
 			if !webTargetRe.MatchString(target) {
 				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
 			}
-			body = "server {\n    listen " + port + ";\n    server_name " + domain + ";\n    location / {\n        proxy_pass http://" + target + ";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    }\n}"
+			// ACME 挑战的 location 预留在每个站点里（签发时令牌才能被公网取到）；
+			// 放在主 location 后面，提取 proxy_pass/root 时第一匹配才是真目标
+			body = "server {\n    listen " + port + ";\n    server_name " + domain + ";\n    location / {\n        proxy_pass http://" + target + ";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    }\n    location ^~ /.well-known/acme-challenge/ {\n        root /usr/share/nginx/html;\n    }\n}"
 		case service == "nginx" && siteType == "static":
 			if !webDirRe.MatchString(target) {
 				return fmt.Errorf("非法的目录名：%q", target)
 			}
 			prepare = fmt.Sprintf(`mkdir -p "$HOME/.termpilot/nginx/www/%s"`, target)
-			body = "server {\n    listen " + port + ";\n    server_name " + domain + ";\n    root /usr/share/nginx/html/" + target + ";\n    index index.html;\n}"
+			body = "server {\n    listen " + port + ";\n    server_name " + domain + ";\n    root /usr/share/nginx/html/" + target + ";\n    index index.html;\n    location ^~ /.well-known/acme-challenge/ {\n        root /usr/share/nginx/html;\n    }\n}"
 		case service == "caddy" && siteType == "proxy":
 			if !webTargetRe.MatchString(target) {
 				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
@@ -290,6 +319,106 @@ fi
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return fmt.Errorf("%s 站点失败（退出码 %d）：%s", action, *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
+// webIPv4Re 站点是 IPv4 地址时走自签：公网 CA 不给 IP 签证书。
+var webIPv4Re = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
+
+// WebSSL 给 nginx 站点开启 HTTPS：已有证书直接用，没有就签——域名走 acme.sh 一次性容器
+// 的 ACME（webroot 挑战，80 端口），IP 走宿主机 openssl 自签（10 年期带 SAN，秒级）。
+// 签完往站点配置追加 443 ssl 块（从现有配置认 proxy_pass/root，认不出的报错让手改），
+// nginx -t 通过才 reload。域名证书写 /etc/cron.d 续期任务；自签不续。只支持 80 端口站点。
+func (s *ExecService) WebSSL(sessionID, domain string) error {
+	if !webDomainRe.MatchString(domain) {
+		return fmt.Errorf("非法的域名：%q", domain)
+	}
+	certsDir := "$HOME/.termpilot/nginx/ssl/certs/" + domain
+	var issue string
+	if webIPv4Re.MatchString(domain) {
+		// IP：openssl 本地自签，不拉镜像不联网
+		issue = `openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "` + certsDir + `/privkey.pem" \
+  -out "` + certsDir + `/fullchain.pem" \
+  -days 3650 -subj "/CN=` + domain + `" -addext "subjectAltName=IP:` + domain + `"`
+	} else {
+		// 域名：acme.sh 一次性容器签发 + 装到统一约定路径
+		issue = `docker run --rm \
+  -v "$HOME/.termpilot/nginx/www:/acme" \
+  -v "$HOME/.termpilot/nginx/ssl:/acme.sh" \
+  neilpang/acme.sh --issue -d ` + domain + ` -w /acme --home /acme.sh --server letsencrypt && \
+docker run --rm \
+  -v "$HOME/.termpilot/nginx/ssl:/acme.sh" \
+  neilpang/acme.sh --install-cert -d ` + domain + ` --home /acme.sh \
+  --key-file /acme.sh/certs/` + domain + `/privkey.pem \
+  --fullchain-file /acme.sh/certs/` + domain + `/fullchain.pem`
+	}
+	script := fmt.Sprintf(`
+conf="$HOME/.termpilot/nginx/conf.d/%[1]s.conf"
+[ -f "$conf" ] || { echo "站点不存在：%[1]s" >&2; exit 1; }
+[ "$(docker inspect -f '{{.State.Status}}' nginx 2>/dev/null)" = "running" ] || { echo "nginx 没在运行，先启动容器" >&2; exit 1; }
+docker exec nginx test -d /etc/nginx/ssl || { echo "nginx 容器缺少 ssl 挂载，删掉重装一次一键安装即可" >&2; exit 1; }
+mkdir -p "%[2]s" "$HOME/.termpilot/nginx/www"
+if [ ! -f "%[2]s/fullchain.pem" ]; then
+%[3]s || exit 1
+fi
+if ! grep -q 'listen 443 ssl' "$conf"; then
+  target=$(sed -n 's/.*proxy_pass\s*http:\/\/\([^;[:space:]]*\).*/\1/p' "$conf" | head -1)
+  rootdir=$(sed -n 's/.*root\s\+\([^;[:space:]]*\).*/\1/p' "$conf" | head -1)
+  if [ -n "$target" ]; then
+    cat >> "$conf" <<EOF
+
+server {
+    listen 443 ssl;
+    server_name %[1]s;
+    ssl_certificate /etc/nginx/ssl/certs/%[1]s/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/certs/%[1]s/privkey.pem;
+    location / {
+        proxy_pass http://$target;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+}
+EOF
+  elif [ -n "$rootdir" ]; then
+    cat >> "$conf" <<EOF
+
+server {
+    listen 443 ssl;
+    server_name %[1]s;
+    ssl_certificate /etc/nginx/ssl/certs/%[1]s/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/certs/%[1]s/privkey.pem;
+    root $rootdir;
+    index index.html;
+}
+EOF
+  else
+    echo "认不出站点类型（像是手写配置），443 块请手动加" >&2
+    exit 1
+  fi
+fi
+if ! grep -q 'listen \[::\]:443' "$conf" && [ -f /proc/net/if_inet6 ]; then
+  sed -i 's/    listen 443 ssl;/    listen 443 ssl;\n    listen [::]:443 ssl;/' "$conf"
+fi
+docker exec nginx nginx -t || exit 1
+docker exec nginx nginx -s reload || exit 1
+if [ -d /etc/cron.d ]; then
+  cat > /etc/cron.d/termpilot-nginx-ssl <<EOF
+# TermPilot：nginx 域名证书续期，每月 1 号 03:37 跑（自签的 10 年期不续）
+37 3 1 * * $(whoami) docker run --rm -v $HOME/.termpilot/nginx/www:/acme -v $HOME/.termpilot/nginx/ssl:/acme.sh neilpang/acme.sh --cron --home /acme.sh && docker exec nginx nginx -s reload
+EOF
+else
+  echo "提示：服务器没有 cron，域名证书到期前要手动续期" >&2
+fi
+`, domain, certsDir, issue)
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("开启 HTTPS 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
