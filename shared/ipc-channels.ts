@@ -110,6 +110,8 @@ export const IPC = {
   sessionKillProc: 'session:kill-proc',
   sessionDocker: 'session:docker',
   sessionDockerAction: 'session:docker-action',
+  sessionDockerInstall: 'session:docker-install',
+  sessionDockerService: 'session:docker-service',
   sessionWeb: 'session:web',
   sessionWebInstall: 'session:web-install',
   sessionWebSite: 'session:website',

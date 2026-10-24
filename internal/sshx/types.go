@@ -105,6 +105,8 @@ type ServerInfo struct {
 // DockerInfo 一次 Docker 采集。Available 为假表示服务器没装 docker。
 type DockerInfo struct {
 	Available  bool              `json:"available"`
+	// Running 装了不等于在跑：daemon 活着（docker info 能通）才是 true。
+	Running    bool              `json:"running"`
 	Containers []DockerContainer `json:"containers"`
 	Images     []DockerImage     `json:"images"`
 	Volumes    []DockerVolume    `json:"volumes"`

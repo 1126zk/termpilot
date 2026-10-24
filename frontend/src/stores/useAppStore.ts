@@ -498,9 +498,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       patch.sessionStatus = { ...get().sessionStatus, [e.sessionId]: st }
     }
     set(patch)
-    // 连接失败时把错误写进终端，用户能直接看到
+    // 连接失败时把错误写进终端，用户能直接看到（翻译成中文）
     if (e.status === 'error' && e.error) {
-      terminalPool.write(e.termId, `\r\n\x1b[1;31m✗ ${e.error}\x1b[0m\r\n`)
+      terminalPool.write(e.termId, `\r\n\x1b[1;31m✗ ${connErrorText(e.error)}\x1b[0m\r\n`)
     }
   },
 
@@ -599,3 +599,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 面板内容硬性互斥：打开编辑表单就关掉文件面板
   setEditing: (v) => set(v ? { editing: v, rightPanelOpen: false } : { editing: null })
 }))
+
+/** 连接报错翻译：Go/SSH 的英文错误映射成中文写进终端，认不出的保留原文。 */
+function connErrorText(err: string): string {
+  const rules: [string, string][] = [
+    ['use of closed network connection', '连接已断开'],
+    ['connection refused', '拒绝连接（端口没监听或被防火墙拦了）'],
+    ['i/o timeout', '连接超时（网络不通或被防火墙拦了）'],
+    ['deadline exceeded', '连接超时'],
+    ['no route to host', '没有到主机的路由'],
+    ['no such host', '域名解析失败'],
+    ['connection reset by peer', '对方重置了连接'],
+    ['unable to authenticate', '认证失败（密码或密钥不对）'],
+    ['permission denied', '认证失败（密码或密钥不对）'],
+    ['handshake failed', 'SSH 握手失败']
+  ]
+  for (const [pat, text] of rules) {
+    if (err.includes(pat)) return text
+  }
+  return err
+}

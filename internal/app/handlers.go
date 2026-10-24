@@ -100,6 +100,36 @@ func (a *App) hSessionDocker(args []interface{}) (interface{}, error) {
 	return a.exec.CollectDocker(id)
 }
 
+func (a *App) hSessionDockerInstall(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	var mirrors []string
+	if len(args) > 1 {
+		if arr, ok := args[1].([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					mirrors = append(mirrors, s)
+				}
+			}
+		}
+	}
+	return nil, a.exec.InstallDocker(id, mirrors)
+}
+
+func (a *App) hSessionDockerService(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	op, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.DockerService(id, op)
+}
+
 func (a *App) hSessionDockerAction(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

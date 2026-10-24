@@ -12,6 +12,8 @@ import (
 const dockerScript = `
 echo '#TP-HAVE#'
 command -v docker >/dev/null 2>&1 && echo yes || echo no
+echo '#TP-RUNNING#'
+docker info >/dev/null 2>&1 && echo yes || echo no
 echo '#TP-PS#'
 docker ps -a --format '{{json .}}' 2>/dev/null
 echo '#TP-IMAGES#'
@@ -34,6 +36,7 @@ func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 	sec := splitSections(res.Stdout)
 	info := &DockerInfo{
 		Available:  strings.TrimSpace(sec["HAVE"]) == "yes",
+		Running:    strings.TrimSpace(sec["RUNNING"]) == "yes",
 		Containers: []DockerContainer{},
 		Images:     []DockerImage{},
 		Volumes:    []DockerVolume{},
@@ -186,4 +189,99 @@ func (s *ExecService) DockerAction(sessionID, action, target, name string) (stri
 		return strings.TrimSpace(res.Stdout), nil
 	}
 	return "", nil
+}
+
+// dockerInstallScript 一键装 docker：标准 apt 源流程（keyring + docker.list + 安装），
+// 源列表由前端传入（面板可编辑），%s 处填入逐个引号包好的地址。不用 get.docker.com
+// 脚本——它的镜像参数只支持阿里云一家。
+const dockerInstallScript = `
+. /etc/os-release
+case "$ID" in ubuntu|debian) ;; *) echo "不支持的发行版：$ID（只支持 Ubuntu/Debian）" >&2; exit 1;; esac
+try_repo() {
+  base="$1"
+  echo "==> 尝试源：$base"
+  install -m 0755 -d /etc/apt/keyrings || return 1
+  rm -f /etc/apt/keyrings/docker.asc
+  curl -fsSL --connect-timeout 8 --max-time 30 "$base/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc || return 1
+  chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] $base/linux/$ID $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+  apt-get update -o Acquire::Retries=1 || return 1
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || return 1
+}
+ok=""
+for base in %s; do
+  try_repo "$base" && { ok=1; break; }
+done
+[ -n "$ok" ] || { echo "所有源都装不上，看上面输出找原因" >&2; exit 1; }
+systemctl enable --now docker
+docker info >/dev/null
+`
+
+// 默认源列表：国内权威源优先，官方兜底。面板可编辑，前端传空时用它。
+var dockerDefaultMirrors = []string{
+	"https://mirrors.aliyun.com/docker-ce",
+	"https://mirrors.tuna.tsinghua.edu.cn/docker-ce",
+	"https://mirrors.ustc.edu.cn/docker-ce",
+	"https://mirrors.huaweicloud.com/docker-ce",
+	"https://mirrors.tencent.com/docker-ce",
+	"https://download.docker.com",
+}
+
+// dockerMirrorRe 源地址白名单：必须 https，主机名+路径字符集，防注入。
+var dockerMirrorRe = regexp.MustCompile(`^https://[a-zA-Z0-9.-]+(/[a-zA-Z0-9._/-]*)?$`)
+
+// dockerServiceScripts docker 服务级操作。uninstall 清包和数据目录，但不动 ~/.termpilot（用户的网站数据）。
+var dockerServiceScripts = map[string]string{
+	"start":   "systemctl start docker",
+	"stop":    "systemctl stop docker docker.socket containerd",
+	"restart": "systemctl restart docker",
+	"uninstall": `
+systemctl stop docker docker.socket containerd 2>/dev/null
+apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+rm -rf /var/lib/docker /var/lib/containerd
+rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.asc
+`,
+}
+
+// DockerService docker 服务级操作（启动/停止/重启/卸载），op 走白名单。
+func (s *ExecService) DockerService(sessionID, op string) error {
+	script, ok := dockerServiceScripts[op]
+	if !ok {
+		return fmt.Errorf("不支持的操作：%q", op)
+	}
+	timeoutMs := 30000
+	if op == "uninstall" {
+		timeoutMs = 300000 // 卸包慢
+	}
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: timeoutMs})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("docker %s 失败（退出码 %d）：%s", op, *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
+// InstallDocker 一键装 docker：按传入的源列表顺序尝试，装系统包慢，超时给足。
+func (s *ExecService) InstallDocker(sessionID string, mirrors []string) error {
+	if len(mirrors) == 0 {
+		mirrors = dockerDefaultMirrors
+	}
+	quoted := make([]string, 0, len(mirrors))
+	for _, m := range mirrors {
+		if !dockerMirrorRe.MatchString(m) {
+			return fmt.Errorf("非法的源地址：%q", m)
+		}
+		quoted = append(quoted, `"`+m+`"`)
+	}
+	script := fmt.Sprintf(dockerInstallScript, strings.Join(quoted, " "))
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 600000})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("安装 Docker 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
 }

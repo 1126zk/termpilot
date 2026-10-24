@@ -73,6 +73,8 @@ const api = {
     serverInfo: (id: string) => invoke<ServerInfo>(IPC.sessionServerInfo, [id]),
     killProc: (id: string, pid: number) => invoke<void>(IPC.sessionKillProc, [id, pid]),
     docker: (id: string) => invoke<DockerInfo>(IPC.sessionDocker, [id]),
+    dockerInstall: (id: string, mirrors: string[]) => invoke<void>(IPC.sessionDockerInstall, [id, mirrors]),
+    dockerService: (id: string, op: string) => invoke<void>(IPC.sessionDockerService, [id, op]),
     dockerAction: (id: string, action: string, target: string, name = '') =>
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
     web: (id: string) => invoke<WebInfo>(IPC.sessionWeb, [id]),

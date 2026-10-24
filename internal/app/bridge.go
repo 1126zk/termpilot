@@ -43,6 +43,8 @@ func (b *Bridge) routes() map[string]handler {
 		"session:kill-proc":     a.hSessionKillProc,
 		"session:docker":        a.hSessionDocker,
 		"session:docker-action": a.hSessionDockerAction,
+		"session:docker-install": a.hSessionDockerInstall,
+		"session:docker-service": a.hSessionDockerService,
 		"session:web":           a.hSessionWeb,
 		"session:web-install":   a.hSessionWebInstall,
 		"session:website":       a.hSessionWebSite,

@@ -40,10 +40,14 @@ export function startPointerDrag(opts: {
   const up = () => {
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
     if (active) opts.onEnd()
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
+  // 按住的是可选中文字时，继续拖动会被 Chromium 当成原生「拖动选中文本」，
+  // 发 pointercancel 而不是 pointerup——不走 onEnd 状态就卡死，同样收尾
+  window.addEventListener('pointercancel', up)
 }
 
 /** 重排前快照各元素的布局位（offset* 不受 transform 影响）。 */

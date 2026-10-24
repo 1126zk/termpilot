@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -147,10 +148,10 @@ export function OpsPanel() {
       >
         {/* 信息条：没采到的用 — 占位，有缓存的直接显示，不等第一笔数据 */}
         <div className="flex flex-col gap-0.5 text-sm">
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
-            <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} />
+          <div className="flex items-baseline gap-x-4 overflow-hidden">
+            <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} truncate />
             <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} />
-            <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} />
+            <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} truncate />
           </div>
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
             <InfoItem
@@ -435,6 +436,221 @@ function ActionCell(props: { confirming: boolean; onConfirm: () => void; childre
   )
 }
 
+// 默认 docker 安装源：国内权威源优先，官方兜底。面板可编辑（名称+地址），存 localStorage。
+type DockerMirror = { name: string; url: string }
+const DEFAULT_DOCKER_MIRRORS: DockerMirror[] = [
+  { name: '阿里云', url: 'https://mirrors.aliyun.com/docker-ce' },
+  { name: '清华', url: 'https://mirrors.tuna.tsinghua.edu.cn/docker-ce' },
+  { name: '中科大', url: 'https://mirrors.ustc.edu.cn/docker-ce' },
+  { name: '华为云', url: 'https://mirrors.huaweicloud.com/docker-ce' },
+  { name: '腾讯云', url: 'https://mirrors.tencent.com/docker-ce' },
+  { name: 'Docker 官方', url: 'https://download.docker.com' }
+]
+const DOCKER_MIRRORS_KEY = 'termpilot.dockerMirrors'
+
+// 老版本存的是纯地址数组，迁移时按这张表认领名字，认不出的归「自定义」
+const LEGACY_MIRROR_NAMES: Record<string, string> = Object.fromEntries(
+  DEFAULT_DOCKER_MIRRORS.map((m) => [m.url, m.name])
+)
+
+function loadDockerMirrors(): DockerMirror[] {
+  try {
+    const raw = localStorage.getItem(DOCKER_MIRRORS_KEY)
+    const list = raw ? JSON.parse(raw) : null
+    if (Array.isArray(list) && list.length > 0) {
+      if (list.every((x) => typeof x === 'string')) {
+        return list.map((url) => ({ name: LEGACY_MIRROR_NAMES[url] ?? '自定义', url }))
+      }
+      if (list.every((x) => x && typeof x.url === 'string')) return list
+    }
+  } catch {
+    // 坏数据回落默认
+  }
+  return DEFAULT_DOCKER_MIRRORS
+}
+
+/** 没装 Docker 的空态 + 一键安装。源列表可编辑（删/加/恢复默认），存面板本地，所有服务器共用。 */
+function DockerInstallSection(props: { sessionId: string }) {
+  const [installing, setInstalling] = useState(false)
+  const [mirrors, setMirrors] = useState<DockerMirror[]>(loadDockerMirrors)
+  const [newName, setNewName] = useState('')
+  const [newUrl, setNewUrl] = useState('')
+  const setNotice = useAppStore((s) => s.setNotice)
+  const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
+  const loadWebInfo = useAppStore((s) => s.loadWebInfo)
+
+  // 拖拽闭包要拿最新顺序（move 事件闭包里的 state 是拖拽开始时的旧快照），镜像一份到 ref
+  const mirrorsRef = useRef(mirrors)
+  const updateMirrors = (list: DockerMirror[]) => {
+    mirrorsRef.current = list
+    setMirrors(list)
+    localStorage.setItem(DOCKER_MIRRORS_KEY, JSON.stringify(list))
+  }
+  const addMirror = () => {
+    const name = newName.trim() || '自定义'
+    let url = newUrl.trim()
+    if (!url) return
+    // 没带协议头就补 https://（后端只收 https）
+    if (!/^https?:\/\//.test(url)) url = 'https://' + url
+    if (mirrors.some((m) => m.url === url)) {
+      setNotice('这个源已经在列表里了')
+      return
+    }
+    updateMirrors([...mirrors, { name, url }])
+    setNewName('')
+    setNewUrl('')
+  }
+
+  // 拖拽排序：复用 flip.ts 那套（TabBar 标签/菜单同款手感）
+  const listRef = useRef<HTMLDivElement>(null)
+  const [dragMirror, setDragMirror] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  const dragStart = useRef({ grab: 0, size: 0 })
+  const pointerY = useRef(0)
+  const prevTop = useRef(new Map<string, number>())
+
+  useFlipSlide(dragMirror !== null, listRef, 'data-mirror', 'y', dragMirror, prevTop, [mirrors, dragMirror])
+
+  // 重排后被拖行的布局位置变了，按抓取点重新算位移，保证跟手不跳；
+  // 位移夹在首尾行之间（TabBar 同款），防止跟手行飞出列表
+  const followPointer = (m: string) => {
+    const list = listRef.current
+    const el = list?.querySelector<HTMLElement>(`[data-mirror="${CSS.escape(m)}"]`)
+    if (!list || !el) return
+    const pointer = pointerY.current - list.getBoundingClientRect().top + list.scrollTop
+    const offset = pointer - dragStart.current.grab - el.offsetTop
+    const items = list.querySelectorAll<HTMLElement>('[data-mirror]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return setDragOffset(offset)
+    const min = first.offsetTop - el.offsetTop
+    const max = last.offsetTop + last.offsetHeight - el.offsetHeight - el.offsetTop
+    setDragOffset(Math.min(max, Math.max(min, offset)))
+  }
+  useLayoutEffect(() => {
+    if (dragMirror) followPointer(dragMirror)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mirrors, dragMirror])
+
+  const startMirrorDrag = (e: ReactPointerEvent, m: string) => {
+    // 拦 pointerdown 的默认行为，防止左栏继承来的 select-text 开始文字选择
+    //（只拦 pointerdown，行内 × 按钮的 click 照常触发）
+    if (e.button === 0) e.preventDefault()
+    startPointerDrag({
+      event: e,
+      axis: 'y',
+      onActivate: () => {
+        const list = listRef.current
+        const el = list?.querySelector<HTMLElement>(`[data-mirror="${CSS.escape(m)}"]`)
+        const pointer = list ? e.clientY - list.getBoundingClientRect().top + list.scrollTop : 0
+        dragStart.current = {
+          grab: pointer - (el?.offsetTop ?? 0),
+          size: el?.offsetHeight ?? 0
+        }
+        setDragMirror(m)
+        setDragOffset(0)
+      },
+      onMove: (y) => {
+        pointerY.current = y
+        // 视觉边缘一律用「指针 - 抓取点」算（和 TabBar 一致）；起始布局位重排后就过期，不能用
+        const list = listRef.current
+        if (list) {
+          const cur = mirrorsRef.current.map((x) => x.url)
+          const pointer = y - list.getBoundingClientRect().top + list.scrollTop
+          const raw = pointer - dragStart.current.grab
+          // 判定也用限位后的视觉位置：拖出首尾行外沿不会乱换（tabDropOrder 同款）
+          const size = dragStart.current.size
+          const items = list.querySelectorAll<HTMLElement>('[data-mirror]')
+          const first = items[0]
+          const last = items[items.length - 1]
+          const start =
+            first && last
+              ? Math.min(last.offsetTop + last.offsetHeight - size, Math.max(first.offsetTop, raw))
+              : raw
+          const insert = dropIndex(list, 'data-mirror', 'y', start, start + size, m, cur)
+          const next = moveTo(cur, m, insert)
+          if (next) {
+            capturePositions(list, 'data-mirror', 'y', prevTop.current)
+            // next 是 url 顺序，映射回对象数组
+            updateMirrors(next.map((url) => mirrorsRef.current.find((x) => x.url === url)!))
+          }
+        }
+        followPointer(m)
+      },
+      onEnd: () => {
+        setDragMirror(null)
+        setDragOffset(0)
+        prevTop.current.clear()
+      }
+    })
+  }
+  const install = () => {
+    setInstalling(true)
+    setNotice('正在安装 Docker（按源顺序尝试），装系统包要等一会…', true)
+    void window.api.sessions
+      .dockerInstall(props.sessionId, mirrors.map((m) => m.url))
+      .then(() => {
+        setNotice('Docker 安装完成')
+        loadDockerInfo(props.sessionId, true)
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setInstalling(false))
+  }
+  return (
+    <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
+      <p>这台服务器没有安装 Docker</p>
+      <Button size="sm" disabled={installing || mirrors.length === 0} onClick={install}>
+        {installing ? '安装中…' : '一键安装 Docker'}
+      </Button>
+      <div className="mt-4 w-full max-w-md text-sm">
+        <div className="mb-1 flex items-center justify-between">
+          <span>源（按顺序尝试）</span>
+          <button type="button" className="hover:text-foreground" onClick={() => updateMirrors(DEFAULT_DOCKER_MIRRORS)}>
+            恢复默认
+          </button>
+        </div>
+        <div ref={listRef} className="relative select-none">
+          {mirrors.map((m) => (
+            <div
+              key={m.url}
+              data-mirror={m.url}
+              className={cn(
+                'flex cursor-grab items-center gap-2 py-0.5',
+                dragMirror === m.url && 'relative z-10 cursor-grabbing bg-background shadow-lg ring-1 ring-foreground/30'
+              )}
+              style={dragMirror === m.url ? { transform: `translateY(${dragOffset}px)` } : undefined}
+              onPointerDown={(e) => startMirrorDrag(e, m.url)}
+            >
+              <span className="w-20 shrink-0">{m.name}</span>
+              <span className="min-w-0 flex-1 truncate font-mono">{m.url.replace(/^https:\/\//, '')}</span>
+              <button
+                type="button"
+                className="shrink-0 text-muted-foreground/60 hover:text-destructive"
+                onClick={() => updateMirrors(mirrors.filter((x) => x.url !== m.url))}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-1 flex gap-1.5">
+          <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="名称" className="h-7 w-24 text-sm" />
+          <Input
+            value={newUrl}
+            onChange={(e) => setNewUrl(e.target.value)}
+            placeholder="https://…/docker-ce"
+            className="h-7 font-mono text-sm"
+          />
+          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={addMirror}>
+            添加
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** Docker 页：一个大卡片，容器、镜像、卷、网络、daemon.json 五节，中间分隔线。结果走 store 缓存，
     切进来先显示缓存；页面开着每 15 秒后台更新，右上角图标手动刷新。 */
 function DockerSection(props: { sessionId: string }) {
@@ -444,6 +660,8 @@ function DockerSection(props: { sessionId: string }) {
   const setNotice = useAppStore((s) => s.setNotice)
   // 删除两步确认：菜单里点了删除，该行 ⋯ 变成红色「确认」，3 秒不点恢复
   const [confirmDel, setConfirmDel] = useState<{ action: string; id: string } | null>(null)
+  // docker 服务操作（停止/重启/卸载）两步确认，同上
+  const [confirmOp, setConfirmOp] = useState<string | null>(null)
 
   useEffect(() => {
     loadDockerInfo(props.sessionId)
@@ -479,8 +697,45 @@ function DockerSection(props: { sessionId: string }) {
 
   const info = cached?.info ?? null
   if (info && !info.available) {
-    return <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker</div>
+    return (
+      <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+        <DockerInstallSection sessionId={props.sessionId} />
+      </div>
+    )
   }
+
+  // docker 服务操作：启动直接跑；停止/重启/卸载两步确认（会动到所有容器/整个引擎）
+  const dockerOp = (op: string) => {
+    if (op !== 'start') {
+      if (confirmOp !== op) {
+        setConfirmOp(op)
+        window.setTimeout(() => setConfirmOp((cur) => (cur === op ? null : cur)), 3000)
+        return
+      }
+      setConfirmOp(null)
+    }
+    void window.api.sessions
+      .dockerService(props.sessionId, op)
+      .then(() => {
+        if (op === 'uninstall') setNotice('Docker 已卸载')
+        loadDockerInfo(props.sessionId, true)
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+  }
+  const opBtn = (op: string, label: string) => (
+    <button
+      key={op}
+      type="button"
+      className={cn(
+        'rounded px-1.5 py-0.5 text-xs',
+        confirmOp === op ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground/70 hover:text-foreground'
+      )}
+      onClick={() => dockerOp(op)}
+    >
+      {confirmOp === op ? '确认' : label}
+    </button>
+  )
   // 没缓存也直接渲染卡片，表格先空着，第一笔数据到了填上
 
   return (
@@ -689,7 +944,14 @@ function DockerSection(props: { sessionId: string }) {
         </table>
       </div>
 
-      <div className="border-y bg-accent/40 px-3 py-1.5 font-mono text-sm text-muted-foreground">/etc/docker/daemon.json</div>
+      <div className="flex items-center justify-between border-y bg-accent/40 px-3 py-1.5 font-mono text-sm text-muted-foreground">
+        <span>/etc/docker/daemon.json</span>
+        <span className="flex items-center gap-1 font-sans">
+          {info?.running
+            ? [opBtn('restart', '重启'), opBtn('stop', '停止'), opBtn('uninstall', '删除')]
+            : [opBtn('start', '启动'), opBtn('uninstall', '删除')]}
+        </span>
+      </div>
       <div className="px-3 py-2">
         {info?.daemonJson ? (
           <pre className="max-h-60 overflow-auto rounded-md bg-muted p-2 font-mono text-sm break-all whitespace-pre-wrap select-text">
@@ -916,7 +1178,7 @@ function WebSection(props: { sessionId: string }) {
           ))}
         </div>
         {info && !info.dockerAvailable ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker，网站服务依赖容器运行</div>
+          <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker</div>
         ) : info && svc && !svc.state ? (
           <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
             <p>还没有安装 {webTab}</p>
@@ -1177,11 +1439,12 @@ function formatPorts(ports: string): string {
   return `端口映射（宿主机 → 容器）\n${lines.join('\n')}`
 }
 
-/** 信息条一项：弱色标签 + 值。值为空不渲染。 */
-function InfoItem(props: { label: string; value: string }) {
+/** 信息条一项：弱色标签 + 值。值为空不渲染。truncate 时空间不够就省略号（主机名/内核用），
+    不开的项（系统）永远完整显示。 */
+function InfoItem(props: { label: string; value: string; truncate?: boolean }) {
   if (!props.value) return null
   return (
-    <span className="whitespace-nowrap">
+    <span className={props.truncate ? 'min-w-0 truncate whitespace-nowrap' : 'shrink-0 whitespace-nowrap'}>
       <span className="text-muted-foreground/60">{props.label} </span>
       <span className="text-muted-foreground">{props.value}</span>
     </span>

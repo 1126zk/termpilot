@@ -103,6 +103,8 @@ export interface ServerInfo {
 /** 一次 Docker 采集，与 Go 端 sshx.DockerInfo 对应。available 为假表示没装 docker。 */
 export interface DockerInfo {
   available: boolean
+  /** 装了不等于在跑：daemon 活着（docker info 能通）才是 true */
+  running: boolean
   containers: DockerContainer[]
   images: DockerImage[]
   volumes: DockerVolume[]
