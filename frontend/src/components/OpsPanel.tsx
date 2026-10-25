@@ -1782,7 +1782,8 @@ function WebSection(props: { sessionId: string }) {
   )
 }
 
-/** 脚本库的一条脚本。存 localStorage（全服务器共享的库），执行和定时任务才落到具体服务器。
+/** 脚本库的一条脚本。存 localStorage：共享库一个 key（全服务器通用），
+    这台服务器的脚本一个 key（带 sessionId，换台机器看不到）。
     interactive=true 的脚本发到面板右侧终端里跑（能看过程能输入），否则后台执行日志区看。 */
 interface ScriptItem {
   id: string
@@ -1792,29 +1793,35 @@ interface ScriptItem {
   interactive?: boolean
 }
 
-const SCRIPTS_KEY = 'termpilot.scripts'
+type ScriptScope = 'server' | 'shared'
 
-function loadScripts(): ScriptItem[] {
+const SCRIPTS_KEY = 'termpilot.scripts'
+const serverScriptsKey = (sessionId: string) => `termpilot.scripts.${sessionId}`
+
+function loadScripts(key: string): ScriptItem[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(SCRIPTS_KEY) || '[]') as unknown
+    const raw = JSON.parse(localStorage.getItem(key) || '[]') as unknown
     if (!Array.isArray(raw)) return []
     return raw.filter(
       (s): s is ScriptItem =>
         typeof s === 'object' && s !== null &&
         typeof (s as ScriptItem).id === 'string' && typeof (s as ScriptItem).name === 'string' &&
         typeof (s as ScriptItem).content === 'string'
-    ).map((s) => ({ id: s.id, name: s.name, remark: s.remark ?? '', content: s.content }))
+    ).map((s) => ({ id: s.id, name: s.name, remark: s.remark ?? '', content: s.content, interactive: s.interactive }))
   } catch {
     return []
   }
 }
 
-/** 脚本页：上脚本库（本地存，一键在当前服务器跑，日志就地展开），下定时任务（远端 crontab，
-    面板建的行尾带 # termpilot:<id> 标记可删，用户手写的只读展示）。 */
+/** 脚本页三节：这台服务器的脚本 → 这台服务器的定时任务（crontab）→ 共享脚本库。
+    定时任务里面板建的行尾带 # termpilot:<id> 标记可删，用户手写的只读展示。 */
 function ScriptSection(props: { sessionId: string; panelTermId: string }) {
   const setNotice = useAppStore((s) => s.setNotice)
-  const [scripts, setScripts] = useState<ScriptItem[]>(loadScripts)
-  // 脚本表单：editing 为 null 是新增，否则是编辑那条
+  const serverKey = serverScriptsKey(props.sessionId)
+  const [serverScripts, setServerScripts] = useState<ScriptItem[]>(() => loadScripts(serverKey))
+  const [sharedScripts, setSharedScripts] = useState<ScriptItem[]>(() => loadScripts(SCRIPTS_KEY))
+  // 脚本表单：editing 为 null 是新增，否则是编辑那条；formScope 决定表单开在哪一节、存进哪个库
+  const [formScope, setFormScope] = useState<ScriptScope>('server')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [fName, setFName] = useState('')
@@ -1822,10 +1829,11 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
   const [fContent, setFContent] = useState('')
   const [confirmDelScript, setConfirmDelScript] = useState<string | null>(null)
   // 运行状态：正在跑的脚本 id + 逐行日志（同安装日志的样子）；
-  // lastRun 记最近一次的结果，跑完日志不消失，下次运行才清
+  // lastRun 记最近一次的结果，跑完日志不消失，下次运行才清；runScope 决定日志区落在哪一节
   const [running, setRunning] = useState<string | null>(null)
   const [runLog, setRunLog] = useState<string[]>([])
   const [lastRun, setLastRun] = useState<{ name: string; ok: boolean } | null>(null)
+  const [runScope, setRunScope] = useState<ScriptScope>('shared')
   const runLogRef = useRef<HTMLDivElement>(null)
   // 定时任务
   const [cronList, setCronList] = useState<CronEntry[] | null>(null)
@@ -1835,9 +1843,15 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
   const [taskBusy, setTaskBusy] = useState(false)
   const [confirmDelCron, setConfirmDelCron] = useState<string | null>(null)
 
-  const save = (next: ScriptItem[]) => {
-    setScripts(next)
-    localStorage.setItem(SCRIPTS_KEY, JSON.stringify(next))
+  const listOf = (scope: ScriptScope) => (scope === 'server' ? serverScripts : sharedScripts)
+  const saveScope = (scope: ScriptScope, next: ScriptItem[]) => {
+    if (scope === 'server') {
+      setServerScripts(next)
+      localStorage.setItem(serverKey, JSON.stringify(next))
+    } else {
+      setSharedScripts(next)
+      localStorage.setItem(SCRIPTS_KEY, JSON.stringify(next))
+    }
   }
 
   const refreshCron = () => {
@@ -1858,14 +1872,16 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
     runLogRef.current?.scrollTo(0, runLogRef.current.scrollHeight)
   }, [runLog])
 
-  const openAdd = () => {
+  const openAdd = (scope: ScriptScope) => {
+    setFormScope(scope)
     setEditing(null)
     setFName('')
     setFRemark('')
     setFContent('')
     setFormOpen(true)
   }
-  const openEdit = (s: ScriptItem) => {
+  const openEdit = (scope: ScriptScope, s: ScriptItem) => {
+    setFormScope(scope)
     setEditing(s.id)
     setFName(s.name)
     setFRemark(s.remark)
@@ -1877,26 +1893,27 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
     const content = fContent.trim()
     if (!name || !content) return
     // 交互式开关在列表行上直接拨，表单不管它：编辑时保留原值
+    const list = listOf(formScope)
     if (editing) {
-      save(scripts.map((s) => (s.id === editing ? { ...s, name, remark: fRemark.trim(), content: fContent } : s)))
+      saveScope(formScope, list.map((s) => (s.id === editing ? { ...s, name, remark: fRemark.trim(), content: fContent } : s)))
     } else {
-      save([...scripts, { id: `s${Date.now()}`, name, remark: fRemark.trim(), content: fContent }])
+      saveScope(formScope, [...list, { id: `s${Date.now()}`, name, remark: fRemark.trim(), content: fContent }])
     }
     setFormOpen(false)
     setNotice(editing ? '脚本已保存' : '脚本已添加')
   }
-  const delScript = (id: string) => {
+  const delScript = (scope: ScriptScope, id: string) => {
     if (confirmDelScript !== id) {
       setConfirmDelScript(id)
       window.setTimeout(() => setConfirmDelScript((cur) => (cur === id ? null : cur)), 3000)
       return
     }
     setConfirmDelScript(null)
-    save(scripts.filter((s) => s.id !== id))
+    saveScope(scope, listOf(scope).filter((s) => s.id !== id))
     // 定时任务里引用的是内容快照，删库里的脚本不影响已建任务
   }
 
-  const run = (s: ScriptItem) => {
+  const run = (scope: ScriptScope, s: ScriptItem) => {
     if (s.interactive) {
       // 交互式：落成临时文件再跑（不是 echo|bash 管道——管道会占住 stdin，read 没法用），
       // stdin 留给终端，read/select/apt 确认这些都能正常交互；跑完即删不留痕
@@ -1906,6 +1923,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
       return
     }
     setRunning(s.id)
+    setRunScope(scope)
     setRunLog([])
     setLastRun(null)
     setNotice(`正在运行 ${s.name}…`, true)
@@ -1925,7 +1943,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
   }
 
   const addTask = () => {
-    const script = scripts.find((s) => s.id === tScript)
+    const script = [...serverScripts, ...sharedScripts].find((s) => s.id === tScript)
     if (!script || !tSchedule.trim()) return
     setTaskBusy(true)
     void window.api.sessions
@@ -1955,102 +1973,116 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
   }
 
+  const scriptRows = (scope: ScriptScope) =>
+    listOf(scope).map((s) => (
+      <div key={s.id} className="flex items-center gap-2 py-1 text-sm">
+        <span className="w-32 shrink-0 truncate">{s.name}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.remark}</span>
+        <Switch
+          size="sm"
+          checked={s.interactive ?? false}
+          onCheckedChange={(v) => saveScope(scope, listOf(scope).map((x) => (x.id === s.id ? { ...x, interactive: v } : x)))}
+        />
+        <span className="shrink-0 text-xs text-muted-foreground">交互式</span>
+        <span className="flex shrink-0 items-center gap-1">
+          <button type="button" disabled={running !== null} className="rounded px-1 text-xs text-primary/80 hover:text-primary disabled:opacity-40" onClick={() => run(scope, s)}>
+            {running === s.id ? '运行中…' : '运行'}
+          </button>
+          <button type="button" className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground" onClick={() => openEdit(scope, s)}>
+            编辑
+          </button>
+          <button
+            type="button"
+            className={cn('rounded px-1 text-xs', confirmDelScript === s.id ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground/60 hover:text-destructive')}
+            onClick={() => delScript(scope, s.id)}
+          >
+            {confirmDelScript === s.id ? '确认' : '删除'}
+          </button>
+        </span>
+      </div>
+    ))
+
+  const scriptForm = (
+    <div className="mt-2 flex flex-col gap-1.5 border-t border-border/50 pt-2">
+      <div className="flex gap-1.5">
+        <Input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="名称 清理日志" className="h-7 w-40 text-sm" />
+        <Input value={fRemark} onChange={(e) => setFRemark(e.target.value)} placeholder="备注（可选）" className="h-7 flex-1 text-sm" />
+      </div>
+      <textarea
+        value={fContent}
+        onChange={(e) => setFContent(e.target.value)}
+        placeholder={'脚本内容，如：\ndocker system prune -f'}
+        rows={4}
+        className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-sm outline-none placeholder:text-muted-foreground/60 focus:border-primary/60"
+      />
+      <div className="flex gap-1.5">
+        <Button size="sm" className="h-7 px-2" disabled={!fName.trim() || !fContent.trim()} onClick={submitScript}>
+          确认
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setFormOpen(false)}>
+          取消
+        </Button>
+      </div>
+    </div>
+  )
+
+  const logArea = (running !== null || runLog.length > 0) && (
+    <div className="mt-2">
+      <div className="mb-1 flex items-center justify-between">
+        {lastRun ? (
+          <p className={cn('text-xs', lastRun.ok ? 'text-muted-foreground' : 'text-destructive')}>
+            上次运行：{lastRun.name} · {lastRun.ok ? '成功' : '失败'}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">运行中…</p>
+        )}
+        <button
+          type="button"
+          title="关闭日志"
+          className="text-muted-foreground/60 hover:text-foreground"
+          onClick={() => {
+            setRunLog([])
+            setLastRun(null)
+          }}
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <div ref={runLogRef} className="max-h-44 overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text">
+        {runLog.map((line, i) => (
+          <div key={i} className="break-all whitespace-pre-wrap">
+            {line}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
-      {/* 上：脚本库 */}
+      {/* 一：这台服务器的脚本 */}
       <div>
         <div className="flex items-center justify-between border-b bg-accent/40 px-3 py-1.5">
-          <span className="text-sm text-muted-foreground">脚本库（全服务器共享）</span>
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-muted-foreground" onClick={() => (formOpen ? setFormOpen(false) : openAdd())}>
-            {formOpen ? '收起' : '+ 添加脚本'}
+          <span className="text-sm text-muted-foreground">脚本（这台服务器）</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-muted-foreground"
+            onClick={() => (formOpen && formScope === 'server' ? setFormOpen(false) : openAdd('server'))}
+          >
+            {formOpen && formScope === 'server' ? '收起' : '+ 添加脚本'}
           </Button>
         </div>
         <div className="px-3 py-2">
-          {scripts.length === 0 && !formOpen && <p className="py-1.5 text-sm text-muted-foreground">还没有脚本</p>}
-          {scripts.map((s) => (
-            <div key={s.id} className="flex items-center gap-2 py-1 text-sm">
-              <span className="w-32 shrink-0 truncate">{s.name}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.remark}</span>
-              <Switch
-                size="sm"
-                checked={s.interactive ?? false}
-                onCheckedChange={(v) => save(scripts.map((x) => (x.id === s.id ? { ...x, interactive: v } : x)))}
-              />
-              <span className="shrink-0 text-xs text-muted-foreground">交互式</span>
-              <span className="flex shrink-0 items-center gap-1">
-                <button type="button" disabled={running !== null} className="rounded px-1 text-xs text-primary/80 hover:text-primary disabled:opacity-40" onClick={() => run(s)}>
-                  {running === s.id ? '运行中…' : '运行'}
-                </button>
-                <button type="button" className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground" onClick={() => openEdit(s)}>
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  className={cn('rounded px-1 text-xs', confirmDelScript === s.id ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground/60 hover:text-destructive')}
-                  onClick={() => delScript(s.id)}
-                >
-                  {confirmDelScript === s.id ? '确认' : '删除'}
-                </button>
-              </span>
-            </div>
-          ))}
-          {formOpen && (
-            <div className="mt-2 flex flex-col gap-1.5 border-t border-border/50 pt-2">
-              <div className="flex gap-1.5">
-                <Input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="名称 清理日志" className="h-7 w-40 text-sm" />
-                <Input value={fRemark} onChange={(e) => setFRemark(e.target.value)} placeholder="备注（可选）" className="h-7 flex-1 text-sm" />
-              </div>
-              <textarea
-                value={fContent}
-                onChange={(e) => setFContent(e.target.value)}
-                placeholder={'脚本内容，如：\ndocker system prune -f'}
-                rows={4}
-                className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-sm outline-none placeholder:text-muted-foreground/60 focus:border-primary/60"
-              />
-              <div className="flex gap-1.5">
-                <Button size="sm" className="h-7 px-2" disabled={!fName.trim() || !fContent.trim()} onClick={submitScript}>
-                  确认
-                </Button>
-                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setFormOpen(false)}>
-                  取消
-                </Button>
-              </div>
-            </div>
+          {serverScripts.length === 0 && !(formOpen && formScope === 'server') && (
+            <p className="py-1.5 text-sm text-muted-foreground">还没有这台服务器的脚本</p>
           )}
-          {(running !== null || runLog.length > 0) && (
-            <div className="mt-2">
-              <div className="mb-1 flex items-center justify-between">
-                {lastRun ? (
-                  <p className={cn('text-xs', lastRun.ok ? 'text-muted-foreground' : 'text-destructive')}>
-                    上次运行：{lastRun.name} · {lastRun.ok ? '成功' : '失败'}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">运行中…</p>
-                )}
-                <button
-                  type="button"
-                  title="关闭日志"
-                  className="text-muted-foreground/60 hover:text-foreground"
-                  onClick={() => {
-                    setRunLog([])
-                    setLastRun(null)
-                  }}
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-              <div ref={runLogRef} className="max-h-44 overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text">
-                {runLog.map((line, i) => (
-                  <div key={i} className="break-all whitespace-pre-wrap">
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {scriptRows('server')}
+          {formOpen && formScope === 'server' && scriptForm}
+          {runScope === 'server' && logArea}
         </div>
       </div>
-      {/* 下：定时任务（远端 crontab） */}
+      {/* 二：定时任务（远端 crontab） */}
       <div className="border-t">
         <div className="flex items-center justify-between bg-accent/40 px-3 py-1.5">
           <span className="text-sm text-muted-foreground">定时任务（这台服务器的 crontab）</span>
@@ -2092,7 +2124,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
                 className="h-7 w-44 rounded-md border bg-transparent px-2 text-sm outline-none focus:border-primary/60"
               >
                 <option value="">选脚本…</option>
-                {scripts.map((s) => (
+                {[...serverScripts, ...sharedScripts].map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
@@ -2107,6 +2139,28 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
               </Button>
             </div>
           )}
+        </div>
+      </div>
+      {/* 三：共享脚本库（全服务器通用） */}
+      <div className="border-t">
+        <div className="flex items-center justify-between bg-accent/40 px-3 py-1.5">
+          <span className="text-sm text-muted-foreground">共享脚本（全服务器）</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-muted-foreground"
+            onClick={() => (formOpen && formScope === 'shared' ? setFormOpen(false) : openAdd('shared'))}
+          >
+            {formOpen && formScope === 'shared' ? '收起' : '+ 添加脚本'}
+          </Button>
+        </div>
+        <div className="px-3 py-2">
+          {sharedScripts.length === 0 && !(formOpen && formScope === 'shared') && (
+            <p className="py-1.5 text-sm text-muted-foreground">还没有共享脚本</p>
+          )}
+          {scriptRows('shared')}
+          {formOpen && formScope === 'shared' && scriptForm}
+          {runScope === 'shared' && logArea}
         </div>
       </div>
     </div>
