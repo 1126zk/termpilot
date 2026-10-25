@@ -144,6 +144,56 @@ func (a *App) hSessionDockerMirrorsSet(args []interface{}) (interface{}, error) 
 	return nil, a.exec.SetDockerMirrors(id, content)
 }
 
+func (a *App) hSessionScriptRun(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	content, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.RunScript(id, content, func(line string) {
+		a.emit("session:script-run-progress", map[string]string{"id": id, "line": line})
+	})
+}
+
+func (a *App) hSessionCronList(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.CronList(id)
+}
+
+func (a *App) hSessionCronAdd(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	schedule, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	content, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.CronAdd(id, schedule, content)
+}
+
+func (a *App) hSessionCronDel(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	cronID, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.CronDel(id, cronID)
+}
+
 func (a *App) hSessionDockerAction(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

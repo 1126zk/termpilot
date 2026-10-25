@@ -3,6 +3,7 @@ import type {
   Appearance,
   CaptureReply,
   CaptureRun,
+  CronEntry,
   DockerInfo,
   HistoryEntry,
   LocalShellInfo,
@@ -81,6 +82,16 @@ const api = {
       }),
     dockerService: (id: string, op: string) => invoke<void>(IPC.sessionDockerService, [id, op]),
     setDockerMirrors: (id: string, content: string) => invoke<void>(IPC.sessionDockerMirrorsSet, [id, content]),
+    /** 跑一段脚本；进度走 onScriptRunProgress 订阅 */
+    runScript: (id: string, content: string) => invoke<void>(IPC.sessionScriptRun, [id, content]),
+    onScriptRunProgress: (id: string, cb: (line: string) => void) =>
+      on<{ id: string; line: string }>(IPC.sessionScriptRunProgress, (p) => {
+        if (p.id === id) cb(p.line)
+      }),
+    cronList: (id: string) => invoke<CronEntry[]>(IPC.sessionCronList, [id]),
+    cronAdd: (id: string, schedule: string, content: string) =>
+      invoke<CronEntry>(IPC.sessionCronAdd, [id, schedule, content]),
+    cronDel: (id: string, cronId: string) => invoke<void>(IPC.sessionCronDel, [id, cronId]),
     dockerAction: (id: string, action: string, target: string, name = '') =>
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
     web: (id: string) => invoke<WebInfo>(IPC.sessionWeb, [id]),

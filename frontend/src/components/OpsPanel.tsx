@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { CircleHelp, MoreHorizontal, RefreshCw, X } from 'lucide-react'
-import type { DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
+import type { CronEntry, DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -65,8 +65,10 @@ export function OpsPanel() {
   const [memShown, setMemShown] = useState(5)
   // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
-  // 内容区选项卡：进程 / Docker / 网站（网站页内容还没做，先空着）
-  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web'>('proc')
+  // 内容区选项卡：进程 / Docker / 网站 / 脚本
+  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script'>('proc')
+  // 面板终端的 id 提到这一层：脚本页的"交互式"脚本要往它里面发命令
+  const [panelTermId] = useState(() => newTermId())
 
   const killProc = (pid: number) => {
     if (confirmKill !== pid) {
@@ -218,12 +220,13 @@ export function OpsPanel() {
           </Ring>
         </div>
 
-        {/* 内容切换：进程 / Docker / 网站，网站页还没做 */}
+        {/* 内容切换：进程 / Docker / 网站 / 脚本 */}
         <div className="flex items-center gap-1 text-sm">
           {([
             ['proc', '进程'],
             ['docker', 'Docker'],
-            ['web', '网站']
+            ['web', '网站'],
+            ['script', '脚本']
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -263,8 +266,10 @@ export function OpsPanel() {
           </div>
         ) : opsTab === 'docker' ? (
           <DockerSection sessionId={sessionId} />
-        ) : (
+        ) : opsTab === 'web' ? (
           <WebSection sessionId={sessionId} />
+        ) : (
+          <ScriptSection sessionId={sessionId} panelTermId={panelTermId} />
         )}
       </div>
       {/* 分隔条：按住左右拖，调整左侧信息区宽度 */}
@@ -274,7 +279,7 @@ export function OpsPanel() {
       />
       {/* 右侧命令区：同一台服务器再开一路真终端，面板关掉就断开销毁 */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <OpsTerminal sessionId={sessionId} />
+        <OpsTerminal sessionId={sessionId} termId={panelTermId} />
       </div>
     </div>
   )
@@ -283,8 +288,8 @@ export function OpsPanel() {
 /** 面板右侧的终端：挂载时在同一 SSH 会话上开一路新终端，卸载时断开销毁。
     渲染复用 TerminalView：右键菜单（复制/三种截图/粘贴）和主终端一致。
     顺序和主流程保持一致：先 create 成功再挂 TerminalView（attach 里的 bindView 要在 create 之后）。 */
-function OpsTerminal(props: { sessionId: string }) {
-  const [termId] = useState(() => newTermId())
+function OpsTerminal(props: { sessionId: string; termId: string }) {
+  const termId = props.termId
   const setNotice = useAppStore((s) => s.setNotice)
   const [ready, setReady] = useState(false)
   // StrictMode 开发模式会假卸载一次（清理后立刻重新挂载）：清理延迟一拍，
@@ -1774,6 +1779,337 @@ function WebSection(props: { sessionId: string }) {
         )}
       </div>
     </>
+  )
+}
+
+/** 脚本库的一条脚本。存 localStorage（全服务器共享的库），执行和定时任务才落到具体服务器。
+    interactive=true 的脚本发到面板右侧终端里跑（能看过程能输入），否则后台执行日志区看。 */
+interface ScriptItem {
+  id: string
+  name: string
+  remark: string
+  content: string
+  interactive?: boolean
+}
+
+const SCRIPTS_KEY = 'termpilot.scripts'
+
+function loadScripts(): ScriptItem[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SCRIPTS_KEY) || '[]') as unknown
+    if (!Array.isArray(raw)) return []
+    return raw.filter(
+      (s): s is ScriptItem =>
+        typeof s === 'object' && s !== null &&
+        typeof (s as ScriptItem).id === 'string' && typeof (s as ScriptItem).name === 'string' &&
+        typeof (s as ScriptItem).content === 'string'
+    ).map((s) => ({ id: s.id, name: s.name, remark: s.remark ?? '', content: s.content }))
+  } catch {
+    return []
+  }
+}
+
+/** 脚本页：上脚本库（本地存，一键在当前服务器跑，日志就地展开），下定时任务（远端 crontab，
+    面板建的行尾带 # termpilot:<id> 标记可删，用户手写的只读展示）。 */
+function ScriptSection(props: { sessionId: string; panelTermId: string }) {
+  const setNotice = useAppStore((s) => s.setNotice)
+  const [scripts, setScripts] = useState<ScriptItem[]>(loadScripts)
+  // 脚本表单：editing 为 null 是新增，否则是编辑那条
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [fName, setFName] = useState('')
+  const [fRemark, setFRemark] = useState('')
+  const [fContent, setFContent] = useState('')
+  const [confirmDelScript, setConfirmDelScript] = useState<string | null>(null)
+  // 运行状态：正在跑的脚本 id + 逐行日志（同安装日志的样子）；
+  // lastRun 记最近一次的结果，跑完日志不消失，下次运行才清
+  const [running, setRunning] = useState<string | null>(null)
+  const [runLog, setRunLog] = useState<string[]>([])
+  const [lastRun, setLastRun] = useState<{ name: string; ok: boolean } | null>(null)
+  const runLogRef = useRef<HTMLDivElement>(null)
+  // 定时任务
+  const [cronList, setCronList] = useState<CronEntry[] | null>(null)
+  const [taskOpen, setTaskOpen] = useState(false)
+  const [tSchedule, setTSchedule] = useState('')
+  const [tScript, setTScript] = useState('')
+  const [taskBusy, setTaskBusy] = useState(false)
+  const [confirmDelCron, setConfirmDelCron] = useState<string | null>(null)
+
+  const save = (next: ScriptItem[]) => {
+    setScripts(next)
+    localStorage.setItem(SCRIPTS_KEY, JSON.stringify(next))
+  }
+
+  const refreshCron = () => {
+    void window.api.sessions
+      .cronList(props.sessionId)
+      .then(setCronList)
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+  }
+  useEffect(refreshCron, [props.sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (running === null) return
+    return window.api.sessions.onScriptRunProgress(props.sessionId, (line) =>
+      setRunLog((cur) => [...cur.slice(-199), line])
+    )
+  }, [running, props.sessionId])
+  useEffect(() => {
+    runLogRef.current?.scrollTo(0, runLogRef.current.scrollHeight)
+  }, [runLog])
+
+  const openAdd = () => {
+    setEditing(null)
+    setFName('')
+    setFRemark('')
+    setFContent('')
+    setFormOpen(true)
+  }
+  const openEdit = (s: ScriptItem) => {
+    setEditing(s.id)
+    setFName(s.name)
+    setFRemark(s.remark)
+    setFContent(s.content)
+    setFormOpen(true)
+  }
+  const submitScript = () => {
+    const name = fName.trim()
+    const content = fContent.trim()
+    if (!name || !content) return
+    // 交互式开关在列表行上直接拨，表单不管它：编辑时保留原值
+    if (editing) {
+      save(scripts.map((s) => (s.id === editing ? { ...s, name, remark: fRemark.trim(), content: fContent } : s)))
+    } else {
+      save([...scripts, { id: `s${Date.now()}`, name, remark: fRemark.trim(), content: fContent }])
+    }
+    setFormOpen(false)
+    setNotice(editing ? '脚本已保存' : '脚本已添加')
+  }
+  const delScript = (id: string) => {
+    if (confirmDelScript !== id) {
+      setConfirmDelScript(id)
+      window.setTimeout(() => setConfirmDelScript((cur) => (cur === id ? null : cur)), 3000)
+      return
+    }
+    setConfirmDelScript(null)
+    save(scripts.filter((s) => s.id !== id))
+    // 定时任务里引用的是内容快照，删库里的脚本不影响已建任务
+  }
+
+  const run = (s: ScriptItem) => {
+    if (s.interactive) {
+      // 交互式：落成临时文件再跑（不是 echo|bash 管道——管道会占住 stdin，read 没法用），
+      // stdin 留给终端，read/select/apt 确认这些都能正常交互；跑完即删不留痕
+      const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(s.content)))
+      window.api.term.input(props.panelTermId, `f=$(mktemp); echo ${b64} | base64 -d > "$f"; bash "$f"; rm -f "$f"\n`)
+      setNotice(`${s.name} 已在右侧终端运行`)
+      return
+    }
+    setRunning(s.id)
+    setRunLog([])
+    setLastRun(null)
+    setNotice(`正在运行 ${s.name}…`, true)
+    void window.api.sessions
+      .runScript(props.sessionId, s.content)
+      .then(() => {
+        setNotice(`${s.name} 执行完成`)
+        setLastRun({ name: s.name, ok: true })
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e)
+        setNotice(message)
+        setLastRun({ name: s.name, ok: false })
+        setRunLog((cur) => [...cur, `[失败] ${message}`])
+      })
+      .finally(() => setRunning(null))
+  }
+
+  const addTask = () => {
+    const script = scripts.find((s) => s.id === tScript)
+    if (!script || !tSchedule.trim()) return
+    setTaskBusy(true)
+    void window.api.sessions
+      .cronAdd(props.sessionId, tSchedule.trim(), script.content)
+      .then(() => {
+        setNotice(`已加定时任务：${script.name}（${tSchedule.trim()}）`)
+        setTaskOpen(false)
+        setTSchedule('')
+        refreshCron()
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setTaskBusy(false))
+  }
+  const delTask = (id: string) => {
+    if (confirmDelCron !== id) {
+      setConfirmDelCron(id)
+      window.setTimeout(() => setConfirmDelCron((cur) => (cur === id ? null : cur)), 3000)
+      return
+    }
+    setConfirmDelCron(null)
+    void window.api.sessions
+      .cronDel(props.sessionId, id)
+      .then(() => {
+        setNotice('定时任务已删除')
+        refreshCron()
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+      {/* 上：脚本库 */}
+      <div>
+        <div className="flex items-center justify-between border-b bg-accent/40 px-3 py-1.5">
+          <span className="text-sm text-muted-foreground">脚本库（全服务器共享）</span>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-muted-foreground" onClick={() => (formOpen ? setFormOpen(false) : openAdd())}>
+            {formOpen ? '收起' : '+ 添加脚本'}
+          </Button>
+        </div>
+        <div className="px-3 py-2">
+          {scripts.length === 0 && !formOpen && <p className="py-1.5 text-sm text-muted-foreground">还没有脚本</p>}
+          {scripts.map((s) => (
+            <div key={s.id} className="flex items-center gap-2 py-1 text-sm">
+              <span className="w-32 shrink-0 truncate">{s.name}</span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.remark}</span>
+              <Switch
+                size="sm"
+                checked={s.interactive ?? false}
+                onCheckedChange={(v) => save(scripts.map((x) => (x.id === s.id ? { ...x, interactive: v } : x)))}
+              />
+              <span className="shrink-0 text-xs text-muted-foreground">交互式</span>
+              <span className="flex shrink-0 items-center gap-1">
+                <button type="button" disabled={running !== null} className="rounded px-1 text-xs text-primary/80 hover:text-primary disabled:opacity-40" onClick={() => run(s)}>
+                  {running === s.id ? '运行中…' : '运行'}
+                </button>
+                <button type="button" className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground" onClick={() => openEdit(s)}>
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  className={cn('rounded px-1 text-xs', confirmDelScript === s.id ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground/60 hover:text-destructive')}
+                  onClick={() => delScript(s.id)}
+                >
+                  {confirmDelScript === s.id ? '确认' : '删除'}
+                </button>
+              </span>
+            </div>
+          ))}
+          {formOpen && (
+            <div className="mt-2 flex flex-col gap-1.5 border-t border-border/50 pt-2">
+              <div className="flex gap-1.5">
+                <Input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="名称 清理日志" className="h-7 w-40 text-sm" />
+                <Input value={fRemark} onChange={(e) => setFRemark(e.target.value)} placeholder="备注（可选）" className="h-7 flex-1 text-sm" />
+              </div>
+              <textarea
+                value={fContent}
+                onChange={(e) => setFContent(e.target.value)}
+                placeholder={'脚本内容，如：\ndocker system prune -f'}
+                rows={4}
+                className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-sm outline-none placeholder:text-muted-foreground/60 focus:border-primary/60"
+              />
+              <div className="flex gap-1.5">
+                <Button size="sm" className="h-7 px-2" disabled={!fName.trim() || !fContent.trim()} onClick={submitScript}>
+                  确认
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setFormOpen(false)}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          )}
+          {(running !== null || runLog.length > 0) && (
+            <div className="mt-2">
+              <div className="mb-1 flex items-center justify-between">
+                {lastRun ? (
+                  <p className={cn('text-xs', lastRun.ok ? 'text-muted-foreground' : 'text-destructive')}>
+                    上次运行：{lastRun.name} · {lastRun.ok ? '成功' : '失败'}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">运行中…</p>
+                )}
+                <button
+                  type="button"
+                  title="关闭日志"
+                  className="text-muted-foreground/60 hover:text-foreground"
+                  onClick={() => {
+                    setRunLog([])
+                    setLastRun(null)
+                  }}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              <div ref={runLogRef} className="max-h-44 overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text">
+                {runLog.map((line, i) => (
+                  <div key={i} className="break-all whitespace-pre-wrap">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      {/* 下：定时任务（远端 crontab） */}
+      <div className="border-t">
+        <div className="flex items-center justify-between bg-accent/40 px-3 py-1.5">
+          <span className="text-sm text-muted-foreground">定时任务（这台服务器的 crontab）</span>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-muted-foreground" onClick={() => setTaskOpen(!taskOpen)}>
+            {taskOpen ? '收起' : '+ 添加任务'}
+          </Button>
+        </div>
+        <div className="max-h-44 overflow-auto px-3 pb-2">
+          {cronList === null ? (
+            <p className="py-1.5 text-sm text-muted-foreground">读取中…</p>
+          ) : cronList.length === 0 ? (
+            <p className="py-1.5 text-sm text-muted-foreground">还没有定时任务</p>
+          ) : (
+            cronList.map((c) => (
+              <div key={c.id || `${c.schedule} ${c.command}`} className="flex items-center gap-2 py-1 text-sm">
+                <span className="w-32 shrink-0 truncate font-mono">{c.schedule}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={c.command}>
+                  {c.command}
+                </span>
+                {c.ours ? (
+                  <button
+                    type="button"
+                    className={cn('shrink-0 rounded px-1 text-xs', confirmDelCron === c.id ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground/60 hover:text-destructive')}
+                    onClick={() => delTask(c.id)}
+                  >
+                    {confirmDelCron === c.id ? '确认' : '删除'}
+                  </button>
+                ) : (
+                  <span className="shrink-0 px-1 text-xs text-muted-foreground/40">手写</span>
+                )}
+              </div>
+            ))
+          )}
+          {taskOpen && (
+            <div className="mt-1 flex items-center gap-1.5 border-t border-border/50 pt-2">
+              <select
+                value={tScript}
+                onChange={(e) => setTScript(e.target.value)}
+                className="h-7 w-44 rounded-md border bg-transparent px-2 text-sm outline-none focus:border-primary/60"
+              >
+                <option value="">选脚本…</option>
+                {scripts.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <Input value={tSchedule} onChange={(e) => setTSchedule(e.target.value)} placeholder="周期 0 3 * * *" className="h-7 w-40 font-mono text-sm" />
+              <Button size="sm" className="h-7 px-2" disabled={taskBusy || !tScript || !tSchedule.trim()} onClick={addTask}>
+                {taskBusy ? '添加中…' : '确认'}
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setTaskOpen(false)}>
+                取消
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -170,6 +170,17 @@ export interface WebConfFile {
   content: string
 }
 
+/** 一条 crontab 条目，与 Go 端 sshx.CronEntry 对应。ours=true 是面板建的（行尾有标记），
+    可以删；其余是用户自己手写的，只展示。 */
+export interface CronEntry {
+  /** 面板建的才有（标记里的 id），原有条目为空串 */
+  id: string
+  /** 五段表达式原文或 @daily 这类关键字 */
+  schedule: string
+  command: string
+  ours: boolean
+}
+
 /** 一个挂载点的用量，字节数 */
 export interface DiskUsage {
   mount: string
