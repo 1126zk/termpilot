@@ -35,10 +35,13 @@ export async function captureTerminalView(opts: {
   cropOnly?: boolean
 }): Promise<CaptureDone> {
   const state = useAppStore.getState()
-  if (!state.tabs.some((tab) => tab.id === opts.termId)) {
+  // 面板终端这类不在标签表里的也能截：缓冲合成只依赖 terminalPool；
+  // 切激活标签只对真标签做，面板终端没有可切的
+  const isTab = state.tabs.some((tab) => tab.id === opts.termId)
+  if (!isTab && !terminalPool.look(opts.termId)) {
     throw new Error('终端标签不存在，先连接')
   }
-  if (state.activeTabId !== opts.termId) state.setActiveTab(opts.termId)
+  if (isTab && state.activeTabId !== opts.termId) state.setActiveTab(opts.termId)
   await waitVisible(opts.termId)
 
   if (opts.mode === 'viewport') {

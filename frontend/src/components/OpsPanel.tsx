@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { terminalPool } from '../terminal/TerminalPool'
+import { TerminalView } from './TerminalView'
 import { useAppStore } from '../stores/useAppStore'
 
 /** 字节 → GiB/MiB 简短文本 */
@@ -279,42 +280,44 @@ export function OpsPanel() {
   )
 }
 
-/** 面板右侧的终端：挂载时在同一 SSH 会话上开一路新终端，卸载时断开销毁。 */
+/** 面板右侧的终端：挂载时在同一 SSH 会话上开一路新终端，卸载时断开销毁。
+    渲染复用 TerminalView：右键菜单（复制/三种截图/粘贴）和主终端一致。
+    顺序和主流程保持一致：先 create 成功再挂 TerminalView（attach 里的 bindView 要在 create 之后）。 */
 function OpsTerminal(props: { sessionId: string }) {
-  const ref = useRef<HTMLDivElement>(null)
   const [termId] = useState(() => newTermId())
+  const setNotice = useAppStore((s) => s.setNotice)
+  const [ready, setReady] = useState(false)
+  // StrictMode 开发模式会假卸载一次（清理后立刻重新挂载）：清理延迟一拍，
+  // 假卸载的清理被取消，真卸载才 close；否则双跑会建出两只 shell，提示符出现两次
+  const cleanupTimer = useRef(0)
 
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    window.api.term.create({
-      termId,
-      kind: 'ssh',
-      sessionId: props.sessionId,
-      title: '面板终端',
-      cols: 80,
-      rows: 24
-    })
-    terminalPool.attach(termId, el)
-
-    // 宽度会随窗口调整连续变化，等停稳再 fit，避免每一帧都重排终端
-    let timer = 0
-    const ro = new ResizeObserver(() => {
-      window.clearTimeout(timer)
-      timer = window.setTimeout(() => terminalPool.fit(termId), 120)
-    })
-    ro.observe(el)
-
+    window.clearTimeout(cleanupTimer.current)
+    let dead = false
+    window.api.term
+      .create({
+        termId,
+        kind: 'ssh',
+        sessionId: props.sessionId,
+        title: '面板终端',
+        cols: 80,
+        rows: 24
+      })
+      .then(() => {
+        if (!dead) setReady(true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
     return () => {
-      window.clearTimeout(timer)
-      ro.disconnect()
-      terminalPool.detach(termId)
-      window.api.term.close(termId)
-      terminalPool.dispose(termId)
+      dead = true
+      cleanupTimer.current = window.setTimeout(() => {
+        window.api.term.close(termId)
+        terminalPool.dispose(termId)
+      }, 100)
     }
-  }, [termId, props.sessionId])
+  }, [termId, props.sessionId, setNotice])
 
-  return <div ref={ref} className="min-h-0 flex-1 p-1" style={{ background: 'var(--terminal-background)' }} />
+  if (!ready) return <div className="min-h-0 flex-1" style={{ background: 'var(--terminal-background)' }} />
+  return <TerminalView termId={termId} />
 }
 
 /** 进程榜一节：标题栏（含展开/收起）+ 前 N 名表格。杀进程按钮两步确认。
