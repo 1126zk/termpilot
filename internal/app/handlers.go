@@ -179,7 +179,8 @@ func (a *App) hSessionCronAdd(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.exec.CronAdd(id, schedule, content)
+	name, _ := argStr(args, 3)
+	return a.exec.CronAdd(id, schedule, content, name)
 }
 
 func (a *App) hSessionCronDel(args []interface{}) (interface{}, error) {

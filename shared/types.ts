@@ -175,6 +175,8 @@ export interface WebConfFile {
 export interface CronEntry {
   /** 面板建的才有（标记里的 id），原有条目为空串 */
   id: string
+  /** 面板建的带脚本名（标记里的名字），空串则显示 command 原文 */
+  name: string
   /** 五段表达式原文或 @daily 这类关键字 */
   schedule: string
   command: string

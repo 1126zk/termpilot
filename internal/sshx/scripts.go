@@ -14,16 +14,18 @@ import (
 // # termpilot:<id> 标记——列出和删除都认这个标记，用户自己手写的条目只读不动。
 
 // CronEntry 一条 crontab 条目。Ours=true 是面板建的（行尾有标记），可以删；
-// 其余是用户自己写的，只展示。
+// 其余是用户自己写的，只展示。面板建的标记形如 # termpilot:<id>:<脚本名>，
+// 名字用来显示（路径是机器看的，名字是人看的）；老数据没有名字，前端回退显示命令原文。
 type CronEntry struct {
 	ID       string `json:"id"`
+	Name     string `json:"name"`
 	Schedule string `json:"schedule"`
 	Command  string `json:"command"`
 	Ours     bool   `json:"ours"`
 }
 
-// cronMarkerRe 行尾标记：# termpilot:<id>
-var cronMarkerRe = regexp.MustCompile(`\s*# termpilot:([a-zA-Z0-9._-]+)\s*$`)
+// cronMarkerRe 行尾标记：# termpilot:<id> 或 # termpilot:<id>:<名字>
+var cronMarkerRe = regexp.MustCompile(`\s*# termpilot:([a-zA-Z0-9._-]+)(?::(.*))?$`)
 
 // cronScheduleRe 五段表达式或 @daily 这类关键字，字符白名单防注入。
 var cronScheduleRe = regexp.MustCompile(`^([0-9*/,-]+( [0-9*/,-]+){4}|@(reboot|yearly|annually|monthly|weekly|daily|midnight|hourly))$`)
@@ -59,9 +61,12 @@ func (s *ExecService) CronList(sessionID string) ([]CronEntry, error) {
 			continue
 		}
 		entry := CronEntry{Command: line}
-		if m := cronMarkerRe.FindStringSubmatch(line); len(m) == 2 {
+		if m := cronMarkerRe.FindStringSubmatch(line); len(m) >= 2 {
 			entry.ID = m[1]
 			entry.Ours = true
+			if len(m) == 3 {
+				entry.Name = strings.TrimSpace(m[2])
+			}
 			entry.Command = strings.TrimSpace(cronMarkerRe.ReplaceAllString(line, ""))
 		}
 		// 前 5 段是周期，剩下是命令；@daily 这类关键字单独一段
@@ -86,8 +91,8 @@ func (s *ExecService) CronList(sessionID string) ([]CronEntry, error) {
 }
 
 // CronAdd 加一条定时任务：脚本内容写到 ~/.termpilot/scripts/<id>.sh，crontab 追加一行。
-// id 面板生成（t+时间戳），重名不冲突。
-func (s *ExecService) CronAdd(sessionID, schedule, content string) (CronEntry, error) {
+// id 面板生成（t+时间戳），重名不冲突；标记里带脚本名，列表显示人话不显示路径。
+func (s *ExecService) CronAdd(sessionID, schedule, content, name string) (CronEntry, error) {
 	if !cronScheduleRe.MatchString(strings.TrimSpace(schedule)) {
 		return CronEntry{}, fmt.Errorf("周期写法不对：五段表达式（如 0 3 * * *）或 @daily 这类关键字，收到 %q", schedule)
 	}
@@ -95,15 +100,19 @@ func (s *ExecService) CronAdd(sessionID, schedule, content string) (CronEntry, e
 		return CronEntry{}, fmt.Errorf("脚本是空的")
 	}
 	id := fmt.Sprintf("t%d", time.Now().Unix())
+	// 名字进 crontab 注释、走 shell 单引号：剥掉单引号和换行防断行/破引用
+	name = strings.NewReplacer("'", "", "\n", " ", "\r", " ").Replace(strings.TrimSpace(name))
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	// base64 过 SSH 防引号/换行；crontab 追加用管道整体写回
+	// 注意 crontab -l 必须 || true：没有 crontab 时它退出码 1，set -e 会传进子 shell
+	// 让 echo 根本没跑，管道把空输入喂给 crontab - 装个空 crontab 还报成功
 	script := fmt.Sprintf(`set -e
 dir="$HOME/.termpilot/scripts"
 mkdir -p "$dir"
 { echo %s | base64 -d; echo; } > "$dir/%s.sh"
 chmod +x "$dir/%s.sh"
-( crontab -l 2>/dev/null; echo '%s bash "$HOME/.termpilot/scripts/%s.sh" # termpilot:%s' ) | crontab -
-`, encoded, id, id, strings.TrimSpace(schedule), id, id)
+( crontab -l 2>/dev/null || true; echo '%s bash "$HOME/.termpilot/scripts/%s.sh" # termpilot:%s:%s' ) | crontab -
+`, encoded, id, id, strings.TrimSpace(schedule), id, id, name)
 	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 15000})
 	if err != nil {
 		return CronEntry{}, err
@@ -111,15 +120,16 @@ chmod +x "$dir/%s.sh"
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return CronEntry{}, fmt.Errorf("添加定时任务失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
-	return CronEntry{ID: id, Schedule: strings.TrimSpace(schedule), Command: content, Ours: true}, nil
+	return CronEntry{ID: id, Name: name, Schedule: strings.TrimSpace(schedule), Command: content, Ours: true}, nil
 }
 
 // CronDel 删面板建的任务：crontab 里按标记过滤掉，再删脚本文件。只认标记 id，别人的条目不动。
+// 注意用 -F 固定串且不带 $ 锚：标记后面还跟着脚本名，行尾锚匹配不到
 func (s *ExecService) CronDel(sessionID, id string) error {
-	if !cronMarkerRe.MatchString(" # termpilot:" + id) {
+	if !cronMarkerRe.MatchString(" # termpilot:"+id) {
 		return fmt.Errorf("非法的任务 id：%q", id)
 	}
-	script := fmt.Sprintf(`crontab -l 2>/dev/null | grep -v '# termpilot:%s$' | crontab -
+	script := fmt.Sprintf(`crontab -l 2>/dev/null | grep -vF '# termpilot:%s' | crontab -
 rm -f "$HOME/.termpilot/scripts/%s.sh"
 `, id, id)
 	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 15000})

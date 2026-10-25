@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import {
@@ -1795,6 +1796,15 @@ interface ScriptItem {
 
 type ScriptScope = 'server' | 'shared'
 
+/** 任务 id 是 t+创建时的 Unix 时间戳，翻译回来就是创建时间；不是这个格式的（老数据）返回空串 */
+function cronCreatedAt(id: string): string {
+  const m = /^t(\d+)$/.exec(id)
+  if (!m) return ''
+  const d = new Date(Number(m[1]) * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 const SCRIPTS_KEY = 'termpilot.scripts'
 const serverScriptsKey = (sessionId: string) => `termpilot.scripts.${sessionId}`
 
@@ -1947,7 +1957,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
     if (!script || !tSchedule.trim()) return
     setTaskBusy(true)
     void window.api.sessions
-      .cronAdd(props.sessionId, tSchedule.trim(), script.content)
+      .cronAdd(props.sessionId, tSchedule.trim(), script.content, script.name)
       .then(() => {
         setNotice(`已加定时任务：${script.name}（${tSchedule.trim()}）`)
         setTaskOpen(false)
@@ -2099,9 +2109,19 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
             cronList.map((c) => (
               <div key={c.id || `${c.schedule} ${c.command}`} className="flex items-center gap-2 py-1 text-sm">
                 <span className="w-32 shrink-0 truncate font-mono">{c.schedule}</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={c.command}>
-                  {c.command}
-                </span>
+                {c.ours && c.name ? (
+                  // 面板建的显示脚本名（人话），路径收进 hover
+                  <span className="min-w-0 flex-1 truncate" title={c.command}>
+                    {c.name}
+                  </span>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={c.command}>
+                    {c.command}
+                  </span>
+                )}
+                {c.ours && cronCreatedAt(c.id) !== '' && (
+                  <span className="shrink-0 text-xs text-muted-foreground/60">创建于 {cronCreatedAt(c.id)}</span>
+                )}
                 {c.ours ? (
                   <button
                     type="button"
@@ -2118,18 +2138,29 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
           )}
           {taskOpen && (
             <div className="mt-1 flex items-center gap-1.5 border-t border-border/50 pt-2">
-              <select
-                value={tScript}
-                onChange={(e) => setTScript(e.target.value)}
-                className="h-7 w-44 rounded-md border bg-transparent px-2 text-sm outline-none focus:border-primary/60"
-              >
-                <option value="">选脚本…</option>
-                {[...serverScripts, ...sharedScripts].map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              <Select value={tScript} onValueChange={setTScript}>
+                <SelectTrigger className="h-7 w-44 text-sm">
+                  <SelectValue placeholder="选脚本" />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* 交互式脚本不进 crontab：无人值守没有 stdin，read 会拿空值静默跑错 */}
+                  {(() => {
+                    const candidates = [...serverScripts, ...sharedScripts].filter((s) => !s.interactive)
+                    if (candidates.length === 0) {
+                      return (
+                        <SelectItem value="__none" disabled>
+                          没有可定时运行的脚本
+                        </SelectItem>
+                      )
+                    }
+                    return candidates.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))
+                  })()}
+                </SelectContent>
+              </Select>
               <Input value={tSchedule} onChange={(e) => setTSchedule(e.target.value)} placeholder="周期 0 3 * * *" className="h-7 w-40 font-mono text-sm" />
               <Button size="sm" className="h-7 px-2" disabled={taskBusy || !tScript || !tSchedule.trim()} onClick={addTask}>
                 {taskBusy ? '添加中…' : '确认'}

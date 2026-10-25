@@ -89,8 +89,8 @@ const api = {
         if (p.id === id) cb(p.line)
       }),
     cronList: (id: string) => invoke<CronEntry[]>(IPC.sessionCronList, [id]),
-    cronAdd: (id: string, schedule: string, content: string) =>
-      invoke<CronEntry>(IPC.sessionCronAdd, [id, schedule, content]),
+    cronAdd: (id: string, schedule: string, content: string, name = '') =>
+      invoke<CronEntry>(IPC.sessionCronAdd, [id, schedule, content, name]),
     cronDel: (id: string, cronId: string) => invoke<void>(IPC.sessionCronDel, [id, cronId]),
     dockerAction: (id: string, action: string, target: string, name = '') =>
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
