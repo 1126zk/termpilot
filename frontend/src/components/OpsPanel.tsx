@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import {
@@ -17,6 +18,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { terminalPool } from '../terminal/TerminalPool'
 import { TerminalView } from './TerminalView'
+import { MANUAL_TOPICS } from './manualData'
+import { TRIAGE_SCENARIOS } from './troubleshootData'
 import { useAppStore } from '../stores/useAppStore'
 
 /** 字节 → GiB/MiB 简短文本 */
@@ -67,7 +70,7 @@ export function OpsPanel() {
   // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
-  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script'>('proc')
+  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual' | 'triage'>('proc')
   // 面板终端的 id 提到这一层：脚本页的"交互式"脚本要往它里面发命令
   const [panelTermId] = useState(() => newTermId())
 
@@ -221,13 +224,15 @@ export function OpsPanel() {
           </Ring>
         </div>
 
-        {/* 内容切换：进程 / Docker / 网站 / 脚本 */}
+        {/* 内容切换：进程 / Docker / 网站 / 脚本 / 手册 / 排查 */}
         <div className="flex items-center gap-1 text-sm">
           {([
             ['proc', '进程'],
             ['docker', 'Docker'],
             ['web', '网站'],
-            ['script', '脚本']
+            ['script', '脚本'],
+            ['manual', '手册'],
+            ['triage', '排查']
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -269,8 +274,12 @@ export function OpsPanel() {
           <DockerSection sessionId={sessionId} />
         ) : opsTab === 'web' ? (
           <WebSection sessionId={sessionId} />
-        ) : (
+        ) : opsTab === 'script' ? (
           <ScriptSection sessionId={sessionId} panelTermId={panelTermId} />
+        ) : opsTab === 'manual' ? (
+          <ManualSection />
+        ) : (
+          <TriageSection />
         )}
       </div>
       {/* 分隔条：按住左右拖，调整左侧信息区宽度 */}
@@ -2195,6 +2204,256 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** 文档条目：标题 + 自由文本。内置的打包在代码里，自建和覆盖的存 localStorage。 */
+const DOCS_WRAP_KEY = 'termpilot.docs.wrap'
+
+interface CustomDoc {
+  id: string
+  title: string
+  content: string
+}
+
+/** 每个文档页一个 store：items = 自建的 + 覆盖内置的（同 id 影子），deleted = 被删掉的内置 id。 */
+interface DocStore {
+  items: CustomDoc[]
+  deleted: string[]
+}
+
+function loadDocStore(key: string): DocStore {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || '{}') as unknown
+    // 旧版是纯数组（只有自建），兼容一下
+    if (Array.isArray(raw)) {
+      return {
+        items: raw.filter(
+          (d): d is CustomDoc =>
+            typeof d === 'object' && d !== null &&
+            typeof (d as CustomDoc).id === 'string' && typeof (d as CustomDoc).title === 'string' &&
+            typeof (d as CustomDoc).content === 'string'
+        ),
+        deleted: []
+      }
+    }
+    const obj = raw as Partial<DocStore>
+    return {
+      items: Array.isArray(obj.items) ? obj.items : [],
+      deleted: Array.isArray(obj.deleted) ? obj.deleted.filter((d): d is string => typeof d === 'string') : []
+    }
+  } catch {
+    return { items: [], deleted: [] }
+  }
+}
+
+/** 手册/排查共用的文档页：左目录，右内容；查看/编辑两种模式，按钮在右下角。
+    所有条目都能编辑删除：编辑内置的 = 存一份同 id 的覆盖版本（变纯文本），删除内置的 = 进黑名单。 */
+function DocSection(props: {
+  topics: { id: string; title: string }[]
+  customKey: string
+  /** 内置条目的纯文本版（进编辑模式时预填；手册是原文，排查是步骤拍平） */
+  builtinText: (id: string) => string
+  renderBuiltin: (id: string, wrap: boolean) => ReactNode
+}) {
+  const setNotice = useAppStore((s) => s.setNotice)
+  const [store, setStore] = useState<DocStore>(() => loadDocStore(props.customKey))
+  const [open, setOpen] = useState<string | null>(props.topics[0]?.id ?? null)
+  const [mode, setMode] = useState<'view' | 'edit' | 'new'>('view')
+  // 内容换行开关：手册/排查共用一个键（DOCS_WRAP_KEY），两页状态统一；
+  // 长行默认折行，关掉变横向滚动（看宽表格/长命令用）
+  const [wrap, setWrapState] = useState(() => localStorage.getItem(DOCS_WRAP_KEY) !== '0')
+  const setWrap = (v: boolean) => {
+    setWrapState(v)
+    localStorage.setItem(DOCS_WRAP_KEY, v ? '1' : '0')
+  }
+  const [fTitle, setFTitle] = useState('')
+  const [fContent, setFContent] = useState('')
+
+  const save = (next: DocStore) => {
+    setStore(next)
+    localStorage.setItem(props.customKey, JSON.stringify(next))
+  }
+
+  // 有效条目：内置的去掉被删的、套上覆盖；id 不撞内置的是纯自建，排在后面
+  const override = (id: string) => store.items.find((d) => d.id === id)
+  const entries: CustomDoc[] = [
+    ...props.topics
+      .filter((t) => !store.deleted.includes(t.id))
+      .map((t) => override(t.id) ?? { id: t.id, title: t.title, content: '' }),
+    ...store.items.filter((d) => !props.topics.some((t) => t.id === d.id))
+  ]
+  const current = entries.find((e) => e.id === open) ?? null
+  const currentIsBuiltin = open !== null && props.topics.some((t) => t.id === open)
+
+  const startNew = () => {
+    setOpen(null)
+    setFTitle('')
+    setFContent('')
+    setMode('new')
+  }
+  const startEdit = (d: CustomDoc) => {
+    // 内置的没覆盖过时 content 是空的，进编辑模式用它的纯文本版预填
+    setFTitle(d.title)
+    setFContent(d.content || props.builtinText(d.id))
+    setMode('edit')
+  }
+  const submit = () => {
+    const title = fTitle.trim()
+    const content = fContent.trim()
+    if (!title || !content) return
+    if (mode === 'edit' && current) {
+      // 同 id 写回：自建的改自建，内置的存覆盖
+      const rest = store.items.filter((c) => c.id !== current.id)
+      save({ ...store, items: [...rest, { id: current.id, title, content }] })
+      setNotice('已保存')
+    } else {
+      const id = `d${Date.now()}`
+      save({ ...store, items: [...store.items, { id, title, content }] })
+      setOpen(id)
+      setNotice('已添加')
+    }
+    setMode('view')
+  }
+  const del = (d: CustomDoc) => {
+    if (currentIsBuiltin) {
+      // 内置的进黑名单，连带清掉覆盖版本
+      save({ items: store.items.filter((c) => c.id !== d.id), deleted: [...store.deleted, d.id] })
+    } else {
+      save({ ...store, items: store.items.filter((c) => c.id !== d.id) })
+    }
+    setOpen(props.topics[0]?.id ?? null)
+    setMode('view')
+    setNotice('已删除')
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border">
+      <div className="w-40 shrink-0 overflow-auto border-r pb-1">
+        {entries.map((e) => (
+          <ContextMenu key={e.id}>
+            <ContextMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  'block w-full truncate px-3 py-1.5 text-left text-sm',
+                  open === e.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={() => {
+                  setOpen(e.id)
+                  setMode('view')
+                }}
+              >
+                {e.title}
+              </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onClick={() => startEdit(e)}>编辑</ContextMenuItem>
+              <ContextMenuItem onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '自动换行'}</ContextMenuItem>
+              <ContextMenuItem variant="destructive" onClick={() => del(e)}>
+                删除
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        ))}
+        <button
+          type="button"
+          className="block w-full px-3 py-1.5 text-left text-sm text-muted-foreground/60 hover:text-foreground"
+          onClick={startNew}
+        >
+          + 新增
+        </button>
+      </div>
+      <div className="min-w-0 flex-1 overflow-auto">
+        {mode !== 'view' ? (
+          <div className="flex flex-col gap-1.5 px-3 py-2">
+            <Input value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="标题" className="h-7 w-64 text-sm" />
+            <textarea
+              value={fContent}
+              onChange={(e) => setFContent(e.target.value)}
+              placeholder="内容（纯文本，自己排版）"
+              rows={14}
+              className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-sm outline-none placeholder:text-muted-foreground/60 focus:border-primary/60"
+            />
+            <div className="flex gap-1.5">
+              <Button size="sm" className="h-7 px-2" disabled={!fTitle.trim() || !fContent.trim()} onClick={submit}>
+                保存
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setMode('view')}>
+                取消
+              </Button>
+            </div>
+          </div>
+        ) : current ? (
+          // 覆盖过/自建的显示纯文本；内置未覆盖的走结构化渲染。编辑/删除在目录项右键里
+          current.content ? (
+            <pre
+              className={cn(
+                'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
+                wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+              )}
+            >
+              {current.content}
+            </pre>
+          ) : (
+            props.renderBuiltin(current.id, wrap)
+          )
+        ) : (
+          <p className="px-3 py-2 text-sm text-muted-foreground">左边选一个，或点 + 新增</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** 手册页：系统讲透一个主题（内置 + 自建），左目录右内容。 */
+function ManualSection() {
+  return (
+    <DocSection
+      topics={MANUAL_TOPICS}
+      customKey="termpilot.docs.manual"
+      builtinText={(id) => MANUAL_TOPICS.find((x) => x.id === id)?.content ?? ''}
+      renderBuiltin={(id, wrap) => {
+        const t = MANUAL_TOPICS.find((x) => x.id === id)
+        return t ? (
+          <pre
+            className={cn(
+              'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
+              wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+            )}
+          >
+            {t.content}
+          </pre>
+        ) : null
+      }}
+    />
+  )
+}
+
+/** 排查页：应急 playbook。内置场景也按纯文本渲染（步骤拍平，编号对齐），
+    和手册同一套展示，换行开关两页一致。 */
+function TriageSection() {
+  const flatten = (id: string) => {
+    const sc = TRIAGE_SCENARIOS.find((x) => x.id === id)
+    if (!sc) return ''
+    return sc.steps.map((st, i) => `${i + 1}. ${st.cmd}\n   ${st.note}`).join('\n\n')
+  }
+  return (
+    <DocSection
+      topics={TRIAGE_SCENARIOS}
+      customKey="termpilot.docs.triage"
+      builtinText={flatten}
+      renderBuiltin={(id, wrap) => (
+        <pre
+          className={cn(
+            'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
+            wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+          )}
+        >
+          {flatten(id)}
+        </pre>
+      )}
+    />
   )
 }
 
