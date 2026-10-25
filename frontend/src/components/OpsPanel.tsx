@@ -1036,10 +1036,10 @@ function DockerSection(props: { sessionId: string }) {
 function parseSites(
   files: WebConfFile[],
   svc: 'nginx' | 'caddy'
-): { name: string; domain: string; port: string; proto: 'http' | 'https'; kind: string; target: string; targetTitle: string }[] {
+): { name: string; domain: string; port: string; proto: 'http' | 'https'; addr: string; kind: string; target: string; targetTitle: string }[] {
   const dir = svc === 'nginx' ? '/conf.d/' : '/sites/'
   const ext = svc === 'nginx' ? '.conf' : '.caddy'
-  const sites: { name: string; domain: string; port: string; proto: 'http' | 'https'; kind: string; target: string; targetTitle: string }[] = []
+  const sites: { name: string; domain: string; port: string; proto: 'http' | 'https'; addr: string; kind: string; target: string; targetTitle: string }[] = []
   for (const f of files) {
     if (!f.path.includes(dir) || !f.path.endsWith(ext) || f.path.endsWith('/placeholder.caddy')) continue
     const body =
@@ -1054,6 +1054,7 @@ function parseSites(
     let domain = ''
     let port = '80'
     let proto: 'http' | 'https' = 'http'
+    let addr = ''
     if (svc === 'nginx') {
       const sn = body.match(/server_name\s+([^;\s]+)/)
       if (!sn) continue
@@ -1064,14 +1065,16 @@ function parseSites(
       // caddy 站点地址是块首行：domain（自动 HTTPS）或 http://domain:port（纯 HTTP）
       const firstLine = body.trimStart().split('\n')[0].replace(/\s*\{.*$/, '')
       proto = /^http:\/\//.test(firstLine) ? 'http' : 'https'
-      const addr = firstLine.replace(/^https?:\/\//, '')
-      const sep = addr.lastIndexOf(':')
-      domain = sep > 0 ? addr.slice(0, sep) : addr
-      port = sep > 0 ? addr.slice(sep + 1) : '80'
+      const addrRaw = firstLine.replace(/^https?:\/\//, '')
+      const sep = addrRaw.lastIndexOf(':')
+      domain = sep > 0 ? addrRaw.slice(0, sep) : addrRaw
+      port = sep > 0 ? addrRaw.slice(sep + 1) : proto === 'https' ? '443' : '80'
+      // 第一列显示完整地址：协议 + 域名 + 端口（没写端口的按协议默认）
+      addr = `${proto}://${domain}:${port}`
     }
     const proxy = body.match(/reverse_proxy\s+(\S+)/) ?? body.match(/proxy_pass\s+https?:\/\/([^;\s]+)/)
     if (proxy) {
-      sites.push({ name, domain, port, proto, kind: '反代', target: proxy[1], targetTitle: '' })
+      sites.push({ name, domain, port, proto, addr, kind: '反代', target: proxy[1], targetTitle: '' })
       continue
     }
     const root = body.match(/root\s+(?:\*\s+)?([^;\s]+)/)
@@ -1086,13 +1089,14 @@ function parseSites(
         domain,
         port,
         proto,
+        addr,
         kind: '静态',
         target: mapped,
         targetTitle: mapped === containerPath ? '' : containerPath
       })
       continue
     }
-    sites.push({ name, domain, port, proto, kind: '自定义', target: '', targetTitle: '' })
+    sites.push({ name, domain, port, proto, addr, kind: '自定义', target: '', targetTitle: '' })
   }
   return sites
 }
@@ -1101,8 +1105,115 @@ function parseSites(
     没装时给一键安装（alpine 小镜像，配置收在 ~/.termpilot/<名字>/ 下）；装了显示配置原文。
     两边都支持站点增删（一站点一文件，写盘 → 校验 → 热加载）；caddy 自动 HTTPS，nginx 只生成 HTTP。
     结果走 store 缓存；页面开着每 15 秒后台更新。 */
+
+type WebTabKey = 'nginx' | 'caddy'
+// 页签顺序按服务器分开存（key 带 sessionId）：这台 caddy 在前，那台 nginx 在前，互不干扰
+const webTabOrderKey = (sessionId: string) => `termpilot.webTabs.order.${sessionId}`
+
+// 每次进来默认选中排第一个的，不记上次选中
+function loadWebTabOrder(sessionId: string): WebTabKey[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(webTabOrderKey(sessionId)) || '[]') as unknown
+    if (Array.isArray(raw)) {
+      const order = raw.filter((k): k is WebTabKey => k === 'nginx' || k === 'caddy')
+      const all = order.concat((['nginx', 'caddy'] as WebTabKey[]).filter((k) => !order.includes(k)))
+      if (all.length === 2) return all
+    }
+  } catch { /* 解析失败用默认 */ }
+  return ['nginx', 'caddy']
+}
+
 function WebSection(props: { sessionId: string }) {
-  const [webTab, setWebTab] = useState<'nginx' | 'caddy'>('nginx')
+  const [webTabs, setWebTabs] = useState<WebTabKey[]>(() => loadWebTabOrder(props.sessionId))
+  // 拖动中判定要用最新顺序（闭包里的 state 是按下时的快照），同 TabBar 的 menuOrderRef
+  const webTabsRef = useRef(webTabs)
+  const updateWebTabs = (next: WebTabKey[]) => {
+    webTabsRef.current = next
+    setWebTabs(next)
+    localStorage.setItem(webTabOrderKey(props.sessionId), JSON.stringify(next))
+  }
+  const [webTab, setWebTab] = useState<WebTabKey>(() => loadWebTabOrder(props.sessionId)[0])
+  // ---- 页签拖拽排序（共用 ./flip 公共件，手感和标签条一致）----
+  // 4px 阈值内仍是点击；被拖项 transform 跟手，另一项 FLIP 160ms 让位；顺序持久化
+  const stripRef = useRef<HTMLDivElement>(null)
+  const [dragKey, setDragKey] = useState<WebTabKey | null>(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  const suppressClick = useRef(false)
+  const prevLeft = useRef(new Map<string, number>())
+  const dragStart = useRef({ pos: 0, layout: 0, grab: 0, size: 0 })
+  const pointerX = useRef(0)
+
+  /** 被拖页签跟手，限制在首尾之间 */
+  const followPointer = (key: string) => {
+    const strip = stripRef.current
+    const el = strip?.querySelector<HTMLElement>(`[data-web-tab="${key}"]`)
+    if (!strip || !el) return
+    const offset = pointerX.current - dragStart.current.pos - (el.offsetLeft - dragStart.current.layout)
+    const items = strip.querySelectorAll<HTMLElement>('[data-web-tab]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return setDragOffset(offset)
+    const min = first.offsetLeft - el.offsetLeft
+    const max = last.offsetLeft + last.offsetWidth - el.offsetWidth - el.offsetLeft
+    setDragOffset(Math.min(max, Math.max(min, offset)))
+  }
+
+  /** 被拖页签视觉边缘越过另一项中点就交换，返回新顺序；没变返回 null */
+  const tabDropOrder = (clientX: number, key: string): WebTabKey[] | null => {
+    const strip = stripRef.current
+    if (!strip) return null
+    const ids = webTabsRef.current
+    const items = strip.querySelectorAll<HTMLElement>('[data-web-tab]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    const raw = clientX - strip.getBoundingClientRect().left - dragStart.current.grab
+    const start =
+      first && last
+        ? Math.min(last.offsetLeft + last.offsetWidth - dragStart.current.size, Math.max(first.offsetLeft, raw))
+        : raw
+    return moveTo(ids, key, dropIndex(strip, 'data-web-tab', 'x', start, start + dragStart.current.size, key, ids)) as WebTabKey[] | null
+  }
+
+  useFlipSlide(dragKey !== null, stripRef, 'data-web-tab', 'x', dragKey, prevLeft, [webTabs, dragKey])
+  useLayoutEffect(() => {
+    if (dragKey) followPointer(dragKey)
+  }, [webTabs, dragKey])
+
+  const startTabDrag = (event: ReactPointerEvent, key: WebTabKey) => {
+    startPointerDrag({
+      event,
+      axis: 'x',
+      onActivate: () => {
+        const strip = stripRef.current
+        const el = strip?.querySelector<HTMLElement>(`[data-web-tab="${key}"]`)
+        const pointer = strip ? event.clientX - strip.getBoundingClientRect().left : 0
+        dragStart.current = {
+          pos: event.clientX,
+          layout: el?.offsetLeft ?? 0,
+          grab: pointer - (el?.offsetLeft ?? 0),
+          size: el?.offsetWidth ?? 0
+        }
+        setDragKey(key)
+        setDragOffset(0)
+      },
+      onMove: (x) => {
+        pointerX.current = x
+        const next = tabDropOrder(x, key)
+        if (next && stripRef.current) {
+          capturePositions(stripRef.current, 'data-web-tab', 'x', prevLeft.current)
+          updateWebTabs(next)
+        }
+        followPointer(key)
+      },
+      onEnd: () => {
+        // 拖完会补一个 click，不能当成切换页签
+        suppressClick.current = true
+        prevLeft.current.clear()
+        setDragKey(null)
+        setDragOffset(0)
+      }
+    })
+  }
   // 正在安装的服务名（同一时间只跑一个）；按钮和日志只在对应子页显示，切页不串
   const [installing, setInstalling] = useState<string | null>(null)
   const [installLog, setInstallLog] = useState<string[]>([])
@@ -1186,11 +1297,12 @@ function WebSection(props: { sessionId: string }) {
   }, [installLog])
 
   const submitSite = () => {
-    // 归一化：剥掉 http(s):// 前缀和结尾斜杠，再拆 域名:端口（域名 example.com:80 一体填写）
-    const raw = domain.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
-    const sep = raw.lastIndexOf(':')
-    const d = sep > 0 ? raw.slice(0, sep) : raw
-    const p = sep > 0 ? raw.slice(sep + 1) : ''
+    // 站点地址按 caddy 写法：[http(s)://]名字[:端口]——http:// 是纯 HTTP，https:// 同裸写。
+    // 不剥前缀，协议前缀要留给后端当语义
+    const raw = domain.trim().replace(/\/+$/, '')
+    const m = raw.match(/^(https?:\/\/)?([^:]+)(?::([0-9]+))?$/)
+    const d = m ? (m[1] ?? '') + m[2] : raw
+    const p = m?.[3] ?? ''
     const t = target.trim()
     setSubmitting(true)
     void window.api.sessions
@@ -1241,21 +1353,28 @@ function WebSection(props: { sessionId: string }) {
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col rounded-xl border">
-        <div className="flex items-center gap-1 border-b px-3 py-2 text-sm">
-          {([
-            ['nginx', 'nginx'],
-            ['caddy', 'caddy']
-          ] as const).map(([key, label]) => (
+        <div ref={stripRef} className="relative flex items-center gap-1 border-b px-3 py-2 text-sm">
+          {webTabs.map((key) => (
             <button
               key={key}
               type="button"
+              data-web-tab={key}
               className={cn(
-                'rounded-md px-2.5 py-1',
-                webTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+                'cursor-grab rounded-md px-2.5 py-1',
+                webTab === key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                dragKey === key && 'z-10 shadow-lg ring-1 ring-foreground/30'
               )}
-              onClick={() => setWebTab(key)}
+              style={dragKey === key ? { transform: `translateX(${dragOffset}px)` } : undefined}
+              onPointerDown={(e) => startTabDrag(e, key)}
+              onClick={() => {
+                if (suppressClick.current) {
+                  suppressClick.current = false
+                  return
+                }
+                setWebTab(key)
+              }}
             >
-              {label}
+              {key}
             </button>
           ))}
         </div>
@@ -1290,14 +1409,40 @@ function WebSection(props: { sessionId: string }) {
                     <TooltipTrigger asChild>
                       <CircleHelp className="size-3.5 cursor-default text-muted-foreground/60 hover:text-foreground" />
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" align="start" sideOffset={4} className="w-max max-w-none whitespace-pre">
-                      {`HTTPS 证书：
-· IP 站点 → 自动自签（10 年有效），浏览器警告属正常
-· 域名站点 → Let's Encrypt 免费签发（域名需先解析过来），临期点"续期"
-· 买来的证书 → 传到 ~/.termpilot/nginx/ssl/certs/<域名>/ 后打开开关
-  例：~/.termpilot/nginx/ssl/certs/blog.example.com/
+                    <TooltipContent side="bottom" align="start" sideOffset={4} className="w-max max-w-none">
+                      {webTab === 'nginx' ? (
+                        <div>
+                          <div>HTTPS 证书：</div>
+                          <div className="grid w-fit grid-cols-[auto_auto_1fr] gap-x-1.5">
+                            <span>· IP 站点</span><span>→</span><span>自动自签（10 年有效），浏览器警告属正常</span>
+                            <span>· 域名站点</span><span>→</span><span>{"Let's Encrypt 免费签发（域名需先解析过来），临期点\"续期\""}</span>
+                            <span>· 买来的证书</span><span>→</span><span>{'传到 ~/.termpilot/nginx/ssl/certs/<域名>/ 后打开开关'}</span>
+                          </div>
+                          <pre className="whitespace-pre">{`  例：~/.termpilot/nginx/ssl/certs/blog.example.com/
       ├── fullchain.pem
-      └── privkey.pem`}
+      └── privkey.pem`}</pre>
+                        </div>
+                      ) : (
+                        <div>
+                          <div>HTTPS 证书：</div>
+                          <div className="grid w-fit grid-cols-[auto_auto_1fr] gap-x-1.5">
+                            <span>· IP 站点</span><span>→</span><span>内置 CA 自签，自动续期，浏览器警告属正常</span>
+                            <span>· 域名站点</span><span>→</span><span>公网 CA 免费签发，自动续期（域名需先解析过来）</span>
+                            <span>· 买来的证书</span><span>→</span><span>{'传到 ~/.termpilot/caddy/ssl/certs/<域名>/ 后，'}</span>
+                          </div>
+                          <pre className="whitespace-pre">{`  在 sites/<域名>.caddy 里加一行 tls 指向它们（不自动续期）
+  例：~/.termpilot/caddy/ssl/certs/blog.example.com/
+      ├── fullchain.pem
+      └── privkey.pem
+      tls /etc/caddy/ssl/certs/blog.example.com/fullchain.pem /etc/caddy/ssl/certs/blog.example.com/privkey.pem`}</pre>
+                          <div className="mt-2">站点地址写法：</div>
+                          <div className="grid w-fit grid-cols-[auto_1fr] gap-x-1.5">
+                            <span>· 标准写法：</span><span>{'协议://域名:端口，如 https://example.com:8080（不写端口默认 443）'}</span>
+                            <span>· 只想开 HTTP：</span><span>{'http://域名:端口，如 http://example.com:8080（不写端口默认 80）'}</span>
+                            <span>· 协议不写默认 https：</span><span>{'example.com:8080 ≡ https://example.com:8080；端口也不写时默认 443，80 自动跳 443'}</span>
+                          </div>
+                        </div>
+                      )}
                     </TooltipContent>
                   </Tooltip>
                 </span>
@@ -1316,7 +1461,7 @@ function WebSection(props: { sessionId: string }) {
                 sites.map((s) => (
                   <div key={s.name} className="flex items-center gap-2 py-1 text-sm">
                     <span className="w-44 shrink-0 truncate">
-                      {s.domain}:{s.port}
+                      {webTab === 'caddy' ? s.addr : `${s.domain}:${s.port}`}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-muted-foreground">
                       {s.kind}
@@ -1335,40 +1480,44 @@ function WebSection(props: { sessionId: string }) {
                           s.target
                         ))}
                     </span>
-                    {/* Switch 在 http/https 前面；仅 nginx 的 80 端口站点可开关，其余占位对齐 */}
-                    <span className="flex w-8 shrink-0 justify-center">
-                      {webTab === 'nginx' && s.port === '80' && (
-                        <Switch
-                          size="sm"
-                          checked={s.proto === 'https'}
-                          disabled={sslBusy === s.domain || (s.proto === 'http' && svc?.state !== 'running')}
-                          onCheckedChange={(checked) => setHTTPS(s.domain, checked ? 'on' : 'off')}
-                        />
-                      )}
-                    </span>
-                    <span className="w-10 shrink-0 text-left text-muted-foreground">{s.proto}</span>
-                    <span
-                      className={cn(
-                        'w-24 shrink-0 text-right text-xs',
-                        s.proto === 'https' && certs[s.domain] !== undefined && certs[s.domain] < 30
-                          ? 'text-amber-500'
-                          : 'text-muted-foreground'
-                      )}
-                    >
-                      {s.proto === 'https' && certs[s.domain] !== undefined ? `证书剩 ${certs[s.domain]} 天` : ''}
-                    </span>
-                    <span className="w-10 shrink-0 text-center">
-                      {webTab === 'nginx' && s.proto === 'https' && certs[s.domain] !== undefined && (
-                        <button
-                          type="button"
-                          className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
-                          disabled={sslBusy === s.domain}
-                          onClick={() => setHTTPS(s.domain, 'renew')}
+                    {/* Switch 在 http/https 前面；仅 nginx 的 80 端口站点可开关；证书与续期也是 nginx 专属，caddy 行整段不渲染不占位 */}
+                    {webTab === 'nginx' && (
+                      <>
+                        <span className="flex w-8 shrink-0 justify-center">
+                          {s.port === '80' && (
+                            <Switch
+                              size="sm"
+                              checked={s.proto === 'https'}
+                              disabled={sslBusy === s.domain || (s.proto === 'http' && svc?.state !== 'running')}
+                              onCheckedChange={(checked) => setHTTPS(s.domain, checked ? 'on' : 'off')}
+                            />
+                          )}
+                        </span>
+                        <span className="w-10 shrink-0 text-left text-muted-foreground">{s.proto}</span>
+                        <span
+                          className={cn(
+                            'w-24 shrink-0 text-right text-xs',
+                            s.proto === 'https' && certs[s.domain] !== undefined && certs[s.domain] < 30
+                              ? 'text-amber-500'
+                              : 'text-muted-foreground'
+                          )}
                         >
-                          续期
-                        </button>
-                      )}
-                    </span>
+                          {s.proto === 'https' && certs[s.domain] !== undefined ? `证书剩 ${certs[s.domain]} 天` : ''}
+                        </span>
+                        <span className="w-10 shrink-0 text-center">
+                          {s.proto === 'https' && certs[s.domain] !== undefined && (
+                            <button
+                              type="button"
+                              className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
+                              disabled={sslBusy === s.domain}
+                              onClick={() => setHTTPS(s.domain, 'renew')}
+                            >
+                              续期
+                            </button>
+                          )}
+                        </span>
+                      </>
+                    )}
                     <span className="w-10 shrink-0 text-center">
                       <button
                         type="button"
@@ -1410,8 +1559,8 @@ function WebSection(props: { sessionId: string }) {
                   <Input
                     value={domain}
                     onChange={(e) => setDomain(e.target.value)}
-                    placeholder="域名 example.com:80"
-                    className="h-7 w-44 text-sm"
+                    placeholder={webTab === 'caddy' ? '域名 https://example.com:443' : '域名 example.com:80'}
+                    className={cn('h-7 text-sm', webTab === 'caddy' ? 'w-56' : 'w-44')}
                   />
                   <div className="relative">
                     <Input

@@ -100,13 +100,17 @@ const caddyPlaceholder = `# 占位站点：加一个真实站点后可以删除
     respond "caddy is running"
 }`
 
-// caddySiteAddr caddy 站点地址：默认 80 只写域名（HTTP 80 + 自动 HTTPS 443）；
-// 指定其他端口时带 http:// 前缀生成纯 HTTP 站点，非标准端口不去签证书。
-func caddySiteAddr(domain, port string) string {
-	if port == "80" {
-		return domain
+// caddySiteAddr caddy 站点地址。scheme=="http" = 明确纯 HTTP（http:// 前缀）；
+// 否则裸写——caddy 默认自动 HTTPS（域名公网 CA，IP 内部 CA 自签）。端口非 80 时带上。
+func caddySiteAddr(domain, port, scheme string) string {
+	addr := domain
+	if scheme == "http" {
+		addr = "http://" + domain
 	}
-	return "http://" + domain + ":" + port
+	if port != "80" {
+		addr += ":" + port
+	}
+	return addr
 }
 
 // webInstallScript 一键安装脚本：备目录、补种子文件、拉镜像、起容器。
@@ -142,11 +146,17 @@ docker run -d --name nginx --restart unless-stopped \
 	case "caddy":
 		// 主配置只做 import，站点一文件一个收在 sites/；网页文件放 www/（容器内 /srv）。
 		// data（证书）和 config（autosave）也映射到目录，容器重建状态不丢。
-		// 网络同 nginx 用 host 模式：直接占宿主机 80/443（含 UDP，HTTP/3 原生生效）
+		// 网络同 nginx 用 host 模式：直接占宿主机 80/443（含 UDP，HTTP/3 原生生效）。
+		// 种子 Caddyfile 带 default_sni（本机公网 IP）：裸 IP 访问（浏览器不带 SNI）时
+		// 拿哪张证答，有 IP 站点时它的内部 CA 证书就能接住无 SNI 握手
 		return fmt.Sprintf(`
-mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config" "$HOME/.termpilot/caddy/sites" "$HOME/.termpilot/caddy/www"
+wanip=$(curl -fsS --max-time 1 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || curl -fsS --max-time 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)
+mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config" "$HOME/.termpilot/caddy/sites" "$HOME/.termpilot/caddy/www" "$HOME/.termpilot/caddy/ssl"
 if [ ! -s "$HOME/.termpilot/caddy/Caddyfile" ]; then
-  cat > "$HOME/.termpilot/caddy/Caddyfile" <<'EOF'
+  if [ -n "$wanip" ]; then
+    printf '{\n\tdefault_sni %%s\n}\n\n' "$wanip" > "$HOME/.termpilot/caddy/Caddyfile"
+  fi
+  cat >> "$HOME/.termpilot/caddy/Caddyfile" <<'EOF'
 # 站点在 sites/ 目录里，一站点一文件；面板可增删，改完执行：docker exec caddy caddy reload --config /etc/caddy/Caddyfile
 import /etc/caddy/sites/*.caddy
 EOF
@@ -164,6 +174,7 @@ docker run -d --name caddy --restart unless-stopped \
   -v "$HOME/.termpilot/caddy/www:/srv" \
   -v "$HOME/.termpilot/caddy/data:/data" \
   -v "$HOME/.termpilot/caddy/config:/config" \
+  -v "$HOME/.termpilot/caddy/ssl:/etc/caddy/ssl" \
   caddy:alpine
 `, caddyPlaceholder), true
 	default:
@@ -196,19 +207,30 @@ var (
 	webPortRe   = regexp.MustCompile(`^[0-9]{1,5}$`)
 )
 
-// WebSite 增删网站站点，service 只认 nginx/caddy。port 留空 = 80（caddy 还会自动占 443
-// 签证书）；非 80 端口是纯 HTTP 站点。nginx 站点在 conf.d/<域名>.conf，caddy 在
-// sites/<域名>.caddy；同名文件已存在直接报错不覆盖。容器在跑就先校验再热加载，
-// 校验失败删掉刚写的文件并把报错抛给前端；没在跑就只落盘，下次启动生效。
+// WebSite 增删网站站点，service 只认 nginx/caddy。站点地址按 caddy 写法：
+// [http(s)://]名字[:端口]——http:// 是明确的纯 HTTP，https:// 等同裸写（自动 HTTPS）。
+// nginx 站点在 conf.d/<域名>.conf，caddy 在 sites/<域名>.caddy；同名文件已存在直接报错
+// 不覆盖。容器在跑就先校验再热加载，校验失败删掉刚写的文件并把报错抛给前端；
+// 没在跑就只落盘，下次启动生效。
 func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType, target string) error {
+	raw := domain
+	scheme := ""
+	if strings.HasPrefix(domain, "http://") {
+		scheme = "http"
+		domain = strings.TrimPrefix(domain, "http://")
+	} else if strings.HasPrefix(domain, "https://") {
+		// https:// 没有别的含义（裸写就是自动 HTTPS），剥掉当笔误处理
+		domain = strings.TrimPrefix(domain, "https://")
+	}
+	domain = strings.TrimRight(domain, "/")
 	if !webDomainRe.MatchString(domain) {
-		return fmt.Errorf("非法的域名：%q", domain)
+		return fmt.Errorf("站点地址写法是 [http://]名字[:端口]（比如 example.com 或 http://192.168.1.10:8080），收到 %q", raw)
 	}
 	if port == "" {
 		port = "80"
 	}
 	if !webPortRe.MatchString(port) {
-		return fmt.Errorf("非法的端口：%q", port)
+		return fmt.Errorf("端口要 1-65535 的数字（写法：名字:端口），收到 %q", port)
 	}
 	if p, _ := strconv.Atoi(port); p < 1 || p > 65535 {
 		return fmt.Errorf("端口超出范围（1-65535）：%q", port)
@@ -255,13 +277,13 @@ func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType
 			if !webTargetRe.MatchString(target) {
 				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
 			}
-			body = caddySiteAddr(domain, port) + " {\n\treverse_proxy " + target + "\n}"
+			body = caddySiteAddr(domain, port, scheme) + " {\n\treverse_proxy " + target + "\n}"
 		case service == "caddy" && siteType == "static":
 			if !webDirRe.MatchString(target) {
 				return fmt.Errorf("非法的目录名：%q", target)
 			}
 			prepare = fmt.Sprintf(`mkdir -p "$HOME/.termpilot/caddy/www/%s"`, target)
-			body = caddySiteAddr(domain, port) + " {\n\troot * /srv/" + target + "\n\tfile_server\n}"
+			body = caddySiteAddr(domain, port, scheme) + " {\n\troot * /srv/" + target + "\n\tfile_server\n}"
 		default:
 			return fmt.Errorf("不支持的站点类型：%q", siteType)
 		}
