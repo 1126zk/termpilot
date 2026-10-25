@@ -125,24 +125,11 @@ func webInstallScript(name string) (string, bool) {
 		// set -e：任一步失败（尤其 docker pull 网络超时）立即中断报错，不留"装了一半却说成功"的假象
 		return `
 set -e
-# 拉镜像：本地有就跳过；标准名拉不动时，按本机 daemon.json 的 registry-mirrors
-# 挨个换显式前缀试，拉到了改回标准标签。timeout 快速失败：客户端被杀后 dockerd
-# 可能还在后台拉，但脚本不再无限等；所有源都失败则以脚本失败收场（set -e）
+# 拉镜像：本地有就跳过；没有就 timeout 90 拉标准名（自动走 daemon.json 镜像站→官方）。
+# 拉不动就失败收场（set -e），去 Docker 页镜像加速小节换源再试
 pull_img() {
   img="$1"
-  docker image inspect "$img" >/dev/null 2>&1 && return 0
-  timeout 90 docker pull "$img" && return 0
-  regs=$(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null | tr -d '[]"' | tr ',' ' ')
-  [ "$regs" = "null" ] && regs=""
-  for url in $regs; do
-    reg=${url#https://}; reg=${reg%%/*}
-    [ -n "$reg" ] || continue
-    if timeout 90 docker pull "$reg/$img"; then
-      docker tag "$reg/$img" "$img" && docker rmi "$reg/$img" >/dev/null
-      return 0
-    fi
-  done
-  return 1
+  docker image inspect "$img" >/dev/null 2>&1 || timeout 90 docker pull "$img"
 }
 mkdir -p "$HOME/.termpilot/nginx/conf.d" "$HOME/.termpilot/nginx/www" "$HOME/.termpilot/nginx/ssl"
 if [ ! -f "$HOME/.termpilot/nginx/conf.d/default.conf" ]; then
@@ -173,22 +160,10 @@ docker run -d --name nginx --restart unless-stopped \
 		// 拿哪张证答，有 IP 站点时它的内部 CA 证书就能接住无 SNI 握手
 		return fmt.Sprintf(`
 set -e
-# 拉镜像：本地有就跳过；标准名拉不动时按 daemon.json 的 registry-mirrors 换显式前缀试（同 nginx）
+# 拉镜像：本地有就跳过；没有就 timeout 90 拉标准名（同 nginx）
 pull_img() {
   img="$1"
-  docker image inspect "$img" >/dev/null 2>&1 && return 0
-  timeout 90 docker pull "$img" && return 0
-  regs=$(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null | tr -d '[]"' | tr ',' ' ')
-  [ "$regs" = "null" ] && regs=""
-  for url in $regs; do
-    reg=${url#https://}; reg=${reg%%/*}
-    [ -n "$reg" ] || continue
-    if timeout 90 docker pull "$reg/$img"; then
-      docker tag "$reg/$img" "$img" && docker rmi "$reg/$img" >/dev/null
-      return 0
-    fi
-  done
-  return 1
+  docker image inspect "$img" >/dev/null 2>&1 || timeout 90 docker pull "$img"
 }
 wanip=$(curl -fsS --max-time 1 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || curl -fsS --max-time 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)
 mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config" "$HOME/.termpilot/caddy/sites" "$HOME/.termpilot/caddy/www" "$HOME/.termpilot/caddy/ssl"
@@ -229,12 +204,12 @@ func (s *ExecService) WebInstall(sessionID, name string, onLine func(string)) er
 	if !ok {
 		return fmt.Errorf("不支持的安装目标：%q", name)
 	}
-	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 900000, OnLine: onLine})
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000, OnLine: onLine})
 	if err != nil {
 		return err
 	}
 	if res.TimedOut {
-		return fmt.Errorf("安装 %s 超时（15 分钟），镜像可能还在后台拉取，稍后再试", name)
+		return fmt.Errorf("安装 %s 超时（5 分钟），镜像可能还在后台拉取，稍后再试", name)
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return fmt.Errorf("安装 %s 失败（退出码 %d）：%s", name, *res.ExitCode, strings.TrimSpace(res.Stderr))
