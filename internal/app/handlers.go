@@ -132,6 +132,18 @@ func (a *App) hSessionDockerService(args []interface{}) (interface{}, error) {
 	return nil, a.exec.DockerService(id, op)
 }
 
+func (a *App) hSessionDockerMirrorsSet(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	content, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.SetDockerMirrors(id, content)
+}
+
 func (a *App) hSessionDockerAction(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {
@@ -192,6 +204,22 @@ func (a *App) hSessionWebSite(args []interface{}) (interface{}, error) {
 	siteType, _ := argStr(args, 5)
 	target, _ := argStr(args, 6)
 	return nil, a.exec.WebSite(id, service, action, domain, port, siteType, target)
+}
+
+func (a *App) hSessionWebService(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	service, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	op, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.WebService(id, service, op)
 }
 
 func (a *App) hSessionWebSSL(args []interface{}) (interface{}, error) {

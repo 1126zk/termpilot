@@ -184,12 +184,26 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 		case waitErr = <-waitDone:
 		case <-time.After(timeout):
 			timedOut = true
+			// Close 只是发 SSH_MSG_CHANNEL_CLOSE，对端 sshd 在子进程活着时会推迟回 CLOSE，
+			// 本地管道读协程就收不到 EOF、一直阻塞。先 SIGKILL 杀远端子进程再 Close。
+			_ = session.Signal(ssh.SIGKILL)
 			_ = session.Close()
 		}
 	} else {
 		waitErr = <-waitDone
 	}
-	copyWg.Wait()
+	// 超时场景下读协程可能仍阻塞（对端始终不回 CLOSE），最多再陪它们等 2 秒，
+	// 到点直接返回；残留的读协程会在连接断开时自己退出
+	if timedOut {
+		drained := make(chan struct{})
+		go func() { copyWg.Wait(); close(drained) }()
+		select {
+		case <-drained:
+		case <-time.After(2 * time.Second):
+		}
+	} else {
+		copyWg.Wait()
+	}
 
 	var exitCode *int
 	if !timedOut && waitErr == nil {

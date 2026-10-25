@@ -713,6 +713,9 @@ function DockerSection(props: { sessionId: string }) {
   const [opBusy, setOpBusy] = useState<string | null>(null)
   // 手动刷新反馈：数据在飞就转圈
   const [refreshing, setRefreshing] = useState(false)
+  // 镜像加速输入框和生效中状态
+  const [mirrorInput, setMirrorInput] = useState('')
+  const [mirrorBusy, setMirrorBusy] = useState(false)
 
   useEffect(() => {
     loadDockerInfo(props.sessionId)
@@ -793,6 +796,52 @@ function DockerSection(props: { sessionId: string }) {
       {opBusy === op ? '进行中…' : confirmOp === op ? '确认' : label}
     </button>
   )
+
+  // ---- 镜像加速：读写 daemon.json 的 registry-mirrors，其余字段原样保留；没有文件时第一次添加会创建 ----
+  const daemonMirrors: string[] = (() => {
+    try {
+      const obj = JSON.parse(info?.daemonJson || '{}') as { 'registry-mirrors'?: unknown }
+      const list = obj['registry-mirrors']
+      return Array.isArray(list) ? list.filter((m): m is string => typeof m === 'string') : []
+    } catch {
+      return []
+    }
+  })()
+
+  const setMirrors = (next: string[]) => {
+    let obj: Record<string, unknown>
+    try {
+      obj = JSON.parse(info?.daemonJson || '{}')
+    } catch {
+      setNotice('现有 daemon.json 不是合法 JSON，先点路径进编辑器修正')
+      return
+    }
+    if (next.length > 0) obj['registry-mirrors'] = next
+    else delete obj['registry-mirrors']
+    setMirrorBusy(true)
+    void window.api.sessions
+      .setDockerMirrors(props.sessionId, JSON.stringify(obj, null, 2))
+      .then(() => {
+        setNotice('镜像加速已生效')
+        setMirrorInput('')
+        loadDockerInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setMirrorBusy(false))
+  }
+
+  const addMirror = () => {
+    const url = mirrorInput.trim().replace(/\/+$/, '')
+    if (!/^https:\/\/[a-zA-Z0-9.-]+(\/[a-zA-Z0-9._/-]*)?$/.test(url)) {
+      setNotice('镜像源地址要是 https://主机 的形式，比如 https://docker.1panel.live')
+      return
+    }
+    if (daemonMirrors.includes(url)) {
+      setNotice('这个源已经在列表里了')
+      return
+    }
+    setMirrors([...daemonMirrors, url])
+  }
   // 没缓存也直接渲染卡片，表格先空着，第一笔数据到了填上
 
   return (
@@ -887,7 +936,10 @@ function DockerSection(props: { sessionId: string }) {
             </tr>
           </thead>
           <tbody>
-            {(info?.images ?? []).map((im) => (
+            {(info?.images ?? []).map((im) => {
+              // 悬空镜像（<none>）没有标签可摘，按 id 删；有标签的按 仓库:标签 删，只摘一个标签
+              const ref = im.repository === '<none>' ? im.id : `${im.repository}:${im.tag}`
+              return (
               <tr key={`${im.repository}:${im.tag}@${im.id}`} className="border-b border-border/50 last:border-0">
                 <td className="px-3 py-1.5">
                   <Tip text={im.repository}>{im.repository}</Tip>
@@ -899,19 +951,20 @@ function DockerSection(props: { sessionId: string }) {
                 </td>
                 <td className="px-1 py-1.5 text-center">
                   <ActionCell
-                    confirming={confirmDel?.action === 'rmi' && confirmDel.id === im.id}
-                    onConfirm={() => act('rmi', im.id)}
+                    confirming={confirmDel?.action === 'rmi' && confirmDel.id === ref}
+                    onConfirm={() => act('rmi', ref)}
                   >
                     <DropdownMenuItem onSelect={() => act('save', im.id, `${im.repository}_${im.tag}`)}>
                       导出
                     </DropdownMenuItem>
-                    <DropdownMenuItem variant="destructive" onSelect={() => act('rmi', im.id)}>
+                    <DropdownMenuItem variant="destructive" onSelect={() => act('rmi', ref)}>
                       删除
                     </DropdownMenuItem>
                   </ActionCell>
                 </td>
               </tr>
-            ))}
+              )
+            })}
             {info && info.images.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
@@ -1024,6 +1077,41 @@ function DockerSection(props: { sessionId: string }) {
           </pre>
         ) : (
           info && <p className="py-2 text-center text-sm text-muted-foreground">没有 /etc/docker/daemon.json</p>
+        )}
+        {/* 镜像加速：列出 registry-mirrors，可增删；没有 daemon.json 时第一次添加会创建文件 */}
+        {info && (
+          <div className="mt-2 border-t border-border/50 pt-2">
+            <p className="mb-1 text-sm text-muted-foreground">镜像加速（registry-mirrors，改完热生效，不用重启）</p>
+            {daemonMirrors.length === 0 ? (
+              <p className="py-0.5 text-sm text-muted-foreground">还没有镜像源</p>
+            ) : (
+              daemonMirrors.map((m) => (
+                <div key={m} className="flex items-center gap-2 py-0.5 text-sm">
+                  <span className="min-w-0 flex-1 truncate font-mono">{m}</span>
+                  <button
+                    type="button"
+                    disabled={mirrorBusy}
+                    className="shrink-0 rounded px-1 text-xs text-muted-foreground/60 hover:text-destructive disabled:opacity-40"
+                    onClick={() => setMirrors(daemonMirrors.filter((x) => x !== m))}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))
+            )}
+            <div className="mt-1 flex items-center gap-1.5">
+              <Input
+                value={mirrorInput}
+                onChange={(e) => setMirrorInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addMirror()}
+                placeholder="https://docker.1panel.live"
+                className="h-7 flex-1 font-mono text-sm"
+              />
+              <Button size="sm" className="h-7 px-2" disabled={mirrorBusy || !mirrorInput.trim()} onClick={addMirror}>
+                {mirrorBusy ? '生效中…' : '添加'}
+              </Button>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -1350,6 +1438,46 @@ function WebSection(props: { sessionId: string }) {
       .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
   }
 
+  // 容器启停/删除：点击即给反馈（按钮变"进行中…" + 顶部提示）；删除是破坏性操作，两步确认
+  const [svcOpBusy, setSvcOpBusy] = useState<string | null>(null)
+  const [confirmSvcRm, setConfirmSvcRm] = useState(false)
+  const svcOpLabels: Record<string, string> = { start: '启动', stop: '停止', restart: '重启', rm: '删除' }
+  const svcOp = (op: 'start' | 'stop' | 'restart' | 'rm') => {
+    if (op === 'rm' && !confirmSvcRm) {
+      setConfirmSvcRm(true)
+      window.setTimeout(() => setConfirmSvcRm(false), 3000)
+      return
+    }
+    setConfirmSvcRm(false)
+    const label = svcOpLabels[op] ?? op
+    setSvcOpBusy(op)
+    setNotice(`正在${label} ${webTab}…`, true)
+    void window.api.sessions
+      .webService(props.sessionId, webTab, op)
+      .then(() => {
+        setNotice(`${webTab} 已${label}`)
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSvcOpBusy(null))
+  }
+  const svcOpBtn = (op: 'start' | 'stop' | 'restart' | 'rm', label: string) => (
+    <button
+      key={op}
+      type="button"
+      disabled={svcOpBusy !== null}
+      className={cn(
+        'rounded px-1.5 py-0.5 text-xs disabled:opacity-40',
+        op === 'rm' && confirmSvcRm
+          ? 'bg-destructive/15 text-destructive'
+          : 'text-muted-foreground/70 hover:text-foreground'
+      )}
+      onClick={() => svcOp(op)}
+    >
+      {svcOpBusy === op ? '进行中…' : op === 'rm' && confirmSvcRm ? '确认' : label}
+    </button>
+  )
+
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col rounded-xl border">
@@ -1604,8 +1732,15 @@ function WebSection(props: { sessionId: string }) {
             <div className="px-3 py-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="font-mono text-sm text-muted-foreground">{file}</p>
-                {svc && svc.state !== '' && svc.state !== 'running' && (
-                  <p className="shrink-0 text-sm text-muted-foreground">容器状态：{svc.state}</p>
+                {svc && svc.state !== '' && (
+                  <span className="flex shrink-0 items-center gap-1">
+                    {svc.state !== 'running' && (
+                      <span className="text-sm text-muted-foreground">容器状态：{svc.state}</span>
+                    )}
+                    {svc.state === 'running'
+                      ? [svcOpBtn('restart', '重启'), svcOpBtn('stop', '停止'), svcOpBtn('rm', '删除')]
+                      : [svcOpBtn('start', '启动'), svcOpBtn('rm', '删除')]}
+                  </span>
                 )}
               </div>
               {svc && svc.files.length > 0 ? (

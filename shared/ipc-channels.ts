@@ -118,6 +118,8 @@ export const IPC = {
   sessionWebInstallProgress: 'session:web-install-progress',
   sessionWebSite: 'session:website',
   sessionWebSSL: 'session:web-ssl',
+  sessionWebService: 'session:web-service',
+  sessionDockerMirrorsSet: 'session:docker-mirrors-set',
   sessionSetOs: 'session:set-os',
   sessionRevealSecret: 'session:reveal-secret',
   shellsList: 'shells:list',

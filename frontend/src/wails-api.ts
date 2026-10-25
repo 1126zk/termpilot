@@ -80,6 +80,7 @@ const api = {
         if (p.id === id) cb(p.line)
       }),
     dockerService: (id: string, op: string) => invoke<void>(IPC.sessionDockerService, [id, op]),
+    setDockerMirrors: (id: string, content: string) => invoke<void>(IPC.sessionDockerMirrorsSet, [id, content]),
     dockerAction: (id: string, action: string, target: string, name = '') =>
       invoke<string>(IPC.sessionDockerAction, [id, action, target, name]),
     web: (id: string) => invoke<WebInfo>(IPC.sessionWeb, [id]),
@@ -93,6 +94,8 @@ const api = {
       invoke<void>(IPC.sessionWebSite, [id, service, action, domain, port, siteType, target]),
     webSSL: (id: string, domain: string, op: 'on' | 'renew' | 'off' = 'on') =>
       invoke<void>(IPC.sessionWebSSL, [id, domain, op]),
+    webService: (id: string, service: string, op: 'start' | 'stop' | 'restart' | 'rm') =>
+      invoke<void>(IPC.sessionWebService, [id, service, op]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

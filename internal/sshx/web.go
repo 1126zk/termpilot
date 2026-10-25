@@ -121,8 +121,29 @@ func webInstallScript(name string) (string, bool) {
 		// conf.d 留空 nginx 也能跑（没有任何 server 块）；种子一份注释模板，
 		// 面板上有东西可看，也提示改完怎么 reload。www 是静态站的网页目录（容器内 /usr/share/nginx/html）。
 		// 网关角色用 host 网络（同 1Panel 的 OpenResty）：直接占宿主机 80/443，
-		// 反代目标写 127.0.0.1:端口 即可，没有共享网络的心智负担
+		// 反代目标写 127.0.0.1:端口 即可，没有共享网络的心智负担。
+		// set -e：任一步失败（尤其 docker pull 网络超时）立即中断报错，不留"装了一半却说成功"的假象
 		return `
+set -e
+# 拉镜像：本地有就跳过；标准名拉不动时，按本机 daemon.json 的 registry-mirrors
+# 挨个换显式前缀试，拉到了改回标准标签。timeout 快速失败：客户端被杀后 dockerd
+# 可能还在后台拉，但脚本不再无限等；所有源都失败则以脚本失败收场（set -e）
+pull_img() {
+  img="$1"
+  docker image inspect "$img" >/dev/null 2>&1 && return 0
+  timeout 90 docker pull "$img" && return 0
+  regs=$(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null | tr -d '[]"' | tr ',' ' ')
+  [ "$regs" = "null" ] && regs=""
+  for url in $regs; do
+    reg=${url#https://}; reg=${reg%%/*}
+    [ -n "$reg" ] || continue
+    if timeout 90 docker pull "$reg/$img"; then
+      docker tag "$reg/$img" "$img" && docker rmi "$reg/$img" >/dev/null
+      return 0
+    fi
+  done
+  return 1
+}
 mkdir -p "$HOME/.termpilot/nginx/conf.d" "$HOME/.termpilot/nginx/www" "$HOME/.termpilot/nginx/ssl"
 if [ ! -f "$HOME/.termpilot/nginx/conf.d/default.conf" ]; then
   cat > "$HOME/.termpilot/nginx/conf.d/default.conf" <<'EOF'
@@ -134,8 +155,9 @@ if [ ! -f "$HOME/.termpilot/nginx/conf.d/default.conf" ]; then
 # }
 EOF
 fi
-docker pull nginx:alpine
-docker pull neilpang/acme.sh
+# pull 套 timeout 快速失败：客户端被杀了 dockerd 可能还在后台拉，但脚本不再无限等（配 set -e）
+pull_img nginx:alpine
+pull_img neilpang/acme.sh
 docker run -d --name nginx --restart unless-stopped \
   --network host \
   -v "$HOME/.termpilot/nginx/conf.d:/etc/nginx/conf.d" \
@@ -150,6 +172,24 @@ docker run -d --name nginx --restart unless-stopped \
 		// 种子 Caddyfile 带 default_sni（本机公网 IP）：裸 IP 访问（浏览器不带 SNI）时
 		// 拿哪张证答，有 IP 站点时它的内部 CA 证书就能接住无 SNI 握手
 		return fmt.Sprintf(`
+set -e
+# 拉镜像：本地有就跳过；标准名拉不动时按 daemon.json 的 registry-mirrors 换显式前缀试（同 nginx）
+pull_img() {
+  img="$1"
+  docker image inspect "$img" >/dev/null 2>&1 && return 0
+  timeout 90 docker pull "$img" && return 0
+  regs=$(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null | tr -d '[]"' | tr ',' ' ')
+  [ "$regs" = "null" ] && regs=""
+  for url in $regs; do
+    reg=${url#https://}; reg=${reg%%/*}
+    [ -n "$reg" ] || continue
+    if timeout 90 docker pull "$reg/$img"; then
+      docker tag "$reg/$img" "$img" && docker rmi "$reg/$img" >/dev/null
+      return 0
+    fi
+  done
+  return 1
+}
 wanip=$(curl -fsS --max-time 1 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || curl -fsS --max-time 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)
 mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config" "$HOME/.termpilot/caddy/sites" "$HOME/.termpilot/caddy/www" "$HOME/.termpilot/caddy/ssl"
 if [ ! -s "$HOME/.termpilot/caddy/Caddyfile" ]; then
@@ -166,7 +206,7 @@ if ! ls "$HOME"/.termpilot/caddy/sites/*.caddy >/dev/null 2>&1; then
 %s
 EOF
 fi
-docker pull caddy:alpine
+pull_img caddy:alpine
 docker run -d --name caddy --restart unless-stopped \
   --network host \
   -v "$HOME/.termpilot/caddy/Caddyfile:/etc/caddy/Caddyfile" \
@@ -189,9 +229,12 @@ func (s *ExecService) WebInstall(sessionID, name string, onLine func(string)) er
 	if !ok {
 		return fmt.Errorf("不支持的安装目标：%q", name)
 	}
-	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000, OnLine: onLine})
+	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 900000, OnLine: onLine})
 	if err != nil {
 		return err
+	}
+	if res.TimedOut {
+		return fmt.Errorf("安装 %s 超时（15 分钟），镜像可能还在后台拉取，稍后再试", name)
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return fmt.Errorf("安装 %s 失败（退出码 %d）：%s", name, *res.ExitCode, strings.TrimSpace(res.Stderr))
@@ -346,6 +389,31 @@ fi
 	return nil
 }
 
+// WebService 启停/删除 web 容器。容器名固定（nginx/caddy），操作白名单，
+// 都不接受外部输入，没有注入面。rm 用 -f：运行中也直接删，配置在挂载目录里不丢。
+func (s *ExecService) WebService(sessionID, service, op string) error {
+	if service != "nginx" && service != "caddy" {
+		return fmt.Errorf("未知的服务：%q", service)
+	}
+	cmd := ""
+	switch op {
+	case "start", "stop", "restart":
+		cmd = "docker " + op + " " + service
+	case "rm":
+		cmd = "docker rm -f " + service
+	default:
+		return fmt.Errorf("未知的操作：%q", op)
+	}
+	res, err := s.Exec(sessionID, ExecOptions{Command: cmd, TimeoutMs: 30000})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		return fmt.Errorf("%s %s 失败（退出码 %d）：%s", op, service, *res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
 // webIPv4Re 站点是 IPv4 地址时走自签：公网 CA 不给 IP 签证书。
 var webIPv4Re = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
 
@@ -444,6 +512,9 @@ docker exec nginx nginx -s reload || exit 1
 	res, err := s.Exec(sessionID, ExecOptions{Command: script, TimeoutMs: 300000})
 	if err != nil {
 		return err
+	}
+	if res.TimedOut {
+		return fmt.Errorf("开启 HTTPS 超时（5 分钟），签发请求可能还在跑，稍后再试")
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		return fmt.Errorf("开启 HTTPS 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
