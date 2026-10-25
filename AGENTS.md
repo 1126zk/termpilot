@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## 打 tag 发版前：先对齐版本号
+
+`release.yml` 会校验 tag 和 `frontend/package.json` 的 version 一致，不一致三个平台全部直接挂。
+所以顺序永远是：先改 `frontend/package.json` 的 version 并提交（`chore: 版本 x.y.z。`），再打同号 tag 推上去。别打完 tag 才想起来改版本。
+
 ## 有现成的就复用，别重造
 
 动手写新东西之前，先找项目里有没有现成的：
