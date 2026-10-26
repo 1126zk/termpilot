@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { CircleHelp, MoreHorizontal, RefreshCw, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { CircleHelp, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
 import type { CronEntry, DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
@@ -18,8 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { terminalPool } from '../terminal/TerminalPool'
 import { TerminalView } from './TerminalView'
-import { MANUAL_TOPICS } from './manualData'
-import { TRIAGE_SCENARIOS } from './troubleshootData'
+import { MANUAL_CATEGORIES, type ManualCategory } from './manualData'
 import { useAppStore } from '../stores/useAppStore'
 
 /** 字节 → GiB/MiB 简短文本 */
@@ -70,7 +69,7 @@ export function OpsPanel() {
   // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
-  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual' | 'triage'>('proc')
+  const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual'>('proc')
   // 面板终端的 id 提到这一层：脚本页的"交互式"脚本要往它里面发命令
   const [panelTermId] = useState(() => newTermId())
 
@@ -224,15 +223,14 @@ export function OpsPanel() {
           </Ring>
         </div>
 
-        {/* 内容切换：进程 / Docker / 网站 / 脚本 / 手册 / 排查 */}
+        {/* 内容切换：进程 / Docker / 网站 / 脚本 / 手册 */}
         <div className="flex items-center gap-1 text-sm">
           {([
             ['proc', '进程'],
             ['docker', 'Docker'],
             ['web', '网站'],
             ['script', '脚本'],
-            ['manual', '手册'],
-            ['triage', '排查']
+            ['manual', '手册']
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -276,10 +274,8 @@ export function OpsPanel() {
           <WebSection sessionId={sessionId} />
         ) : opsTab === 'script' ? (
           <ScriptSection sessionId={sessionId} panelTermId={panelTermId} />
-        ) : opsTab === 'manual' ? (
-          <ManualSection />
         ) : (
-          <TriageSection />
+          <ManualSection />
         )}
       </div>
       {/* 分隔条：按住左右拖，调整左侧信息区宽度 */}
@@ -2247,26 +2243,21 @@ function loadDocStore(key: string): DocStore {
   }
 }
 
-/** 手册/排查共用的文档页：左目录，右内容；查看/编辑两种模式，按钮在右下角。
+/** 手册分类共用的文档页：左目录，右内容；查看/编辑两种模式，按钮在右下角。
     所有条目都能编辑删除：编辑内置的 = 存一份同 id 的覆盖版本（变纯文本），删除内置的 = 进黑名单。 */
 function DocSection(props: {
   topics: { id: string; title: string }[]
   customKey: string
-  /** 内置条目的纯文本版（进编辑模式时预填；手册是原文，排查是步骤拍平） */
+  /** 内置条目的纯文本版（进编辑模式时预填，就是原文） */
   builtinText: (id: string) => string
+  /** 内容换行开关：状态在 ManualSection（按钮在页签条右端），这里只消费 */
+  wrap: boolean
   renderBuiltin: (id: string, wrap: boolean) => ReactNode
 }) {
   const setNotice = useAppStore((s) => s.setNotice)
   const [store, setStore] = useState<DocStore>(() => loadDocStore(props.customKey))
   const [open, setOpen] = useState<string | null>(props.topics[0]?.id ?? null)
   const [mode, setMode] = useState<'view' | 'edit' | 'new'>('view')
-  // 内容换行开关：手册/排查共用一个键（DOCS_WRAP_KEY），两页状态统一；
-  // 长行默认折行，关掉变横向滚动（看宽表格/长命令用）
-  const [wrap, setWrapState] = useState(() => localStorage.getItem(DOCS_WRAP_KEY) !== '0')
-  const setWrap = (v: boolean) => {
-    setWrapState(v)
-    localStorage.setItem(DOCS_WRAP_KEY, v ? '1' : '0')
-  }
   const [fTitle, setFTitle] = useState('')
   const [fContent, setFContent] = useState('')
 
@@ -2275,14 +2266,34 @@ function DocSection(props: {
     localStorage.setItem(props.customKey, JSON.stringify(next))
   }
 
-  // 有效条目：内置的去掉被删的、套上覆盖；id 不撞内置的是纯自建，排在后面
-  const override = (id: string) => store.items.find((d) => d.id === id)
-  const entries: CustomDoc[] = [
-    ...props.topics
-      .filter((t) => !store.deleted.includes(t.id))
-      .map((t) => override(t.id) ?? { id: t.id, title: t.title, content: '' }),
-    ...store.items.filter((d) => !props.topics.some((t) => t.id === d.id))
-  ]
+  // 目录条目顺序持久化：存里的去掉已删条目，新条目补在末尾
+  const [entryOrder, setEntryOrder] = useState<string[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(`${props.customKey}.order`) || '[]') as unknown
+      return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const updateEntryOrder = (next: string[]) => {
+    setEntryOrder(next)
+    localStorage.setItem(`${props.customKey}.order`, JSON.stringify(next))
+  }
+
+  // 有效条目：内置的去掉被删的、套上覆盖；id 不撞内置的是纯自建；再按持久化的顺序排
+  const entries = useMemo<CustomDoc[]>(() => {
+    const raw: CustomDoc[] = [
+      ...props.topics
+        .filter((t) => !store.deleted.includes(t.id))
+        .map((t) => store.items.find((d) => d.id === t.id) ?? { id: t.id, title: t.title, content: '' }),
+      ...store.items.filter((d) => !props.topics.some((t) => t.id === d.id))
+    ]
+    const ids = raw.map((e) => e.id)
+    const valid = entryOrder.filter((id) => ids.includes(id))
+    return valid.concat(ids.filter((id) => !valid.includes(id))).map((id) => raw.find((e) => e.id === id)!)
+  }, [store, props.topics, entryOrder])
+  const entryIds = useMemo(() => entries.map((e) => e.id), [entries])
+  const entryDrag = useDragOrder('y', 'data-doc-entry', entryIds, updateEntryOrder)
   const current = entries.find((e) => e.id === open) ?? null
   const currentIsBuiltin = open !== null && props.topics.some((t) => t.id === open)
 
@@ -2328,18 +2339,27 @@ function DocSection(props: {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border">
-      <div className="w-40 shrink-0 overflow-auto border-r pb-1">
+    // 外框在 ManualSection（同网站页的大框），这里不再带自己的边框
+    <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div ref={entryDrag.stripRef} className="relative w-40 shrink-0 overflow-auto border-r pb-1">
         {entries.map((e) => (
           <ContextMenu key={e.id}>
             <ContextMenuTrigger asChild>
               <button
                 type="button"
+                data-doc-entry={e.id}
                 className={cn(
-                  'block w-full truncate px-3 py-1.5 text-left text-sm',
-                  open === e.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'block w-full cursor-grab truncate px-3 py-1.5 text-left text-sm',
+                  open === e.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  entryDrag.dragKey === e.id && 'z-10 shadow-lg ring-1 ring-foreground/30'
                 )}
+                style={entryDrag.dragKey === e.id ? { transform: `translateY(${entryDrag.dragOffset}px)` } : undefined}
+                onPointerDown={(ev) => entryDrag.startDrag(ev, e.id)}
                 onClick={() => {
+                  if (entryDrag.suppressClick.current) {
+                    entryDrag.suppressClick.current = false
+                    return
+                  }
                   setOpen(e.id)
                   setMode('view')
                 }}
@@ -2349,7 +2369,6 @@ function DocSection(props: {
             </ContextMenuTrigger>
             <ContextMenuContent>
               <ContextMenuItem onClick={() => startEdit(e)}>编辑</ContextMenuItem>
-              <ContextMenuItem onClick={() => setWrap(!wrap)}>{wrap ? '取消换行' : '自动换行'}</ContextMenuItem>
               <ContextMenuItem variant="destructive" onClick={() => del(e)}>
                 删除
               </ContextMenuItem>
@@ -2390,13 +2409,13 @@ function DocSection(props: {
             <pre
               className={cn(
                 'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
-                wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+                props.wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
               )}
             >
               {current.content}
             </pre>
           ) : (
-            props.renderBuiltin(current.id, wrap)
+            props.renderBuiltin(current.id, props.wrap)
           )
         ) : (
           <p className="px-3 py-2 text-sm text-muted-foreground">左边选一个，或点 + 新增</p>
@@ -2406,54 +2425,341 @@ function DocSection(props: {
   )
 }
 
-/** 手册页：系统讲透一个主题（内置 + 自建），左目录右内容。 */
-function ManualSection() {
-  return (
-    <DocSection
-      topics={MANUAL_TOPICS}
-      customKey="termpilot.docs.manual"
-      builtinText={(id) => MANUAL_TOPICS.find((x) => x.id === id)?.content ?? ''}
-      renderBuiltin={(id, wrap) => {
-        const t = MANUAL_TOPICS.find((x) => x.id === id)
-        return t ? (
-          <pre
-            className={cn(
-              'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
-              wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
-            )}
-          >
-            {t.content}
-          </pre>
-        ) : null
-      }}
-    />
-  )
+/** 每个手册分类一个 localStorage store（自建 + 覆盖 + 内置删除黑名单）。 */
+const manualStoreKey = (catId: string) => `termpilot.docs.manual.${catId}`
+
+/** 旧版文档 store 的键：未分类的整本手册、上一版按 系统/权限/Docker 分的三个、排查页。
+    统一按条目 id 分发到 学习/应急 两个分类的 store；id 不撞任何内置的纯自建条目归到学习手册。
+    迁移完删旧键，重复执行无副作用。 */
+const LEGACY_DOC_KEYS = [
+  'termpilot.docs.manual',
+  'termpilot.docs.manual.system',
+  'termpilot.docs.manual.access',
+  'termpilot.docs.manual.docker',
+  'termpilot.docs.triage'
+]
+
+function migrateManualStore() {
+  for (const key of LEGACY_DOC_KEYS) {
+    if (localStorage.getItem(key) === null) continue
+    const old = loadDocStore(key)
+    MANUAL_CATEGORIES.forEach((cat, i) => {
+      const cur = loadDocStore(manualStoreKey(cat.id))
+      const taken = old.items.filter(
+        (d) =>
+          cat.topics.some((t) => t.id === d.id) ||
+          (i === 0 && !MANUAL_CATEGORIES.some((c) => c.topics.some((t) => t.id === d.id)))
+      )
+      const del = old.deleted.filter((id) => cat.topics.some((t) => t.id === id))
+      const items = [...cur.items, ...taken.filter((d) => !cur.items.some((c) => c.id === d.id))]
+      const deleted = [...cur.deleted, ...del.filter((id) => !cur.deleted.includes(id))]
+      localStorage.setItem(manualStoreKey(cat.id), JSON.stringify({ items, deleted }))
+    })
+    localStorage.removeItem(key)
+  }
 }
 
-/** 排查页：应急 playbook。内置场景也按纯文本渲染（步骤拍平，编号对齐），
-    和手册同一套展示，换行开关两页一致。 */
-function TriageSection() {
-  const flatten = (id: string) => {
-    const sc = TRIAGE_SCENARIOS.find((x) => x.id === id)
-    if (!sc) return ''
-    return sc.steps.map((st, i) => `${i + 1}. ${st.cmd}\n   ${st.note}`).join('\n\n')
+/** 自建手册分类：{id, title} 列表存 localStorage；分类下的条目走 manualStoreKey(id) 的 DocStore。 */
+const CUSTOM_CATS_KEY = 'termpilot.docs.manual.cats'
+
+interface CustomCat {
+  id: string
+  title: string
+}
+
+function loadCustomCats(): CustomCat[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CUSTOM_CATS_KEY) || '[]') as unknown
+    if (!Array.isArray(raw)) return []
+    return raw.filter(
+      (c): c is CustomCat =>
+        typeof c === 'object' && c !== null &&
+        typeof (c as CustomCat).id === 'string' && typeof (c as CustomCat).title === 'string'
+    )
+  } catch {
+    return []
   }
-  return (
-    <DocSection
-      topics={TRIAGE_SCENARIOS}
-      customKey="termpilot.docs.triage"
-      builtinText={flatten}
-      renderBuiltin={(id, wrap) => (
-        <pre
-          className={cn(
-            'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
-            wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
-          )}
-        >
-          {flatten(id)}
-        </pre>
-      )}
+}
+
+/** 拖拽排序通用钩子（手册页签横向 / 目录条目竖向）：状态机 + 被拖项跟手 + FLIP 让位，
+    手感和网站页页签一致（共用 ./flip 公共件）。ids 是当前顺序（需稳定引用，用 useMemo 供），
+    产生新顺序时调 onReorder（持久化由调用方做）。容器支持滚动（换算时补 scrollTop）。 */
+function useDragOrder(axis: 'x' | 'y', attr: string, ids: string[], onReorder: (next: string[]) => void) {
+  const stripRef = useRef<HTMLDivElement>(null)
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  // 拖完会补一个 click，不能当成选中/切换
+  const suppressClick = useRef(false)
+  const prevPos = useRef(new Map<string, number>())
+  const dragStart = useRef({ pos: 0, layout: 0, grab: 0, size: 0 })
+  const pointerPos = useRef(0)
+  const idsRef = useRef(ids)
+  idsRef.current = ids
+  const reorderRef = useRef(onReorder)
+  reorderRef.current = onReorder
+
+  const posOf = (el: HTMLElement) => (axis === 'x' ? el.offsetLeft : el.offsetTop)
+  const sizeOf = (el: HTMLElement) => (axis === 'x' ? el.offsetWidth : el.offsetHeight)
+
+  /** 被拖项跟手，限制在首尾之间 */
+  const followPointer = (key: string) => {
+    const strip = stripRef.current
+    const el = strip?.querySelector<HTMLElement>(`[${attr}="${key}"]`)
+    if (!strip || !el) return
+    const offset = pointerPos.current - dragStart.current.pos - (posOf(el) - dragStart.current.layout)
+    const items = strip.querySelectorAll<HTMLElement>(`[${attr}]`)
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return setDragOffset(offset)
+    const min = posOf(first) - posOf(el)
+    const max = posOf(last) + sizeOf(last) - sizeOf(el) - posOf(el)
+    setDragOffset(Math.min(max, Math.max(min, offset)))
+  }
+
+  /** 被拖项视觉边缘越过另一项中点就交换，返回新顺序；没变返回 null */
+  const dropOrder = (clientPos: number, key: string): string[] | null => {
+    const strip = stripRef.current
+    if (!strip) return null
+    const ids = idsRef.current
+    const items = strip.querySelectorAll<HTMLElement>(`[${attr}]`)
+    const first = items[0]
+    const last = items[items.length - 1]
+    const rect = strip.getBoundingClientRect()
+    const scroll = axis === 'x' ? strip.scrollLeft : strip.scrollTop
+    const raw = clientPos - (axis === 'x' ? rect.left : rect.top) + scroll - dragStart.current.grab
+    const start =
+      first && last
+        ? Math.min(posOf(last) + sizeOf(last) - dragStart.current.size, Math.max(posOf(first), raw))
+        : raw
+    return moveTo(ids, key, dropIndex(strip, attr, axis, start, start + dragStart.current.size, key, ids))
+  }
+
+  useFlipSlide(dragKey !== null, stripRef, attr, axis, dragKey, prevPos, [ids, dragKey])
+  useLayoutEffect(() => {
+    if (dragKey) followPointer(dragKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids, dragKey])
+
+  const startDrag = (event: ReactPointerEvent, key: string) => {
+    startPointerDrag({
+      event,
+      axis,
+      onActivate: () => {
+        const strip = stripRef.current
+        const el = strip?.querySelector<HTMLElement>(`[${attr}="${key}"]`)
+        const clientPos = axis === 'x' ? event.clientX : event.clientY
+        const rect = strip?.getBoundingClientRect()
+        const scroll = strip ? (axis === 'x' ? strip.scrollLeft : strip.scrollTop) : 0
+        const pointer = strip && rect ? clientPos - (axis === 'x' ? rect.left : rect.top) + scroll : 0
+        dragStart.current = {
+          pos: clientPos,
+          layout: el ? posOf(el) : 0,
+          grab: pointer - (el ? posOf(el) : 0),
+          size: el ? sizeOf(el) : 0
+        }
+        setDragKey(key)
+        setDragOffset(0)
+      },
+      onMove: (pos) => {
+        pointerPos.current = pos
+        const next = dropOrder(pos, key)
+        if (next && stripRef.current) {
+          capturePositions(stripRef.current, attr, axis, prevPos.current)
+          reorderRef.current(next)
+        }
+        followPointer(key)
+      },
+      onEnd: () => {
+        suppressClick.current = true
+        prevPos.current.clear()
+        setDragKey(null)
+        setDragOffset(0)
+      }
+    })
+  }
+
+  return { stripRef, dragKey, dragOffset, suppressClick, startDrag }
+}
+
+/** 手册页：大框同网站页——顶部页签条（学习/应急/自建）+ 下面左目录右内容。
+    页签条右边的 + 自建分类；自建分类右键可重命名/删除（删除连带清掉它的条目 store）。 */
+function ManualSection() {
+  const CAT_KEY = 'termpilot.docs.manual.cat'
+  const CAT_ORDER_KEY = 'termpilot.docs.manual.catOrder'
+  const [customCats, setCustomCats] = useState<CustomCat[]>(loadCustomCats)
+  const availCats: ManualCategory[] = useMemo(
+    () => [...MANUAL_CATEGORIES, ...customCats.map((c) => ({ id: c.id, title: c.title, topics: [] }))],
+    [customCats]
+  )
+  // 页签顺序持久化：存里的去掉已删分类，新分类（含升级新增的内置）补在末尾
+  const [catOrder, setCatOrder] = useState<string[]>(() => {
+    migrateManualStore()
+    const avail = MANUAL_CATEGORIES.map((c) => c.id).concat(loadCustomCats().map((c) => c.id))
+    try {
+      const raw = JSON.parse(localStorage.getItem(CAT_ORDER_KEY) || '[]') as unknown
+      const valid = (Array.isArray(raw) ? raw : []).filter(
+        (k): k is string => typeof k === 'string' && avail.includes(k)
+      )
+      return valid.concat(avail.filter((k) => !valid.includes(k)))
+    } catch {
+      return avail
+    }
+  })
+  const orderedIds = useMemo(() => {
+    const avail = availCats.map((c) => c.id)
+    const valid = catOrder.filter((id) => avail.includes(id))
+    return valid.concat(avail.filter((id) => !valid.includes(id)))
+  }, [catOrder, availCats])
+  const cats = orderedIds.map((id) => availCats.find((c) => c.id === id)!)
+  const [cat, setCat] = useState(() => localStorage.getItem(CAT_KEY) ?? MANUAL_CATEGORIES[0].id)
+  // editing：null=没在编辑；id=null 是新建分类，否则是在重命名那个分类
+  const [editing, setEditing] = useState<{ id: string | null; title: string } | null>(null)
+  // 内容换行开关：所有分类共用一个键（DOCS_WRAP_KEY），状态统一；
+  // 长行默认折行，关掉变横向滚动（看宽表格/长命令用）。图标按钮在页签条右端
+  const [wrap, setWrapState] = useState(() => localStorage.getItem(DOCS_WRAP_KEY) !== '0')
+  const active = cats.find((c) => c.id === cat) ?? cats[0]
+
+  const updateCatOrder = (next: string[]) => {
+    setCatOrder(next)
+    localStorage.setItem(CAT_ORDER_KEY, JSON.stringify(next))
+  }
+  const catDrag = useDragOrder('x', 'data-manual-cat', orderedIds, updateCatOrder)
+
+  const saveCats = (next: CustomCat[]) => {
+    setCustomCats(next)
+    localStorage.setItem(CUSTOM_CATS_KEY, JSON.stringify(next))
+  }
+  const selectCat = (id: string) => {
+    setCat(id)
+    localStorage.setItem(CAT_KEY, id)
+  }
+  const commitEdit = () => {
+    if (!editing) return
+    const title = editing.title.trim()
+    if (title) {
+      if (editing.id === null) {
+        const id = `c${Date.now()}`
+        saveCats([...customCats, { id, title }])
+        updateCatOrder([...orderedIds, id])
+        selectCat(id)
+      } else {
+        saveCats(customCats.map((c) => (c.id === editing.id ? { ...c, title } : c)))
+      }
+    }
+    setEditing(null)
+  }
+  const delCat = (id: string) => {
+    saveCats(customCats.filter((c) => c.id !== id))
+    updateCatOrder(orderedIds.filter((k) => k !== id))
+    localStorage.removeItem(manualStoreKey(id))
+    if (cat === id) selectCat(MANUAL_CATEGORIES[0].id)
+  }
+
+  const nameInput = (
+    <Input
+      autoFocus
+      value={editing?.title ?? ''}
+      onChange={(e) => editing && setEditing({ ...editing, title: e.target.value })}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commitEdit()
+        if (e.key === 'Escape') setEditing(null)
+      }}
+      onBlur={commitEdit}
+      placeholder="手册名"
+      className="h-7 w-28 px-2 text-sm"
     />
+  )
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col rounded-xl border">
+      <div ref={catDrag.stripRef} className="relative flex items-center gap-1 border-b px-3 py-2 text-sm">
+        {cats.map((c) => {
+          if (editing && editing.id === c.id) return <span key={c.id}>{nameInput}</span>
+          const pill = (
+            <button
+              type="button"
+              data-manual-cat={c.id}
+              className={cn(
+                'cursor-grab rounded-md px-2.5 py-1',
+                cat === c.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                catDrag.dragKey === c.id && 'z-10 shadow-lg ring-1 ring-foreground/30'
+              )}
+              style={catDrag.dragKey === c.id ? { transform: `translateX(${catDrag.dragOffset}px)` } : undefined}
+              onPointerDown={(e) => catDrag.startDrag(e, c.id)}
+              onClick={() => {
+                if (catDrag.suppressClick.current) {
+                  catDrag.suppressClick.current = false
+                  return
+                }
+                selectCat(c.id)
+              }}
+            >
+              {c.title}
+            </button>
+          )
+          // 内置分类（学习/应急）不可改名删除；自建的带右键菜单
+          if (!customCats.some((x) => x.id === c.id)) return <span key={c.id}>{pill}</span>
+          return (
+            <ContextMenu key={c.id}>
+              <ContextMenuTrigger asChild>{pill}</ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onClick={() => setEditing({ id: c.id, title: c.title })}>重命名</ContextMenuItem>
+                <ContextMenuItem variant="destructive" onClick={() => delCat(c.id)}>
+                  删除
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          )
+        })}
+        {editing && editing.id === null ? (
+          nameInput
+        ) : (
+          <button
+            type="button"
+            title="新建手册"
+            className="rounded-md px-2 py-1 text-muted-foreground/60 hover:text-foreground"
+            onClick={() => setEditing({ id: null, title: '' })}
+          >
+            +
+          </button>
+        )}
+        <button
+          type="button"
+          title={wrap ? '取消换行（长行改横向滚动）' : '自动换行（长行折行显示）'}
+          className={cn(
+            'ml-auto rounded-md p-1.5',
+            wrap ? 'text-foreground' : 'text-muted-foreground/60 hover:text-foreground'
+          )}
+          onClick={() => {
+            setWrapState(!wrap)
+            localStorage.setItem(DOCS_WRAP_KEY, wrap ? '0' : '1')
+          }}
+        >
+          <WrapText className="size-4" />
+        </button>
+      </div>
+      {/* key=分类 id：切分类整棵重建，目录选中项/编辑态不串到下一个分类 */}
+      <DocSection
+        key={active.id}
+        topics={active.topics}
+        customKey={manualStoreKey(active.id)}
+        wrap={wrap}
+        builtinText={(id) => active.topics.find((x) => x.id === id)?.content ?? ''}
+        renderBuiltin={(id, wrap) => {
+          const t = active.topics.find((x) => x.id === id)
+          return t ? (
+            <pre
+              className={cn(
+                'px-4 py-3 font-mono text-[13px] leading-relaxed select-text',
+                wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
+              )}
+            >
+              {t.content}
+            </pre>
+          ) : null
+        }}
+      />
+    </div>
   )
 }
 
