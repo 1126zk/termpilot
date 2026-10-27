@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { CircleHelp, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
 import type { CronEntry, DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
-import { newTermId } from '../../../shared/ids'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +15,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { terminalPool } from '../terminal/TerminalPool'
 import { TerminalView } from './TerminalView'
 import { MANUAL_CATEGORIES, type ManualCategory } from './manualData'
 import { useAppStore } from '../stores/useAppStore'
@@ -70,8 +68,8 @@ export function OpsPanel() {
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
   const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual'>('proc')
-  // 面板终端的 id 提到这一层：脚本页的"交互式"脚本要往它里面发命令
-  const [panelTermId] = useState(() => newTermId())
+  // 面板和脚本页都操作当前标签的主终端，开关面板不新建 Shell
+  const panelTermId = activeTabId ?? ''
 
   const killProc = (pid: number) => {
     if (confirmKill !== pid) {
@@ -283,52 +281,12 @@ export function OpsPanel() {
         className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
         onPointerDown={startDrag}
       />
-      {/* 右侧命令区：同一台服务器再开一路真终端，面板关掉就断开销毁 */}
+      {/* 右侧命令区：复用当前标签的主终端，开关面板只重新挂载，保留 Shell 和滚动缓冲 */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <OpsTerminal sessionId={sessionId} termId={panelTermId} />
+        <TerminalView termId={panelTermId} />
       </div>
     </div>
   )
-}
-
-/** 面板右侧的终端：挂载时在同一 SSH 会话上开一路新终端，卸载时断开销毁。
-    渲染复用 TerminalView：右键菜单（复制/三种截图/粘贴）和主终端一致。
-    顺序和主流程保持一致：先 create 成功再挂 TerminalView（attach 里的 bindView 要在 create 之后）。 */
-function OpsTerminal(props: { sessionId: string; termId: string }) {
-  const termId = props.termId
-  const setNotice = useAppStore((s) => s.setNotice)
-  const [ready, setReady] = useState(false)
-  // StrictMode 开发模式会假卸载一次（清理后立刻重新挂载）：清理延迟一拍，
-  // 假卸载的清理被取消，真卸载才 close；否则双跑会建出两只 shell，提示符出现两次
-  const cleanupTimer = useRef(0)
-
-  useEffect(() => {
-    window.clearTimeout(cleanupTimer.current)
-    let dead = false
-    window.api.term
-      .create({
-        termId,
-        kind: 'ssh',
-        sessionId: props.sessionId,
-        title: '面板终端',
-        cols: 80,
-        rows: 24
-      })
-      .then(() => {
-        if (!dead) setReady(true)
-      })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
-    return () => {
-      dead = true
-      cleanupTimer.current = window.setTimeout(() => {
-        window.api.term.close(termId)
-        terminalPool.dispose(termId)
-      }, 100)
-    }
-  }, [termId, props.sessionId, setNotice])
-
-  if (!ready) return <div className="min-h-0 flex-1" style={{ background: 'var(--terminal-background)' }} />
-  return <TerminalView termId={termId} />
 }
 
 /** 进程榜一节：标题栏（含展开/收起）+ 前 N 名表格。杀进程按钮两步确认。
