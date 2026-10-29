@@ -107,7 +107,7 @@ class TerminalPool {
     host.style.overflow = 'hidden'
     term.open(host)
     host.style.background = this.palette.background ?? ''
-    bindClipboardKeys(term)
+    bindTerminalKeys(term)
     bindOsc52(term)
     bindIme(host, term)
     const disposeMouse = bindFullscreenWheel(host, term)
@@ -142,7 +142,7 @@ class TerminalPool {
   attach(termId: string, el: HTMLElement): void {
     const e = this.ensure(termId)
     if (e.host.parentElement !== el) el.appendChild(e.host)
-    bindClipboardKeys(e.term)
+    bindTerminalKeys(e.term)
     this.fit(termId)
     this.scheduleSettle(termId)
     // 菜单关掉时会把焦点还给「新建」按钮，而且往往排在下一帧之后。
@@ -419,10 +419,15 @@ export function normalizeTerminalCopy(text: string): string {
   return text.replace(/[ \t]+(?=\r\n|\n|\r|$)/g, '')
 }
 
-/** Ctrl/Cmd+C 有选区就复制，否则仍是中断。Ctrl/Cmd+V 只粘贴，不把控制字符发给远端。 */
-function bindClipboardKeys(term: Terminal): void {
+/** Shift+Enter 发送 Ctrl+J 换行；Ctrl/Cmd+C 有选区就复制，否则仍是中断；Ctrl/Cmd+V 只粘贴。 */
+function bindTerminalKeys(term: Terminal): void {
   term.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown' || event.altKey) return true
+    if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault()
+      term.input('\n')
+      return false
+    }
     const key = event.key.toLowerCase()
     const mac = window.api.platform === 'darwin'
     const mod = mac ? event.metaKey : event.ctrlKey
