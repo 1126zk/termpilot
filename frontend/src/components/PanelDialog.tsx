@@ -71,30 +71,35 @@ export function PanelConfirm(props: {
   message: string
   confirmText?: string
   error?: string
+  busy?: boolean
   onClose: () => void
   onConfirm: () => void
 }) {
   if (!props.open) return null
+  const close = () => {
+    if (!props.busy) props.onClose()
+  }
   return (
     <div
       className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 p-3"
-      onClick={props.onClose}
+      onClick={close}
     >
-      <PanelCard title={props.title} onClose={props.onClose}>
+      <PanelCard title={props.title} onClose={close} busy={props.busy}>
         <p className="text-sm break-all text-muted-foreground">{props.message}</p>
         {props.error ? <p className="text-xs text-destructive">{props.error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={props.onClose}>
+          <Button variant="ghost" onClick={close} disabled={props.busy}>
             取消
           </Button>
           <Button
             autoFocus
             onClick={props.onConfirm}
+            disabled={props.busy}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') props.onClose()
+              if (e.key === 'Escape') close()
             }}
           >
-            {props.confirmText ?? '删除'}
+            {props.busy ? '删除中…' : (props.confirmText ?? '删除')}
           </Button>
         </div>
       </PanelCard>
@@ -102,7 +107,7 @@ export function PanelConfirm(props: {
   )
 }
 
-function PanelCard(props: { title: string; onClose: () => void; children: ReactNode }) {
+function PanelCard(props: { title: string; onClose: () => void; busy?: boolean; children: ReactNode }) {
   return (
     <div
       className="h-fit w-full rounded-xl border bg-card shadow-lg shadow-black/30"
@@ -115,6 +120,7 @@ function PanelCard(props: { title: string; onClose: () => void; children: ReactN
           title="关闭"
           className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
           onClick={props.onClose}
+          disabled={props.busy}
         >
           <X className="size-4" />
         </button>

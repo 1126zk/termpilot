@@ -62,6 +62,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   const [renameError, setRenameError] = useState('')
   const [removing, setRemoving] = useState<RemoteFile | null>(null)
   const [removeError, setRemoveError] = useState('')
+  const [removeBusy, setRemoveBusy] = useState(false)
+  const removeInFlight = useRef(false)
   const [dropDir, setDropDir] = useState<string | null>(null)
   const dropRef = useRef<(dir: string, paths: string[]) => void>(() => undefined)
   // 自己发起的列目录把代数加一，进行中的自动刷新结果作废，避免盖掉更新的列表
@@ -323,14 +325,19 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
 
   const remove = async () => {
     const item = removing
-    if (!item) return
+    if (!item || removeInFlight.current) return
+    removeInFlight.current = true
+    setRemoveBusy(true)
+    setRemoveError('')
     try {
       await fs.remove(item.path, item.kind)
       setRemoving(null)
-      setRemoveError('')
       await listInto(parentDir(item.path) ?? root)
     } catch (e) {
       setRemoveError(sftpMessage(e))
+    } finally {
+      removeInFlight.current = false
+      setRemoveBusy(false)
     }
   }
 
@@ -980,6 +987,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
             : `删除 ${removing?.name ?? ''}？删除后无法恢复。`
         }
         error={removeError}
+        busy={removeBusy}
         onClose={() => {
           setRemoving(null)
           setRemoveError('')
