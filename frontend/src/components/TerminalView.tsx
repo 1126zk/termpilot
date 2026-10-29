@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/context-menu'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
-import { terminalPool } from '../terminal/TerminalPool'
+import { normalizeTerminalCopy, terminalPool } from '../terminal/TerminalPool'
 import { CaptureDialog } from './CaptureDialog'
 import { cn } from '@/lib/utils'
 import { DROP_TARGET_STYLE } from '../fileDrop'
@@ -50,7 +50,7 @@ export function TerminalView(props: { termId: string }) {
     const text = selection?.text
     if (!text) return
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(normalizeTerminalCopy(text))
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
     }

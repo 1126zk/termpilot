@@ -415,6 +415,10 @@ function bindScrollHint(host: HTMLDivElement, term: Terminal): () => void {
   }
 }
 
+export function normalizeTerminalCopy(text: string): string {
+  return text.replace(/[ \t]+(?=\r\n|\n|\r|$)/g, '')
+}
+
 /** Ctrl/Cmd+C 有选区就复制，否则仍是中断。Ctrl/Cmd+V 只粘贴，不把控制字符发给远端。 */
 function bindClipboardKeys(term: Terminal): void {
   term.attachCustomKeyEventHandler((event) => {
@@ -431,7 +435,7 @@ function bindClipboardKeys(term: Terminal): void {
     if ((copy || insertCopy) && (event.shiftKey || event.key === 'Insert' || term.hasSelection())) {
       event.preventDefault()
       const text = term.getSelection()
-      if (text) void navigator.clipboard.writeText(text)
+      if (text) void navigator.clipboard.writeText(normalizeTerminalCopy(text))
       return false
     }
     if (paste || insertPaste) {
