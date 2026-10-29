@@ -210,13 +210,13 @@ func TestReadWriteText(t *testing.T) {
 		t.Fatalf("ReadText = %q", got)
 	}
 
-	// 超过 1.5MB 拒绝
+	// 超过 20MB 拒绝
 	big := filepath.Join(native, "big.txt")
 	if err := os.WriteFile(big, make([]byte, sftpx.MaxEditBytes+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ReadText(posix + "/big.txt"); err == nil || !strings.Contains(err.Error(), "1.5MB") {
-		t.Fatalf("超大文件应报 1.5MB 错误, got %v", err)
+	if _, err := svc.ReadText(posix + "/big.txt"); err == nil || !strings.Contains(err.Error(), "20MB") {
+		t.Fatalf("超大文件应报 20MB 错误, got %v", err)
 	}
 
 	// 含 NUL 按二进制拒绝

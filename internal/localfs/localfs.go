@@ -135,7 +135,7 @@ func (s *Service) Rename(from, to string) error {
 	return os.Rename(src, dst)
 }
 
-// ReadText 对应 TS readText：先按 1.5MB 上限挡，读出后按 NUL 字节判二进制。
+// ReadText 对应 TS readText：先按 20MB 上限挡，读出后按 NUL 字节判二进制。
 func (s *Service) ReadText(path string) (string, error) {
 	target, err := s.ToNative(path)
 	if err != nil {

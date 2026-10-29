@@ -1,10 +1,10 @@
 import type { RemoteFile } from './types'
 
-/** 编辑器只打开 1.5MB 以内的文本文件。先按大小挡，读出内容后再按 NUL 字节判二进制。 */
-export const MAX_EDIT_BYTES = 1_500_000
+/** 编辑器只打开 20MB 以内的文本文件。先按大小挡，读出内容后再按 NUL 字节判二进制。 */
+export const MAX_EDIT_BYTES = 20 * 1024 * 1024
 
 export function assertEditSize(size: number): void {
-  if (size > MAX_EDIT_BYTES) throw new Error('文件超过 1.5MB，不在编辑器里打开')
+  if (size > MAX_EDIT_BYTES) throw new Error('文件超过 20MB，不在编辑器里打开')
 }
 
 export function assertTextBuffer(buf: Uint8Array): void {

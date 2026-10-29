@@ -85,7 +85,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
         return
       }
     } else if (item.size > MAX_EDIT_BYTES) {
-      setNotice('文件超过 1.5MB，不在编辑器里打开')
+      setNotice('文件超过 20MB，不在编辑器里打开')
       return
     }
     openRemoteEditor(treeId, local ? null : sessionId, { path: item.path, name: item.name }, pin, readOnly)

@@ -1,17 +1,14 @@
 package sftpx
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestAssertEditSize(t *testing.T) {
 	if err := AssertEditSize(MaxEditBytes); err != nil {
-		t.Errorf("1.5MB 整应该放行: %v", err)
+		t.Errorf("20MB 整应该放行: %v", err)
 	}
 	err := AssertEditSize(MaxEditBytes + 1)
-	if err == nil || err.Error() != "文件超过 1.5MB，不在编辑器里打开" {
-		t.Errorf("超 1.5MB 的错误文案不对: %v", err)
+	if err == nil || err.Error() != "文件超过 20MB，不在编辑器里打开" {
+		t.Errorf("超 20MB 的错误文案不对: %v", err)
 	}
 }
 
@@ -42,19 +39,5 @@ func TestCompareRemoteFiles(t *testing.T) {
 	link := RemoteFile{Name: "z", Kind: KindLink}
 	if CompareRemoteFiles(link, dir) <= 0 {
 		t.Error("链接不算目录，排在目录后")
-	}
-}
-
-func TestRefuseHuge(t *testing.T) {
-	if err := refuseHuge(MaxTransferBytes); err != nil {
-		t.Errorf("512MB 整应该放行: %v", err)
-	}
-	err := refuseHuge(MaxTransferBytes + 1)
-	if err == nil || !strings.Contains(err.Error(), "513 MB") || !strings.Contains(err.Error(), "超过 512 MB") {
-		t.Errorf("刚超 512MB 的文案不对: %v", err)
-	}
-	err = refuseHuge(2*1024*1024*1024 + 512*1024*1024)
-	if err == nil || !strings.Contains(err.Error(), "2.5 GB") {
-		t.Errorf("GB 档文案不对: %v", err)
 	}
 }

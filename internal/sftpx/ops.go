@@ -95,7 +95,7 @@ func (s *Service) Remove(sessionID, path string, kind FileKind) error {
 	})
 }
 
-// ReadText 对应 TS readText：1.5MB 上限，读出后按 NUL 字节判二进制。
+// ReadText 对应 TS readText：20MB 上限，读出后按 NUL 字节判二进制。
 func (s *Service) ReadText(sessionID, path string) (string, error) {
 	var text string
 	err := s.run(sessionID, func(conn *liveConn) error {

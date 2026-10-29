@@ -239,7 +239,7 @@ var TOOLS = []ToolDef{
 	},
 	{
 		Name:        "sftp_upload",
-		Description: "把本机绝对路径的文件上传到远端路径。超过 512MB 会拒绝。",
+		Description: "把本机绝对路径的文件上传到远端路径。",
 		Input: []FieldSpec{
 			connIDField,
 			{Name: "localPath", Type: "string", Required: true, Description: "本机绝对路径"},
@@ -248,7 +248,7 @@ var TOOLS = []ToolDef{
 	},
 	{
 		Name:        "sftp_download",
-		Description: "把远端文件下载到本机绝对路径。超过 512MB 会拒绝。几个 GB 的文件留在远程机器上处理。",
+		Description: "把远端文件下载到本机绝对路径。",
 		Input: []FieldSpec{
 			connIDField,
 			{Name: "remotePath", Type: "string", Required: true, Description: "远端路径"},

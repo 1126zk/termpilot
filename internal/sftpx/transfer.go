@@ -73,9 +73,6 @@ func (s *Service) Put(sessionID, localPath, remotePath string) error {
 		return errors.New("本地文件不存在")
 	}
 	total := info.Size()
-	if err := refuseHuge(total); err != nil {
-		return err
-	}
 	return s.run(sessionID, func(conn *liveConn) error {
 		return conn.using(normalizeRemotePath(remotePath), func(target string) error {
 			return s.streamTransfer(transferOptions{
@@ -104,9 +101,6 @@ func (s *Service) Get(sessionID, remotePath, localPath string) error {
 		return conn.using(normalizeRemotePath(remotePath), func(target string) error {
 			total, err := statSize(conn.client, target)
 			if err != nil {
-				return err
-			}
-			if err := refuseHuge(total); err != nil {
 				return err
 			}
 			return s.streamTransfer(transferOptions{
@@ -141,9 +135,6 @@ func (s *Service) UploadPaths(sessionID, dir string, localPaths []string) (int, 
 		if info.IsDir() {
 			total, err := localTreeSize(local)
 			if err != nil {
-				return done, present(err)
-			}
-			if err := refuseHuge(total); err != nil {
 				return done, present(err)
 			}
 			group := s.beginGroup(DirectionUp, filepath.Base(local), total)
@@ -184,9 +175,6 @@ func (s *Service) Download(sessionID string, file RemoteFile, localPath string) 
 			if err != nil {
 				return err
 			}
-			if err := refuseHuge(total); err != nil {
-				return err
-			}
 			return s.streamTransfer(transferOptions{
 				direction:  DirectionDown,
 				name:       file.Name,
@@ -214,9 +202,6 @@ func (s *Service) DownloadDir(sessionID string, file RemoteFile, parentDir strin
 		return conn.using(normalizeRemotePath(file.Path), func(target string) error {
 			total, err := remoteTreeSize(conn, target)
 			if err != nil {
-				return err
-			}
-			if err := refuseHuge(total); err != nil {
 				return err
 			}
 			group := s.beginGroup(DirectionDown, file.Name, total)
@@ -248,9 +233,6 @@ func (s *Service) uploadFile(conn *liveConn, local, remote string, group *transf
 		return false, err
 	}
 	total := info.Size()
-	if err := refuseHuge(total); err != nil {
-		return false, err
-	}
 	err = conn.using(remote, func(target string) error {
 		return s.streamTransfer(transferOptions{
 			direction:  DirectionUp,
@@ -338,9 +320,6 @@ func (s *Service) downloadTree(conn *liveConn, remoteDir, localDir string, group
 		}
 		total, err := statSize(conn.client, item.Path)
 		if err != nil {
-			return err
-		}
-		if err := refuseHuge(total); err != nil {
 			return err
 		}
 		if err := s.streamTransfer(transferOptions{
