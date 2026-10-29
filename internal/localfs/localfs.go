@@ -42,6 +42,9 @@ func (s *Service) ToNative(p string) (string, error) {
 		}
 		raw = home
 	}
+	if mounted, ok := wslUNCMountedDrive(strings.ReplaceAll(raw, `\`, "/")); ok {
+		raw = mounted
+	}
 	return filepath.Abs(nativeSlashes(raw))
 }
 

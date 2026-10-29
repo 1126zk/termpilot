@@ -631,6 +631,14 @@ func (a *App) hLocalList(args []interface{}) (interface{}, error) {
 	return a.local.List(dir)
 }
 
+func (a *App) hLocalWSLResolve(args []interface{}) (interface{}, error) {
+	path, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.local.ResolveWSL(path)
+}
+
 func (a *App) hLocalMkdir(args []interface{}) (interface{}, error) {
 	dir, name, err := twoStrings(args)
 	if err != nil {

@@ -148,7 +148,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       if (!fs || !backendKey) return
       const token = ++listingGen.current
       const requested = path.trim().replaceAll('\\', '/') || '.'
-      const res = await fs.list(requested)
+      const resolved = tab?.shell === 'wsl' ? await window.api.localfs.resolveWsl(requested) : requested
+      const res = await fs.list(resolved)
       if (listingGen.current !== token) return
       setRoot(res.path)
       setEntries(sortEntries(res.entries))
@@ -157,7 +158,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       setSelected(res.path)
       setError('')
     },
-    [fs, backendKey]
+    [fs, backendKey, tab?.shell]
   )
 
   const loadRoot = useCallback(
@@ -707,7 +708,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     })
 
   const rootOpen = !!open[root]
-  const rootName = baseName(root)
+  const displayRoot = tab?.shell === 'wsl' ? wslDisplayPath(root) : root
+  const rootName = baseName(displayRoot)
 
   return (
     <div
@@ -751,11 +753,11 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       <div className="flex items-center gap-1 pr-1 pb-1">
         <input
           className="h-8 min-w-0 flex-1 rounded bg-foreground/5 px-2 text-sm outline-none focus:bg-foreground/10"
-          value={draft ?? (root === '.' ? '' : root)}
-          placeholder={local ? 'C:\\Users\\...' : '/root 或 /home'}
-          title={root === '.' ? '' : root}
+          value={draft ?? (root === '.' ? '' : displayRoot)}
+          placeholder={local && tab?.shell !== 'wsl' ? 'C:\\Users\\...' : '/root 或 /home'}
+          title={root === '.' ? '' : displayRoot}
           spellCheck={false}
-          onFocus={() => setDraft(root === '.' ? '' : root)}
+          onFocus={() => setDraft(root === '.' ? '' : displayRoot)}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -1081,6 +1083,11 @@ function pathInside(parent: string, child: string): boolean {
   return target.startsWith(prefix)
 }
 
+function wslDisplayPath(path: string): string {
+  const match = /^\/\/(?:wsl\.localhost|wsl\$)\/[^/]+(\/.*)?$/i.exec(path)
+  return match ? (match[1] ?? '/') : path
+}
+
 function baseName(path: string): string {
   if (path === '/' || path === '.') return path
   const trimmed = path.replace(/\/+$/, '')
@@ -1090,7 +1097,7 @@ function baseName(path: string): string {
 
 function parentDir(path: string): string | null {
   const trimmed = path.replace(/\/+$/, '')
-  if (!trimmed || trimmed === '/') return null
+  if (!trimmed || trimmed === '/' || /^\/\/(?:wsl\.localhost|wsl\$)(?:\/[^/]+)?$/i.test(trimmed)) return null
   // POSIX 绝对路径或 Windows 盘符路径（C:/...），其余（相对路径等）没有上级
   if (!trimmed.startsWith('/') && !/^[A-Za-z]:(\/|$)/.test(trimmed)) return null
   const slash = trimmed.lastIndexOf('/')
@@ -1108,13 +1115,47 @@ const HIDDEN_KEY = 'termpilot.showHidden'
 
 const NO_SFTP = '这台机器没有 SFTP'
 
+const FILE_ERROR_TEXT: Record<string, string> = {
+  'The specified path is invalid.': '路径无效',
+  'The system cannot find the path specified.': '路径不存在',
+  'The system cannot find the file specified.': '文件不存在',
+  'Access is denied.': '没有访问权限',
+  'Cannot create a file when that file already exists.': '文件或目录已存在',
+  'The filename, directory name, or volume label syntax is incorrect.': '文件名、目录名或卷标语法不正确',
+  'The process cannot access the file because it is being used by another process.': '文件正被其他程序占用',
+  'There is not enough space on the disk.': '磁盘空间不足'
+}
+
+const FILE_ERROR_OPS: Record<string, string> = {
+  open: '打开',
+  readdirent: '读取目录',
+  mkdir: '创建目录',
+  remove: '删除',
+  removeall: '删除目录',
+  rename: '重命名',
+  read: '读取',
+  write: '写入',
+  stat: '读取状态',
+  lstat: '读取状态'
+}
+
+function localizeFileError(raw: string): string {
+  for (const [english, chinese] of Object.entries(FILE_ERROR_TEXT)) {
+    if (!raw.endsWith(english)) continue
+    const match = /^(\S+)\s+(.*):\s*$/.exec(raw.slice(0, -english.length))
+    if (!match) return chinese
+    return `${FILE_ERROR_OPS[match[1]!] ?? match[1]} ${match[2]} 失败：${chinese}`
+  }
+  return raw
+}
+
 function sftpMessage(error: unknown): string {
   const raw = (error instanceof Error ? error.message : String(error)).replace(
     /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/,
     ''
   )
   if (/Received exit code 127|establishing SFTP/i.test(raw)) return NO_SFTP
-  return raw
+  return localizeFileError(raw)
 }
 
 function formatSize(n: number): string {

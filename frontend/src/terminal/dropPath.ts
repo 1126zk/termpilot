@@ -24,6 +24,11 @@ function splitDrive(path: string): { drive: string; rest: string } | null {
   return m ? { drive: m[1]!.toLowerCase(), rest: m[2]!.replaceAll('\\', '/') } : null
 }
 
+function splitWsl(path: string): string | null {
+  const m = /^\/\/(?:wsl\.localhost|wsl\$)\/[^/]+\/(.+)$/i.exec(path.replaceAll('\\', '/'))
+  return m ? `/${m[1]}` : null
+}
+
 /** 按终端里跑的 shell 改写路径并加引号。 */
 function format(path: string, tab: Tab, localPath: boolean): string {
   if (tab.kind === 'ssh' || window.api.platform !== 'win32') return posixQuote(path)
@@ -31,8 +36,10 @@ function format(path: string, tab: Tab, localPath: boolean): string {
   let text = path
   if (tab.shell === 'wsl' || tab.shell === 'gitbash') {
     style = 'posix'
-    const parts = localPath ? splitDrive(path) : null
-    if (parts) text = `${tab.shell === 'wsl' ? '/mnt/' : '/'}${parts.drive}/${parts.rest}`
+    const wsl = tab.shell === 'wsl' && localPath ? splitWsl(path) : null
+    const parts = localPath && !wsl ? splitDrive(path) : null
+    if (wsl) text = wsl
+    else if (parts) text = `${tab.shell === 'wsl' ? '/mnt/' : '/'}${parts.drive}/${parts.rest}`
   } else {
     if (tab.shell === 'cmd') style = 'cmd'
     if (localPath) text = path.replaceAll('/', '\\')

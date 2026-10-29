@@ -182,7 +182,8 @@ const api = {
     read: (path: string) => invoke<string>(IPC.localfsRead, [path]),
     /** 整张图片的 base64 */
     readImage: (path: string) => invoke<string>(IPC.localfsReadImage, [path]),
-    write: (path: string, text: string) => invoke(IPC.localfsWrite, [path, text])
+    write: (path: string, text: string) => invoke(IPC.localfsWrite, [path, text]),
+    resolveWsl: (path: string) => invoke<string>(IPC.localfsWslResolve, [path])
   },
   appearance: {
     get: () => invoke<Appearance>(IPC.appearanceGet, []),
