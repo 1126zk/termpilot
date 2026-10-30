@@ -14,6 +14,7 @@ import { Maximize, RotateCcw, RotateCw, ZoomIn, ZoomOut } from 'lucide-react'
 import * as monaco from 'monaco-editor'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import mermaid from 'mermaid'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import editorWorker from 'monaco-editor/editor/editor.worker.js?worker'
@@ -540,6 +541,35 @@ function loosenLists(md: string): string {
   return out.join('\n')
 }
 
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: 'strict',
+  theme: 'base',
+  look: 'neo',
+  htmlLabels: false,
+  themeVariables: {
+    background: 'transparent',
+    fontFamily: 'system-ui, sans-serif',
+    fontSize: '14px',
+    primaryColor: '#1f2937',
+    primaryTextColor: '#e5e7eb',
+    primaryBorderColor: '#64748b',
+    secondaryColor: '#111827',
+    tertiaryColor: 'transparent',
+    textColor: '#e5e7eb',
+    titleColor: '#e5e7eb',
+    lineColor: '#64748b',
+    clusterBkg: 'rgba(148, 163, 184, 0.06)',
+    clusterBorder: '#334155',
+    edgeLabelBackground: '#1f2937'
+  },
+  flowchart: {
+    nodeSpacing: 36,
+    rankSpacing: 42
+  }
+})
+let mermaidSeq = 0
+
 function MarkdownPreview(props: { text: string }) {
   const html = useMemo(
     // gfm + breaks 对齐 Typora：单个换行就换行，不用行尾两个空格
@@ -555,15 +585,57 @@ function MarkdownPreview(props: { text: string }) {
     if (/^(https?:|mailto:)/i.test(href)) window.runtime.BrowserOpenURL(href)
   }
   const rootRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const root = rootRef.current
     const viewport = root?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
     if (!root || !viewport) return
     return bindMiddleScroll(root, (dx, dy) => viewport.scrollBy(dx, dy))
   }, [])
+  useEffect(() => {
+    const root = contentRef.current
+    if (!root) return
+    let cancelled = false
+    const blocks = Array.from(root.querySelectorAll<HTMLElement>('pre > code.language-mermaid'))
+    for (const block of blocks) {
+      const pre = block.parentElement
+      if (!pre) continue
+      const source = block.textContent ?? ''
+      void mermaid.render(`mermaid-${++mermaidSeq}`, source).then(({ svg }) => {
+        if (cancelled || !pre.isConnected) return
+        const container = document.createElement('div')
+        container.className = 'my-4 overflow-x-auto text-center'
+        container.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true, html: true } })
+        container.querySelectorAll('[filter]').forEach((el) => el.removeAttribute('filter'))
+        container.querySelectorAll('[stroke]').forEach((el) => {
+          if ((el.getAttribute('stroke') ?? '').startsWith('url(')) el.setAttribute('stroke', '#64748b')
+        })
+        container.querySelectorAll('style').forEach((style) => {
+          style.textContent = (style.textContent ?? '')
+            .replace(/filter\s*:\s*drop-shadow\([^)]*\)\s*;?/gi, 'filter:none;')
+            .replace(/stroke\s*:\s*url\(#[^)]+\)/gi, 'stroke:#64748b')
+        })
+        pre.replaceWith(container)
+      }).catch(() => {
+        if (cancelled || !pre.isConnected) return
+        const message = document.createElement('p')
+        message.className = 'text-sm text-destructive'
+        message.textContent = 'Mermaid 图形渲染失败，请检查语法'
+        pre.after(message)
+      })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [html])
   return (
     <ScrollArea ref={rootRef} className="h-full">
-      <div className="markdown-body mx-auto max-w-4xl px-8 py-6" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+      <div
+        ref={contentRef}
+        className="markdown-body mx-auto max-w-4xl px-8 py-6"
+        onClick={onClick}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </ScrollArea>
   )
 }
