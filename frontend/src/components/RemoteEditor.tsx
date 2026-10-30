@@ -24,6 +24,7 @@ import htmlWorker from 'monaco-editor/language/html/html.worker.js?worker'
 import tsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
 import { readBuffer, writeBuffer } from '../editor/editorBuffers'
 import { bindMiddleScroll } from '../editor/middleScroll'
+import { mountMermaidViewport } from './mermaidViewport'
 import { useAppStore, type EditorTab } from '../stores/useAppStore'
 import { terminalFontStack } from '../theme/applyAppearance'
 
@@ -616,7 +617,7 @@ function MarkdownPreview(props: { text: string }) {
       void mermaid.render(`mermaid-${++mermaidSeq}`, source).then(({ svg }) => {
         if (cancelled || !pre.isConnected) return
         const container = document.createElement('div')
-        container.className = 'my-4 overflow-x-auto text-center'
+        container.className = 'relative my-4 h-[65vh] min-h-80 overflow-hidden rounded-md border border-border/60 bg-background select-none'
         container.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true, html: true } })
         container.querySelectorAll('[filter]').forEach((el) => el.removeAttribute('filter'))
         container.querySelectorAll('[stroke]').forEach((el) => {
@@ -627,6 +628,7 @@ function MarkdownPreview(props: { text: string }) {
             .replace(/filter\s*:\s*drop-shadow\([^)]*\)\s*;?/gi, 'filter:none;')
             .replace(/stroke\s*:\s*url\(#[^)]+\)/gi, 'stroke:#64748b')
         })
+        mountMermaidViewport(container)
         pre.replaceWith(container)
       }).catch(() => {
         if (cancelled || !pre.isConnected) return
