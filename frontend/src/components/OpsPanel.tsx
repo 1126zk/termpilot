@@ -348,25 +348,25 @@ function ProcSection(props: {
         <table className="w-full table-fixed text-sm">
           <thead className="sticky top-0 bg-background">
             <tr className="border-b text-muted-foreground">
-              <th className="w-20 px-3 py-1.5 text-right font-medium">PID</th>
-              <th className="w-20 px-3 py-1.5 text-left font-medium">USER</th>
-              <th className="w-16 px-3 py-1.5 text-right font-medium">%CPU</th>
-              <th className="w-16 px-3 py-1.5 text-right font-medium">%MEM</th>
-              <th className="w-16 px-3 py-1.5 text-right font-medium">RSS</th>
-              <th className="px-3 py-1.5 text-left font-medium">命令</th>
-              <th className="w-10 px-1 py-1.5" />
+              <th className="w-18 px-2 py-1.5 text-right font-medium">PID</th>
+              <th className="w-14 px-2 py-1.5 text-left font-medium">USER</th>
+              <th className="w-14 px-2 py-1.5 text-right font-medium">%CPU</th>
+              <th className="w-14 px-2 py-1.5 text-right font-medium">%MEM</th>
+              <th className="w-14 px-2 py-1.5 text-right font-medium">RSS</th>
+              <th className="px-2 py-1.5 text-left font-medium">命令</th>
+              <th className="w-8 px-1 py-1.5" />
             </tr>
           </thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.pid} className="border-b border-border/50 last:border-0">
-                <td className="px-3 py-1.5 text-right tabular-nums">{p.pid}</td>
-                <td className="truncate px-3 py-1.5">{p.user}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{p.cpu.toFixed(1)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{p.mem.toFixed(1)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{formatRss(p.rss)}</td>
-                <td className="px-3 py-1.5 text-muted-foreground">
-                  <Tip text={formatCmd(p.cmd)}>{p.cmd}</Tip>
+                <td className="px-2 py-1.5 text-right tabular-nums">{p.pid}</td>
+                <td className="truncate px-2 py-1.5">{p.user}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{p.cpu.toFixed(1)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{p.mem.toFixed(1)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{formatRss(p.rss)}</td>
+                <td className="px-2 py-1.5 text-muted-foreground">
+                  <ProcCommand cmd={p.cmd} />
                 </td>
                 <td className="px-1 py-1.5 text-center">
                   <button
@@ -409,6 +409,35 @@ function ProcSection(props: {
         </table>
       </div>
     </div>
+  )
+}
+
+function ProcCommand(props: { cmd: string }) {
+  const match = /^\s*(\S+)([\s\S]*)$/.exec(props.cmd)
+  const executable = match?.[1] ?? props.cmd
+  const args = match?.[2] ?? ''
+  const slash = executable.lastIndexOf('/')
+  const command = (slash >= 0 ? executable.slice(slash + 1) : executable) + args
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="block w-full cursor-default truncate text-foreground">{command}</span>
+      </TooltipTrigger>
+      <TooltipContent
+        side="bottom"
+        align="start"
+        sideOffset={4}
+        className="max-w-md cursor-text break-words whitespace-pre-wrap pointer-events-auto select-text"
+        onPointerLeave={(e) => {
+          const selection = window.getSelection()
+          if (selection?.anchorNode && e.currentTarget.contains(selection.anchorNode)) {
+            selection.removeAllRanges()
+          }
+        }}
+      >
+        {formatCmd(props.cmd)}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
