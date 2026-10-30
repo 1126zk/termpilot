@@ -461,6 +461,31 @@ function PathLink(props: { sessionId: string; path: string; className?: string }
   )
 }
 
+function StatusDot(props: { label: string; tone: 'running' | 'busy' | 'stopped'; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          aria-label={props.label}
+          className={cn(
+            'relative flex size-2.5 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            props.className
+          )}
+        >
+          <span
+            className={cn(
+              'relative size-2 rounded-full',
+              props.tone === 'busy' ? 'bg-amber-400' : props.tone === 'running' ? 'bg-emerald-400' : 'bg-muted-foreground/50'
+            )}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{props.label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 /** 没装 Docker 的空态 + 一键安装。源列表可编辑（删/加/恢复默认），存面板本地，所有服务器共用。 */
 function DockerInstallSection(props: { sessionId: string }) {
   const task = useInstallStore((s) => s.tasks[dockerInstallKey(props.sessionId)])
@@ -1017,6 +1042,13 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
           <span>/etc/docker/daemon.json</span>
         )}
         <span className="flex items-center gap-1 font-sans">
+          {(opBusy || info) && (
+            <StatusDot
+              className="mr-2"
+              label={opBusy ? '状态更新中…' : info?.running ? '运行中' : '已停止'}
+              tone={opBusy ? 'busy' : info?.running ? 'running' : 'stopped'}
+            />
+          )}
           {info?.running
             ? [opBtn('restart', '重启'), opBtn('stop', '停止'), opBtn('uninstall', '删除')]
             : [opBtn('start', '启动'), opBtn('uninstall', '删除')]}
@@ -1667,12 +1699,16 @@ function WebSection(props: { sessionId: string; active: boolean }) {
             </div>
             <div className="px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="font-mono text-sm text-muted-foreground">{file}</p>
+                <p className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground" title={file}>
+                  {file}
+                </p>
                 {svc && svc.state !== '' && (
                   <span className="flex shrink-0 items-center gap-1">
-                    {svc.state !== 'running' && (
-                      <span className="text-sm text-muted-foreground">容器状态：{svc.state}</span>
-                    )}
+                    <StatusDot
+                      className="mr-1"
+                      label={`${webTab} 容器状态：${svcOpBusy ? '状态更新中…' : svc.state}`}
+                      tone={svcOpBusy ? 'busy' : svc.state === 'running' ? 'running' : 'stopped'}
+                    />
                     {svc.state === 'running'
                       ? [svcOpBtn('restart', '重启'), svcOpBtn('stop', '停止'), svcOpBtn('rm', '删除')]
                       : [svcOpBtn('start', '启动'), svcOpBtn('rm', '删除')]}
