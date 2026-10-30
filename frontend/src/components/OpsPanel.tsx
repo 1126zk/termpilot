@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { TerminalView } from './TerminalView'
 import { MANUAL_CATEGORIES, type ManualCategory } from './manualData'
-import { useAppStore } from '../stores/useAppStore'
+import { connErrorText, useAppStore } from '../stores/useAppStore'
 import { dockerInstallKey, useInstallStore, webInstallKey } from '../stores/useInstallStore'
 
 /** 字节 → GiB/MiB 简短文本 */
@@ -80,7 +80,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
     setConfirmKill(null)
     if (!sessionId) return
     void window.api.sessions.killProc(sessionId, pid).catch((e) => {
-      setNotice(e instanceof Error ? e.message : String(e))
+      setNotice(connErrorText(e instanceof Error ? e.message : String(e)))
     })
   }
 
@@ -114,7 +114,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
         setError('')
       } catch (e) {
         // 采集失败保留上一次成功的数据，只提示一句
-        if (!stopped) setError(e instanceof Error ? e.message : String(e))
+        if (!stopped) setError(connErrorText(e instanceof Error ? e.message : String(e)))
       } finally {
         inFlight.current = false
       }
@@ -723,7 +723,7 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
         // 容器增删/启停直接影响网站页的"装没装、跑没跑"，顺手刷新它的缓存
         if (['start', 'stop', 'restart', 'rm'].includes(action)) loadWebInfo(props.sessionId, true)
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
   }
 
   const info = cached?.info ?? null
@@ -756,7 +756,7 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
         loadDockerInfo(props.sessionId, true)
         loadWebInfo(props.sessionId, true)
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setOpBusy(null))
   }
   const opBtn = (op: string, label: string) => (
@@ -803,7 +803,7 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
         setMirrorInput('')
         loadDockerInfo(props.sessionId, true)
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setMirrorBusy(false))
   }
 
@@ -1370,7 +1370,7 @@ function WebSection(props: { sessionId: string; active: boolean }) {
         setTarget('')
         loadWebInfo(props.sessionId, true)
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setSubmitting(false))
   }
 
@@ -1390,7 +1390,7 @@ function WebSection(props: { sessionId: string; active: boolean }) {
         setNotice(op === 'off' ? `${d} 的 HTTPS 已关闭` : op === 'renew' ? `${d} 的证书已续期` : `${d} 的 HTTPS 已开启`)
         loadWebInfo(props.sessionId, true)
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setSslBusy(null))
   }
 
@@ -1403,7 +1403,7 @@ function WebSection(props: { sessionId: string; active: boolean }) {
     void window.api.sessions
       .webSite(props.sessionId, webTab, 'del', siteDomain)
       .then(() => loadWebInfo(props.sessionId, true))
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
   }
 
   // 容器启停/删除：点击即给反馈（按钮变"进行中…" + 顶部提示）；删除是破坏性操作，两步确认
@@ -1426,7 +1426,7 @@ function WebSection(props: { sessionId: string; active: boolean }) {
         setNotice(`${webTab} 已${label}`)
         loadWebInfo(props.sessionId, true)
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setSvcOpBusy(null))
   }
   const svcOpBtn = (op: 'start' | 'stop' | 'restart' | 'rm', label: string) => (
@@ -1831,7 +1831,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
     void window.api.sessions
       .cronList(props.sessionId)
       .then(setCronList)
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
   }
   useEffect(refreshCron, [props.sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1907,7 +1907,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
         setLastRun({ name: s.name, ok: true })
       })
       .catch((e) => {
-        const message = e instanceof Error ? e.message : String(e)
+        const message = connErrorText(e instanceof Error ? e.message : String(e))
         setNotice(message)
         setLastRun({ name: s.name, ok: false })
         setRunLog((cur) => [...cur, `[失败] ${message}`])
@@ -1927,7 +1927,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
         setTSchedule('')
         refreshCron()
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setTaskBusy(false))
   }
   const delTask = (id: string) => {
@@ -1943,7 +1943,7 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
         setNotice('定时任务已删除')
         refreshCron()
       })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
   }
 
   const scriptRows = (scope: ScriptScope) =>

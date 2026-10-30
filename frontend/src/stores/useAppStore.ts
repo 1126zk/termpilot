@@ -603,7 +603,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 }))
 
 /** 连接报错翻译：Go/SSH 的英文错误映射成中文写进终端，认不出的保留原文。 */
-function connErrorText(err: string): string {
+export function connErrorText(err: string): string {
   const rules: [string, string][] = [
     ['use of closed network connection', '连接已断开'],
     ['connection refused', '拒绝连接（端口没监听或被防火墙拦了）'],

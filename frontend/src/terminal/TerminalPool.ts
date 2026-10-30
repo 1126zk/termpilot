@@ -6,6 +6,7 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import '@xterm/xterm/css/xterm.css'
 import { bindFullscreenWheel } from './fullscreenWheel'
 import { bindIme } from './ime'
+import { bindTerminalLinks } from './links'
 import { terminalPalette } from '../theme/terminalThemes'
 
 /**
@@ -23,6 +24,7 @@ interface PoolEntry {
   fit: FitAddon
   host: HTMLDivElement
   disposeData: () => void
+  disposeLinks: () => void
   disposeScrollHint: () => void
   disposeMouse: () => void
   settled: boolean
@@ -108,6 +110,7 @@ class TerminalPool {
     term.open(host)
     host.style.background = this.palette.background ?? ''
     bindTerminalKeys(term)
+    const disposeLinks = bindTerminalLinks(term)
     bindOsc52(term)
     bindIme(host, term)
     const disposeMouse = bindFullscreenWheel(host, term)
@@ -130,6 +133,7 @@ class TerminalPool {
       fit,
       host,
       disposeData,
+      disposeLinks,
       disposeScrollHint: bindScrollHint(host, term),
       disposeMouse,
       settled: false
@@ -343,6 +347,7 @@ class TerminalPool {
     const e = this.entries.get(termId)
     if (!e) return
     e.disposeMouse()
+    e.disposeLinks()
     e.disposeData()
     e.disposeScrollHint()
     e.term.dispose()
