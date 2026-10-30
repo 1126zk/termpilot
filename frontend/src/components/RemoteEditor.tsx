@@ -157,6 +157,12 @@ export function saveTextFile(key: string): Promise<void> | undefined {
   return textSaves.get(key)?.()
 }
 
+const textReloads = new Map<string, () => Promise<void>>()
+
+export function reloadTextFile(key: string): Promise<void> | undefined {
+  return textReloads.get(key)?.()
+}
+
 /** 标签栏右侧的图片工具：尺寸、缩放、旋转。compact 只收紧间距，图标大小不变。 */
 export function ImageTools(props: { tabKey: string; compact?: boolean }) {
   const controls = useSyncExternalStore(subscribeControls, () => imageControls.get(props.tabKey))
@@ -404,9 +410,9 @@ function TextEditor(props: { tab: EditorTab }) {
     if (row?.preview && dirty) pinEditorTab(tab.key)
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const cached = readBuffer(tab.key)
-    if (cached?.loaded) {
+    if (!force && cached?.loaded) {
       textRef.current = cached.text
       savedRef.current = cached.saved
       setText(cached.text)
@@ -420,9 +426,7 @@ function TextEditor(props: { tab: EditorTab }) {
       const content = tab.sessionId
         ? await window.api.sftp.read(tab.sessionId, tab.path)
         : await window.api.localfs.read(tab.path)
-      textRef.current = content
-      savedRef.current = content
-      writeBuffer(tab.key, { text: content, saved: content, loaded: true, error: '' })
+      remember(content, content)
       setText(content)
     } catch (e) {
       const message = e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '') : String(e)
@@ -436,6 +440,14 @@ function TextEditor(props: { tab: EditorTab }) {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    const reload = () => load(true)
+    textReloads.set(tab.key, reload)
+    return () => {
+      if (textReloads.get(tab.key) === reload) textReloads.delete(tab.key)
+    }
+  }, [tab.key, load])
 
   const save = useCallback(async () => {
     try {

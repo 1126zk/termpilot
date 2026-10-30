@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
-import { ArrowRightToLine, ChevronLeft, ChevronRight, Eye, FilePenLine, Save, SquareTerminal, WrapText, X } from 'lucide-react'
+import { ArrowRightToLine, ChevronLeft, ChevronRight, Eye, FilePenLine, RefreshCw, Save, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -13,7 +13,7 @@ import {
 import { readBuffer } from '../editor/editorBuffers'
 import { useAppStore, type EditorTab } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
-import { ImageTools, isImage, isMarkdown, saveTextFile } from './RemoteEditor'
+import { ImageTools, isImage, isMarkdown, reloadTextFile, saveTextFile } from './RemoteEditor'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 
 const TOOL_BUTTON =
@@ -41,6 +41,8 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
   const reorderEditorTabs = useAppStore((s) => s.reorderEditorTabs)
   const [pending, setPending] = useState<EditorTab | null>(null)
   const [saving, setSaving] = useState(false)
+  const [refreshPending, setRefreshPending] = useState<EditorTab | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   // 拖动排序，和顶部会话标签同一套（见 TabBar）：被拖标签跟手，其余 FLIP 让位
   const stripRef = useRef<HTMLDivElement>(null)
@@ -224,6 +226,21 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
     }
   }
 
+  const reload = async (tab: EditorTab, force = false) => {
+    if (!force && unsaved(tab)) {
+      setRefreshPending(tab)
+      return
+    }
+    setRefreshing(true)
+    try {
+      await reloadTextFile(tab.key)
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   return (
     <>
     <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
@@ -303,6 +320,18 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           <ImageTools tabKey={activeTab.key} compact={compactTools} />
         </div>
       )}
+      {activeTab && !isImage(activeTab.name) && (
+        <button
+          type="button"
+          title="重新读取原文件"
+          className={cn(TOOL_BUTTON, 'disabled:opacity-40')}
+          disabled={refreshing}
+          onClick={() => void reload(activeTab)}
+        >
+          <RefreshCw className={cn('size-4', refreshing && 'animate-spin')} />
+          刷新
+        </button>
+      )}
       {activeTab && !isImage(activeTab.name) && !activeTab.readOnly && (
         <button
           type="button"
@@ -362,6 +391,32 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
           </Button>
           <Button disabled={saving} onClick={() => void saveAndClose()}>
             保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={refreshPending !== null} onOpenChange={(open) => !open && !refreshing && setRefreshPending(null)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>重新读取文件？</DialogTitle>
+          <DialogDescription>
+            {refreshPending?.name} 有未保存的修改，刷新后这些内容会丢失。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" disabled={refreshing} onClick={() => setRefreshPending(null)}>
+            取消
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={refreshing}
+            onClick={() => {
+              const tab = refreshPending
+              setRefreshPending(null)
+              if (tab) void reload(tab, true)
+            }}
+          >
+            放弃修改并刷新
           </Button>
         </DialogFooter>
       </DialogContent>
