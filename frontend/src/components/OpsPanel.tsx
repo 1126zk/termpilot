@@ -421,11 +421,12 @@ function ProcCommand(props: { cmd: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="block w-full cursor-default truncate text-foreground">{command}</span>
+        <span className="block w-fit max-w-full cursor-default truncate text-foreground">{command}</span>
       </TooltipTrigger>
       <TooltipContent
         side="bottom"
         align="start"
+        arrowClassName="!left-4"
         sideOffset={4}
         className="max-w-md cursor-text break-words whitespace-pre-wrap pointer-events-auto select-text"
         onPointerLeave={(e) => {
