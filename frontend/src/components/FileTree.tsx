@@ -15,7 +15,7 @@ import { TREE_PATH_MIME } from '../terminal/dropPath'
 import { beginTreeMove, finishTreeMove, noteTreeMoveDrop, treeMoveActive } from '../treeMove'
 import { PanelConfirm, PanelDialog, useMenuAction } from './PanelDialog'
 import { DROP_TARGET_STYLE, dropDirAt, registerDropTree } from '../fileDrop'
-import type { RemoteFile, SftpTransferEvent, Tab } from '../../../shared/types'
+import type { RemoteFile, Tab } from '../../../shared/types'
 import { MAX_EDIT_BYTES } from '../../../shared/file-listing'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
@@ -72,10 +72,11 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   const dragging = useRef(false)
   const refreshRef = useRef<() => Promise<void>>(async () => undefined)
   const treeId = tab?.id ?? ''
-  const [transfers, setTransfers] = useState<SftpTransferEvent[]>([])
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === '1')
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
   const setNotice = useAppStore((s) => s.setNotice)
+  const dismissTransfer = useAppStore((s) => s.dismissSftpTransfer)
+  const transfers = useAppStore((s) => (sessionId ? s.transfersBySession[sessionId] : undefined)) ?? []
 
   // 编辑器/预览收不下的文件不开废标签页，点击时就地提示。图片走预览，上限另算
   const openFile = (item: RemoteFile, pin: boolean, readOnly?: boolean) => {
@@ -118,22 +119,6 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       downloadDir: (file) => sftp.downloadDir(id, file)
     }
   }, [local, sessionId])
-
-  // 底部传输区：按事件 id 更新；成功的留十秒，失败的不自动消失，只能点 × 关闭
-  useEffect(() => {
-    return window.api.sftp.onTransfer((event) => {
-      setTransfers((list) => {
-        const index = list.findIndex((t) => t.id === event.id)
-        if (index < 0) return [...list, event]
-        const next = [...list]
-        next[index] = event
-        return next
-      })
-      if (event.done && !event.error) {
-        setTimeout(() => setTransfers((list) => list.filter((t) => t.id !== event.id)), 10000)
-      }
-    })
-  }, [])
 
   useEffect(() => {
     if (!treeId) return
@@ -938,7 +923,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                     title={t.done ? '关闭' : '取消传输'}
                     className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                     onClick={() => {
-                      if (t.done) setTransfers((list) => list.filter((item) => item.id !== t.id))
+                      if (t.done) dismissTransfer(t.sessionId, t.id)
                       else void window.api.sftp.cancelTransfer(t.id)
                     }}
                   >

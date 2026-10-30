@@ -33,6 +33,7 @@ export default function App() {
   const editorTabs = useAppStore((s) => s.editorTabs)
 
   useEffect(() => window.api.capture.onRun((job) => void runCapture(job)), [])
+  useEffect(() => window.api.sftp.onTransfer(useAppStore.getState().onSftpTransfer), [])
 
   useEffect(() => {
     const open = () => {

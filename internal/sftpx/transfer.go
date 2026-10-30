@@ -27,6 +27,7 @@ const chunkSize = 32 * 1024
 // transferGroup 文件夹传输的聚合进度：整棵树共用一条事件，Transferred 跨文件累计。
 type transferGroup struct {
 	id        string
+	sessionID string
 	direction string
 	name      string
 	total     int64
@@ -52,6 +53,7 @@ func (g *transferGroup) setAbort(fn func()) {
 
 // transferOptions 一条流传输的参数。
 type transferOptions struct {
+	sessionID string
 	direction string
 	name      string
 	total     int64
@@ -76,6 +78,7 @@ func (s *Service) Put(sessionID, localPath, remotePath string) error {
 	return s.run(sessionID, func(conn *liveConn) error {
 		return conn.using(normalizeRemotePath(remotePath), func(target string) error {
 			return s.streamTransfer(transferOptions{
+				sessionID:  sessionID,
 				direction:  DirectionUp,
 				name:       remoteBase(target),
 				total:      total,
@@ -104,6 +107,7 @@ func (s *Service) Get(sessionID, remotePath, localPath string) error {
 				return err
 			}
 			return s.streamTransfer(transferOptions{
+				sessionID:  sessionID,
 				direction:  DirectionDown,
 				name:       remoteBase(target),
 				total:      total,
@@ -137,7 +141,7 @@ func (s *Service) UploadPaths(sessionID, dir string, localPaths []string) (int, 
 			if err != nil {
 				return done, present(err)
 			}
-			group := s.beginGroup(DirectionUp, filepath.Base(local), total)
+			group := s.beginGroup(sessionID, DirectionUp, filepath.Base(local), total)
 			n, err := s.uploadTree(conn, local, remote, group)
 			if err != nil {
 				s.endGroup(group, err.Error())
@@ -153,7 +157,7 @@ func (s *Service) UploadPaths(sessionID, dir string, localPaths []string) (int, 
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		ok, err := s.uploadFile(conn, local, remote, nil)
+		ok, err := s.uploadFile(conn, sessionID, local, remote, nil)
 		if err != nil {
 			return done, present(err)
 		}
@@ -176,6 +180,7 @@ func (s *Service) Download(sessionID string, file RemoteFile, localPath string) 
 				return err
 			}
 			return s.streamTransfer(transferOptions{
+				sessionID:  sessionID,
 				direction:  DirectionDown,
 				name:       file.Name,
 				total:      total,
@@ -204,7 +209,7 @@ func (s *Service) DownloadDir(sessionID string, file RemoteFile, parentDir strin
 			if err != nil {
 				return err
 			}
-			group := s.beginGroup(DirectionDown, file.Name, total)
+			group := s.beginGroup(sessionID, DirectionDown, file.Name, total)
 			if err := s.downloadTree(conn, target, localDir, group); err != nil {
 				s.endGroup(group, err.Error())
 				return err
@@ -227,7 +232,7 @@ func (s *Service) CancelTransfer(id string) {
 
 // uploadFile 对应 TS uploadFile。聚合传输里取消要抛出去让整棵树停下；
 // 单文件被取消返回 (false, nil)。
-func (s *Service) uploadFile(conn *liveConn, local, remote string, group *transferGroup) (bool, error) {
+func (s *Service) uploadFile(conn *liveConn, sessionID, local, remote string, group *transferGroup) (bool, error) {
 	info, err := os.Stat(local)
 	if err != nil {
 		return false, err
@@ -235,6 +240,7 @@ func (s *Service) uploadFile(conn *liveConn, local, remote string, group *transf
 	total := info.Size()
 	err = conn.using(remote, func(target string) error {
 		return s.streamTransfer(transferOptions{
+			sessionID:  sessionID,
 			direction:  DirectionUp,
 			name:       remoteBase(target),
 			total:      total,
@@ -284,7 +290,7 @@ func (s *Service) uploadTree(conn *liveConn, localDir, remoteDir string, group *
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		ok, err := s.uploadFile(conn, local, remote, group)
+		ok, err := s.uploadFile(conn, group.sessionID, local, remote, group)
 		if err != nil {
 			return done, err
 		}
@@ -323,6 +329,7 @@ func (s *Service) downloadTree(conn *liveConn, remoteDir, localDir string, group
 			return err
 		}
 		if err := s.streamTransfer(transferOptions{
+			sessionID:  group.sessionID,
 			direction:  DirectionDown,
 			name:       item.Name,
 			total:      total,
@@ -355,6 +362,7 @@ func (s *Service) streamTransfer(opts transferOptions) error {
 	push := func(done bool, errText string) {
 		ev := TransferEvent{
 			ID:          id,
+			SessionID:   opts.sessionID,
 			Direction:   opts.direction,
 			Name:        opts.name,
 			Transferred: transferred.Load(),
@@ -474,8 +482,8 @@ func (s *Service) streamTransfer(opts transferOptions) error {
 }
 
 // beginGroup 文件夹传输开始：聚合成一条进度，取消时标记 cancelled 并毁掉正在传的那个文件。
-func (s *Service) beginGroup(direction, name string, total int64) *transferGroup {
-	group := &transferGroup{id: randomID(), direction: direction, name: name, total: total}
+func (s *Service) beginGroup(sessionID, direction, name string, total int64) *transferGroup {
+	group := &transferGroup{id: randomID(), sessionID: sessionID, direction: direction, name: name, total: total}
 	s.registerTransfer(group.id, func() {
 		group.cancelled.Store(true)
 		group.mu.Lock()
@@ -485,7 +493,7 @@ func (s *Service) beginGroup(direction, name string, total int64) *transferGroup
 			abort()
 		}
 	})
-	s.emitTransfer(TransferEvent{ID: group.id, Direction: direction, Name: name, Total: total})
+	s.emitTransfer(TransferEvent{ID: group.id, SessionID: sessionID, Direction: direction, Name: name, Total: total})
 	return group
 }
 
@@ -494,6 +502,7 @@ func (s *Service) endGroup(group *transferGroup, errText string) {
 	s.unregisterTransfer(group.id)
 	ev := TransferEvent{
 		ID:        group.id,
+		SessionID: group.sessionID,
 		Direction: group.direction,
 		Name:      group.name,
 		Total:     group.total,

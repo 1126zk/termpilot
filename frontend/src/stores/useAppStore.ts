@@ -13,6 +13,7 @@ import {
   type ServerInfo,
   type SessionConfig,
   type SessionStatus,
+  type SftpTransferEvent,
   type Tab,
   type TermStatusEvent,
   type WebInfo
@@ -59,6 +60,8 @@ interface AppState {
   dockerBySession: Record<string, { info: DockerInfo | null; at: number }>
   /** 网站服务（nginx/caddy）配置采集缓存，按会话存，at 用法同 dockerBySession */
   webBySession: Record<string, { info: WebInfo | null; at: number }>
+  /** SFTP 传输记录按服务器会话归属，同一服务器的多个终端标签共用 */
+  transfersBySession: Record<string, SftpTransferEvent[]>
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
   hostNotes: Record<string, string>
   sessionStatus: Record<string, SessionStatus>
@@ -130,6 +133,8 @@ interface AppState {
   /** 主进程终端状态事件入口（App 中订阅一次） */
   onTermStatus: (e: TermStatusEvent) => void
   onTermMeta: (e: { termId: string; title: string; remark: string }) => void
+  onSftpTransfer: (e: SftpTransferEvent) => void
+  dismissSftpTransfer: (sessionId: string, transferId: string) => void
 
   toggleRightPanel: () => void
   toggleOpsPanel: (termId: string) => void
@@ -186,6 +191,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   serverInfoBySession: {},
   dockerBySession: {},
   webBySession: {},
+  transfersBySession: {},
   hostNotes: {},
   sessionStatus: {},
   termState: {},
@@ -508,6 +514,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       tabs: get().tabs.map((tab) => (tab.id === e.termId ? { ...tab, title: e.title || tab.title, remark: e.remark } : tab))
     })
+  },
+
+  onSftpTransfer: (event) => {
+    const list = get().transfersBySession[event.sessionId] ?? []
+    const index = list.findIndex((item) => item.id === event.id)
+    const transfers = index < 0 ? [...list, event] : list.map((item, i) => (i === index ? event : item))
+    set({ transfersBySession: { ...get().transfersBySession, [event.sessionId]: transfers } })
+    if (event.done && !event.error) {
+      setTimeout(() => get().dismissSftpTransfer(event.sessionId, event.id), 10000)
+    }
+  },
+
+  dismissSftpTransfer: (sessionId, transferId) => {
+    const transfers = (get().transfersBySession[sessionId] ?? []).filter((item) => item.id !== transferId)
+    set({ transfersBySession: { ...get().transfersBySession, [sessionId]: transfers } })
   },
 
   // 面板内容硬性互斥：开文件面板就关掉编辑表单

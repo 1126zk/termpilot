@@ -286,6 +286,7 @@ export interface SftpInstallEvent {
 /** 文件上传/下载的传输进度（main → renderer）。done 后界面留几秒再移除。 */
 export interface SftpTransferEvent {
   id: string
+  sessionId: string
   direction: 'up' | 'down'
   name: string
   transferred: number

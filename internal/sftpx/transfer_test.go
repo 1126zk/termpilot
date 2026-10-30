@@ -50,6 +50,15 @@ func newTestService(log *eventLog) *Service {
 	return New(Options{OnTransfer: log.push})
 }
 
+func assertSessionID(t *testing.T, events []TransferEvent, want string) {
+	t.Helper()
+	for _, ev := range events {
+		if ev.SessionID != want {
+			t.Errorf("事件 sessionId = %q, want %q: %+v", ev.SessionID, want, ev)
+		}
+	}
+}
+
 func memSource(data []byte) func() (io.ReadCloser, error) {
 	return func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(data)), nil }
 }
@@ -71,7 +80,7 @@ func TestStreamTransferSuccess(t *testing.T) {
 	data := bytes.Repeat([]byte("x"), 100000) // 多块，确认进度累计
 	dest := &bufferDest{}
 	err := svc.streamTransfer(transferOptions{
-		direction: DirectionDown, name: "f.bin", total: int64(len(data)),
+		sessionID: "session-a", direction: DirectionDown, name: "f.bin", total: int64(len(data)),
 		openSource: memSource(data), openDest: memDest(dest),
 	})
 	if err != nil {
@@ -84,6 +93,7 @@ func TestStreamTransferSuccess(t *testing.T) {
 	if len(events) < 3 {
 		t.Fatalf("至少要有起始/进度/完成事件，只有 %d 条", len(events))
 	}
+	assertSessionID(t, events, "session-a")
 	first, last := events[0], events[len(events)-1]
 	if first.Done || first.Transferred != 0 || first.Total != int64(len(data)) {
 		t.Errorf("起始事件不对: %+v", first)
@@ -158,7 +168,7 @@ func TestStreamTransferOpenFails(t *testing.T) {
 	log := &eventLog{}
 	svc := newTestService(log)
 	err := svc.streamTransfer(transferOptions{
-		direction: DirectionUp, name: "f.bin", total: 10,
+		sessionID: "session-a", direction: DirectionUp, name: "f.bin", total: 10,
 		openSource: func() (io.ReadCloser, error) { return nil, errors.New("打不开") },
 		openDest:   memDest(&bufferDest{}),
 	})
@@ -169,6 +179,7 @@ func TestStreamTransferOpenFails(t *testing.T) {
 	if len(events) != 2 || !events[1].Done || events[1].Error != "打不开" {
 		t.Errorf("事件序列不对: %+v", events)
 	}
+	assertSessionID(t, events, "session-a")
 }
 
 func TestStreamTransferCancel(t *testing.T) {
@@ -222,11 +233,11 @@ func TestCancelUnknownTransfer(t *testing.T) {
 func TestStreamTransferGroupAggregation(t *testing.T) {
 	log := &eventLog{}
 	svc := newTestService(log)
-	group := svc.beginGroup(DirectionUp, "dir", 30)
+	group := svc.beginGroup("session-a", DirectionUp, "dir", 30)
 	cleaned := false
 	for i, data := range [][]byte{[]byte("0123456789"), []byte("01234567890123456789")} {
 		err := svc.streamTransfer(transferOptions{
-			direction: DirectionUp, name: "f", total: int64(len(data)), group: group,
+			sessionID: "session-a", direction: DirectionUp, name: "f", total: int64(len(data)), group: group,
 			openSource:     memSource(data),
 			openDest:       memDest(&bufferDest{}),
 			cleanupPartial: func() { cleaned = true },
@@ -238,6 +249,7 @@ func TestStreamTransferGroupAggregation(t *testing.T) {
 	svc.endGroup(group, "")
 
 	events := log.snapshot()
+	assertSessionID(t, events, "session-a")
 	if events[0].ID != group.id || events[0].Done {
 		t.Errorf("beginGroup 的起始事件不对: %+v", events[0])
 	}
@@ -272,13 +284,13 @@ func TestStreamTransferGroupAggregation(t *testing.T) {
 func TestStreamTransferGroupCancel(t *testing.T) {
 	log := &eventLog{}
 	svc := newTestService(log)
-	group := svc.beginGroup(DirectionDown, "dir", 1<<20)
+	group := svc.beginGroup("session-a", DirectionDown, "dir", 1<<20)
 	srcReader, srcWriter := io.Pipe()
 	defer srcWriter.Close()
 	done := make(chan error, 1)
 	go func() {
 		done <- svc.streamTransfer(transferOptions{
-			direction: DirectionDown, name: "f", total: 1 << 20, group: group,
+			sessionID: "session-a", direction: DirectionDown, name: "f", total: 1 << 20, group: group,
 			openSource: func() (io.ReadCloser, error) { return srcReader, nil },
 			openDest:   memDest(&bufferDest{}),
 		})
@@ -297,6 +309,7 @@ func TestStreamTransferGroupCancel(t *testing.T) {
 		t.Error("组没被标记 cancelled（遍历方靠它停下）")
 	}
 	svc.endGroup(group, "已取消")
+	assertSessionID(t, log.snapshot(), "session-a")
 	last := log.snapshot()[len(log.snapshot())-1]
 	if !last.Done || last.Error != "已取消" || last.Transferred != 0 {
 		t.Errorf("取消的收尾事件不对: %+v", last)
@@ -325,13 +338,13 @@ func TestLocalTreeSize(t *testing.T) {
 
 func TestTransferEventJSONShape(t *testing.T) {
 	// 确认事件字段名和前端 TS 类型一致（json tag 级）
-	ev := TransferEvent{ID: "x", Direction: "up", Name: "n", Transferred: 1, Total: 2, Done: false}
+	ev := TransferEvent{ID: "x", SessionID: "s", Direction: "up", Name: "n", Transferred: 1, Total: 2, Done: false}
 	raw, err := json.Marshal(ev)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	for _, key := range []string{`"id"`, `"direction"`, `"name"`, `"transferred"`, `"total"`, `"done"`} {
+	for _, key := range []string{`"id"`, `"sessionId"`, `"direction"`, `"name"`, `"transferred"`, `"total"`, `"done"`} {
 		if !strings.Contains(text, key) {
 			t.Errorf("事件 JSON 缺字段 %s: %s", key, text)
 		}

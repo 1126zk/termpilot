@@ -32,6 +32,7 @@ const (
 // 文件夹传输整棵树共用一个 id，Transferred 跨文件累计。
 type TransferEvent struct {
 	ID          string `json:"id"`
+	SessionID   string `json:"sessionId"`
 	Direction   string `json:"direction"`
 	Name        string `json:"name"`
 	Transferred int64  `json:"transferred"`
