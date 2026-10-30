@@ -66,6 +66,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   const [memShown, setMemShown] = useState(5)
   // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
+  const [killing, setKilling] = useState<Set<number>>(new Set())
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
   const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual'>('proc')
   // 面板和脚本页都操作当前标签的主终端，开关面板不新建 Shell
@@ -78,10 +79,27 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
       return
     }
     setConfirmKill(null)
-    if (!sessionId) return
-    void window.api.sessions.killProc(sessionId, pid).catch((e) => {
-      setNotice(connErrorText(e instanceof Error ? e.message : String(e)))
-    })
+    if (!sessionId || killing.has(pid)) return
+    setKilling((cur) => new Set(cur).add(pid))
+    setNotice(`正在结束进程 ${pid}…`, true)
+    void window.api.sessions
+      .killProc(sessionId, pid)
+      .then(async () => {
+        setNotice(`已向进程 ${pid} 发送结束信号`)
+        const m = await window.api.sessions.metrics(sessionId)
+        setMetrics(m)
+        setError('')
+      })
+      .catch((e) => {
+        setNotice(connErrorText(e instanceof Error ? e.message : String(e)))
+      })
+      .finally(() => {
+        setKilling((cur) => {
+          const next = new Set(cur)
+          next.delete(pid)
+          return next
+        })
+      })
   }
 
   // 按住分隔条左右拖：左栏在 520 ~（容器宽 - 240，给终端保底）之间调整
@@ -252,6 +270,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
               shown={cpuShown}
               onToggle={() => setCpuShown(cpuShown === 5 ? 10 : 5)}
               confirmKill={confirmKill}
+              killing={killing}
               onKill={killProc}
               loaded={metrics !== null}
             />
@@ -261,6 +280,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
               shown={memShown}
               onToggle={() => setMemShown(memShown === 5 ? 10 : 5)}
               confirmKill={confirmKill}
+              killing={killing}
               onKill={killProc}
               loaded={metrics !== null}
               divider
@@ -297,6 +317,7 @@ function ProcSection(props: {
   shown: number
   onToggle: () => void
   confirmKill: number | null
+  killing: Set<number>
   onKill: (pid: number) => void
   /** 第一笔数据还没回来时是 false，空表先不显示「没有采集到」 */
   loaded: boolean
@@ -350,16 +371,29 @@ function ProcSection(props: {
                 <td className="px-1 py-1.5 text-center">
                   <button
                     type="button"
-                    title={props.confirmKill === p.pid ? '再点一次确认杀死' : '杀死进程（SIGTERM）'}
+                    title={
+                      props.killing.has(p.pid)
+                        ? '正在结束进程'
+                        : props.confirmKill === p.pid
+                          ? '再点一次确认杀死'
+                          : '杀死进程（SIGTERM）'
+                    }
+                    disabled={props.killing.has(p.pid)}
                     className={cn(
-                      'inline-flex h-6 min-w-6 items-center justify-center rounded px-0.5 text-sm',
+                      'inline-flex h-6 min-w-6 items-center justify-center rounded px-0.5 text-sm disabled:opacity-60',
                       props.confirmKill === p.pid
                         ? 'bg-destructive/15 text-destructive'
                         : 'text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive'
                     )}
                     onClick={() => props.onKill(p.pid)}
                   >
-                    {props.confirmKill === p.pid ? '确认' : <X className="size-3.5" />}
+                    {props.killing.has(p.pid) ? (
+                      <RefreshCw className="size-3.5 animate-spin" />
+                    ) : props.confirmKill === p.pid ? (
+                      '确认'
+                    ) : (
+                      <X className="size-3.5" />
+                    )}
                   </button>
                 </td>
               </tr>

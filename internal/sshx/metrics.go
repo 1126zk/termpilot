@@ -235,8 +235,15 @@ func (s *ExecService) KillProcess(sessionID string, pid int) error {
 	if err != nil {
 		return err
 	}
+	if res.TimedOut {
+		return fmt.Errorf("结束进程 %d 超时", pid)
+	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
-		return fmt.Errorf("kill 失败（退出码 %d）：%s", *res.ExitCode, strings.TrimSpace(res.Stderr))
+		stderr := strings.TrimSpace(res.Stderr)
+		if strings.Contains(strings.ToLower(stderr), "no such process") {
+			return fmt.Errorf("进程 %d 不存在或已退出", pid)
+		}
+		return fmt.Errorf("kill 失败（退出码 %d）：%s", *res.ExitCode, stderr)
 	}
 	return nil
 }
