@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { RightPanel } from './components/RightPanel'
@@ -110,7 +110,7 @@ export default function App() {
   ])
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  const opsPanelTermId = useAppStore((s) => s.opsPanelTermId)
+  const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const fileTabs = activeTab
     ? editorTabs.filter((t) => t.termId === activeTab.id)
@@ -122,6 +122,7 @@ export default function App() {
   const onTerminalPage = !!activeTab && !hostsOpen && !settingsOpen
   const editing = useAppStore((s) => s.editing)
   const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !settingsOpen && activeTab))
+  const opsOpen = !!activeTab && opsPanelTermIds.includes(activeTab.id)
 
   return (
     <TooltipProvider>
@@ -133,6 +134,8 @@ export default function App() {
               <EditorTabBar tabs={fileTabs} activeKey={currentFile?.key ?? null} />
             )}
             <div className="flex min-h-0 flex-1 flex-col">
+              <OpsPanels activeTermId={onTerminalPage && !currentFile && opsOpen && activeTab ? activeTab.id : null} />
+              <TerminalViews activeTermId={onTerminalPage && !currentFile && !opsOpen && activeTab ? activeTab.id : null} />
               {settingsOpen ? (
                 <SettingsPage />
               ) : hostsOpen || !activeTab ? (
@@ -140,11 +143,7 @@ export default function App() {
               ) : currentFile ? (
                 // 文件盖在最上层：面板/终端模式下点文件都能看，切走回落到之前的模式
                 <RemoteEditor key={currentFile.key} tab={currentFile} />
-              ) : opsPanelTermId === activeTab.id ? (
-                <OpsPanel />
-              ) : (
-                <TerminalView key={activeTab.id} termId={activeTab.id} />
-              )}
+              ) : null}
             </div>
           </div>
           {/* 面板挤占布局不盖内容，宽度从 0 平滑展开到满宽。编辑表单任何页面都能弹；文件面板只属于终端页 */}
@@ -164,5 +163,40 @@ export default function App() {
         <NoticeToast />
       </div>
     </TooltipProvider>
+  )
+}
+
+function OpsPanels(props: { activeTermId: string | null }) {
+  const tabs = useAppStore((s) => s.tabs)
+  const openIds = useAppStore((s) => s.opsPanelTermIds)
+  const openTabs = tabs.filter((tab) => openIds.includes(tab.id))
+  return (
+    <>
+      {openTabs.map((tab) => (
+        <div key={tab.id} className={tab.id === props.activeTermId ? 'contents' : 'hidden'}>
+          <OpsPanel termId={tab.id} active={tab.id === props.activeTermId} />
+        </div>
+      ))}
+    </>
+  )
+}
+
+function TerminalViews(props: { activeTermId: string | null }) {
+  const tabs = useAppStore((s) => s.tabs)
+  const [visited, setVisited] = useState<string[]>([])
+  useEffect(() => {
+    const id = props.activeTermId
+    if (!id) return
+    setVisited((ids) => (ids.includes(id) ? ids : [...ids, id]))
+  }, [props.activeTermId])
+  const visible = tabs.filter((tab) => visited.includes(tab.id) || tab.id === props.activeTermId)
+  return (
+    <>
+      {visible.map((tab) => (
+        <div key={tab.id} className={tab.id === props.activeTermId ? 'contents' : 'hidden'}>
+          <TerminalView termId={tab.id} active={tab.id === props.activeTermId} />
+        </div>
+      ))}
+    </>
   )
 }

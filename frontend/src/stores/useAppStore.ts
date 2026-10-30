@@ -80,8 +80,8 @@ interface AppState {
   editorTabs: EditorTab[]
   /** 正在看的文件。null 表示回到这台机器的终端。 */
   activeEditorKey: string | null
-  /** 运维面板开在哪个终端标签上。null 表示都关着。 */
-  opsPanelTermId: string | null
+  /** 已打开运维面板的终端标签，互不影响。 */
+  opsPanelTermIds: string[]
 
   /** 会话编辑弹窗。host 表示在这台机器下再加一条连接 */
   editing:
@@ -192,7 +192,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   rightPanelOpen: false,
-  opsPanelTermId: null,
+  opsPanelTermIds: [],
   hostsOpen: false,
   rightPanelPane: 'files',
   search: '',
@@ -463,8 +463,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return false
     })
     const activeEditorKey = editorTabs.some((t) => t.key === get().activeEditorKey) ? get().activeEditorKey : null
-    const opsPanelTermId = get().opsPanelTermId === tabId ? null : get().opsPanelTermId
-    set({ tabs, activeTabId, termState, editorTabs, activeEditorKey, opsPanelTermId })
+    const opsPanelTermIds = get().opsPanelTermIds.filter((id) => id !== tabId)
+    set({ tabs, activeTabId, termState, editorTabs, activeEditorKey, opsPanelTermIds })
     // 先断主进程连接，再销毁 xterm 实例
     window.api.term.close(tabId)
     terminalPool.dispose(tabId)
@@ -514,12 +514,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen, editing: null }),
 
   // 文件盖在最上层：开面板时把正在看的文件退到后台（tab 不丢），不然面板出不来
-  toggleOpsPanel: (termId) =>
+  toggleOpsPanel: (termId) => {
+    const open = get().opsPanelTermIds
     set(
-      get().opsPanelTermId === termId
-        ? { opsPanelTermId: null }
-        : { opsPanelTermId: termId, activeEditorKey: null }
-    ),
+      open.includes(termId)
+        ? { opsPanelTermIds: open.filter((id) => id !== termId) }
+        : { opsPanelTermIds: [...open, termId], activeEditorKey: null }
+    )
+  },
 
   toggleHostsOpen: () =>
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),

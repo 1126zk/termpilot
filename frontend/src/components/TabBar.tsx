@@ -81,7 +81,7 @@ function WindowControls(props: { terminalActive: boolean }) {
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
   const tabs = useAppStore((s) => s.tabs)
   const activeTabId = useAppStore((s) => s.activeTabId)
-  const opsPanelTermId = useAppStore((s) => s.opsPanelTermId)
+  const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
   const toggleOpsPanel = useAppStore((s) => s.toggleOpsPanel)
 
   useEffect(() => {
@@ -92,7 +92,7 @@ function WindowControls(props: { terminalActive: boolean }) {
   // 运维面板只给 Linux 服务器的 SSH 连接，本地终端和探测不出系统的都没有
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const opsOk = props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
-  const opsOpen = !!activeTab && opsPanelTermId === activeTab.id
+  const opsOpen = !!activeTab && opsPanelTermIds.includes(activeTab.id)
 
   return (
     <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>

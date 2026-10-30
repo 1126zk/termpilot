@@ -14,11 +14,8 @@ import { cn } from '@/lib/utils'
 import { DROP_TARGET_STYLE } from '../fileDrop'
 import { insertPaths, TREE_PATH_MIME } from '../terminal/dropPath'
 
-/**
- * 终端视图：只负责提供挂载容器，xterm 实例由 TerminalPool 持有。
- * 切换标签时组件卸载/重挂载，但终端本体只是 re-parent，缓冲不丢。
- */
-export function TerminalView(props: { termId: string }) {
+/** 终端视图只提供挂载容器；标签切换时组件保活，xterm 不重挂、缓冲不丢。 */
+export function TerminalView(props: { termId: string; active: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const setNotice = useAppStore((s) => s.setNotice)
   const [selection, setSelection] = useState<{ text: string; startLine: number; endLine: number } | null>(null)
@@ -45,6 +42,16 @@ export function TerminalView(props: { termId: string }) {
       terminalPool.detach(props.termId)
     }
   }, [props.termId])
+
+  useEffect(() => {
+    const el = ref.current
+    if (!props.active || !el) return
+    const frame = requestAnimationFrame(() => {
+      terminalPool.attach(props.termId, el)
+      terminalPool.focus(props.termId)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [props.active, props.termId])
 
   const copy = async () => {
     const text = selection?.text

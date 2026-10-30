@@ -18,6 +18,7 @@ import {
 import { TerminalView } from './TerminalView'
 import { MANUAL_CATEGORIES, type ManualCategory } from './manualData'
 import { useAppStore } from '../stores/useAppStore'
+import { dockerInstallKey, useInstallStore, webInstallKey } from '../stores/useInstallStore'
 
 /** 字节 → GiB/MiB 简短文本 */
 function formatBytes(n: number): string {
@@ -44,10 +45,9 @@ function formatUptime(sec: number): string {
 }
 
 /** 运维面板：在共享 SSH 连接上轮询采集，只支持 Linux。 */
-export function OpsPanel() {
+export function OpsPanel(props: { termId: string; active: boolean }) {
   const tabs = useAppStore((s) => s.tabs)
-  const activeTabId = useAppStore((s) => s.activeTabId)
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeTab = tabs.find((t) => t.id === props.termId)
   const sessionId = activeTab?.sessionId ?? null
 
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
@@ -69,7 +69,7 @@ export function OpsPanel() {
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
   const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual'>('proc')
   // 面板和脚本页都操作当前标签的主终端，开关面板不新建 Shell
-  const panelTermId = activeTabId ?? ''
+  const panelTermId = props.termId
 
   const killProc = (pid: number) => {
     if (confirmKill !== pid) {
@@ -102,7 +102,7 @@ export function OpsPanel() {
   }
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId || !props.active) return
     let stopped = false
     const collect = async () => {
       if (inFlight.current) return
@@ -125,11 +125,11 @@ export function OpsPanel() {
       stopped = true
       window.clearInterval(timer)
     }
-  }, [sessionId])
+  }, [sessionId, props.active])
 
   useEffect(() => {
-    if (sessionId) loadServerInfo(sessionId)
-  }, [sessionId, loadServerInfo])
+    if (sessionId && props.active) loadServerInfo(sessionId)
+  }, [sessionId, props.active, loadServerInfo])
 
   if (!sessionId) {
     return <div className="flex min-h-0 flex-1" />
@@ -267,9 +267,9 @@ export function OpsPanel() {
             />
           </div>
         ) : opsTab === 'docker' ? (
-          <DockerSection sessionId={sessionId} />
+          <DockerSection sessionId={sessionId} active={props.active} />
         ) : opsTab === 'web' ? (
-          <WebSection sessionId={sessionId} />
+          <WebSection sessionId={sessionId} active={props.active} />
         ) : opsTab === 'script' ? (
           <ScriptSection sessionId={sessionId} panelTermId={panelTermId} />
         ) : (
@@ -281,9 +281,9 @@ export function OpsPanel() {
         className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
         onPointerDown={startDrag}
       />
-      {/* 右侧命令区：复用当前标签的主终端，开关面板只重新挂载，保留 Shell 和滚动缓冲 */}
+      {/* 右侧命令区：复用当前标签的主终端，可见视图接管同一个 xterm，Shell 和滚动缓冲不丢 */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <TerminalView termId={panelTermId} />
+        <TerminalView termId={panelTermId} active={props.active} />
       </div>
     </div>
   )
@@ -444,7 +444,7 @@ function loadDockerMirrors(): DockerMirror[] {
 /** 可点击的文件路径：点击切到现成的远程编辑器打开（可编辑、固定 tab），和文件面板同一通道。 */
 function PathLink(props: { sessionId: string; path: string; className?: string }) {
   const openRemoteEditor = useAppStore((s) => s.openRemoteEditor)
-  const termId = useAppStore((s) => s.opsPanelTermId)
+  const termId = useAppStore((s) => s.activeTabId)
   return (
     <button
       type="button"
@@ -463,15 +463,15 @@ function PathLink(props: { sessionId: string; path: string; className?: string }
 
 /** 没装 Docker 的空态 + 一键安装。源列表可编辑（删/加/恢复默认），存面板本地，所有服务器共用。 */
 function DockerInstallSection(props: { sessionId: string }) {
-  const [installing, setInstalling] = useState(false)
-  const [log, setLog] = useState<string[]>([])
+  const task = useInstallStore((s) => s.tasks[dockerInstallKey(props.sessionId)])
+  const startDocker = useInstallStore((s) => s.startDocker)
+  const installing = task?.status === 'running'
+  const log = task?.log ?? []
   const logRef = useRef<HTMLDivElement>(null)
   const [mirrors, setMirrors] = useState<DockerMirror[]>(loadDockerMirrors)
   const [newName, setNewName] = useState('')
   const [newUrl, setNewUrl] = useState('')
   const setNotice = useAppStore((s) => s.setNotice)
-  const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
-  const loadWebInfo = useAppStore((s) => s.loadWebInfo)
 
   // 拖拽闭包要拿最新顺序（move 事件闭包里的 state 是拖拽开始时的旧快照），镜像一份到 ref
   const mirrorsRef = useRef(mirrors)
@@ -578,28 +578,7 @@ function DockerInstallSection(props: { sessionId: string }) {
       }
     })
   }
-  const install = () => {
-    setInstalling(true)
-    setLog([])
-    setNotice('正在安装 Docker（按源顺序尝试），装系统包要等一会…', true)
-    void window.api.sessions
-      .dockerInstall(props.sessionId, mirrors.map((m) => m.url))
-      .then(() => {
-        setNotice('Docker 安装完成')
-        loadDockerInfo(props.sessionId, true)
-        loadWebInfo(props.sessionId, true)
-      })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
-      .finally(() => setInstalling(false))
-  }
-
-  // 安装过程的逐行输出：安装期间订阅，退订随安装结束；最多留 200 行，自动滚到底
-  useEffect(() => {
-    if (!installing) return
-    return window.api.sessions.onDockerInstallProgress(props.sessionId, (line) =>
-      setLog((cur) => [...cur.slice(-199), line])
-    )
-  }, [installing, props.sessionId])
+  const install = () => startDocker(props.sessionId, mirrors.map((m) => m.url))
   useEffect(() => {
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
@@ -672,7 +651,7 @@ function DockerInstallSection(props: { sessionId: string }) {
 
 /** Docker 页：一个大卡片，容器、镜像、卷、网络、daemon.json 五节，中间分隔线。结果走 store 缓存，
     切进来先显示缓存；页面开着每 15 秒后台更新，右上角图标手动刷新。 */
-function DockerSection(props: { sessionId: string }) {
+function DockerSection(props: { sessionId: string; active: boolean }) {
   const cached = useAppStore((s) => s.dockerBySession[props.sessionId])
   const loadDockerInfo = useAppStore((s) => s.loadDockerInfo)
   const loadWebInfo = useAppStore((s) => s.loadWebInfo)
@@ -690,10 +669,11 @@ function DockerSection(props: { sessionId: string }) {
   const [mirrorBusy, setMirrorBusy] = useState(false)
 
   useEffect(() => {
+    if (!props.active) return
     loadDockerInfo(props.sessionId)
     const timer = window.setInterval(() => loadDockerInfo(props.sessionId), 15000)
     return () => window.clearInterval(timer)
-  }, [props.sessionId, loadDockerInfo])
+  }, [props.sessionId, props.active, loadDockerInfo])
 
   const act = (action: string, target: string, name = '') => {
     const destructive = ['rm', 'rmi', 'volume-rm', 'network-rm'].includes(action)
@@ -1183,7 +1163,7 @@ function loadWebTabOrder(sessionId: string): WebTabKey[] {
   return ['nginx', 'caddy']
 }
 
-function WebSection(props: { sessionId: string }) {
+function WebSection(props: { sessionId: string; active: boolean }) {
   const [webTabs, setWebTabs] = useState<WebTabKey[]>(() => loadWebTabOrder(props.sessionId))
   // 拖动中判定要用最新顺序（闭包里的 state 是按下时的快照），同 TabBar 的 menuOrderRef
   const webTabsRef = useRef(webTabs)
@@ -1274,9 +1254,13 @@ function WebSection(props: { sessionId: string }) {
       }
     })
   }
-  // 正在安装的服务名（同一时间只跑一个）；按钮和日志只在对应子页显示，切页不串
-  const [installing, setInstalling] = useState<string | null>(null)
-  const [installLog, setInstallLog] = useState<string[]>([])
+  const installTask = useInstallStore((s) => s.tasks[webInstallKey(props.sessionId, webTab)])
+  const webInstalling = useInstallStore((s) =>
+    Object.values(s.tasks).some((task) => task.sessionId === props.sessionId && task.kind !== 'docker' && task.status === 'running')
+  )
+  const startWeb = useInstallStore((s) => s.startWeb)
+  const installing = installTask?.status === 'running' ? webTab : null
+  const installLog = installTask?.log ?? []
   const installLogRef = useRef<HTMLDivElement>(null)
   const cached = useAppStore((s) => s.webBySession[props.sessionId])
   const loadWebInfo = useAppStore((s) => s.loadWebInfo)
@@ -1293,10 +1277,11 @@ function WebSection(props: { sessionId: string }) {
   const [sslBusy, setSslBusy] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!props.active) return
     loadWebInfo(props.sessionId)
     const timer = window.setInterval(() => loadWebInfo(props.sessionId), 15000)
     return () => window.clearInterval(timer)
-  }, [props.sessionId, loadWebInfo])
+  }, [props.sessionId, props.active, loadWebInfo])
 
   const info = cached?.info ?? null
   const svc = info?.[webTab]
@@ -1329,28 +1314,7 @@ function WebSection(props: { sessionId: string }) {
     if (!containers) loadDockerInfo(props.sessionId)
   }
 
-  const install = () => {
-    const name = webTab
-    setInstalling(name)
-    setInstallLog([])
-    setNotice(`正在拉取 ${name}:alpine 并启动容器，镜像要下载一会…`, true)
-    void window.api.sessions
-      .webInstall(props.sessionId, name)
-      .then(() => {
-        setNotice(`${name} 容器已启动，配置在 ~/.termpilot/${name}/ 下`)
-        loadWebInfo(props.sessionId, true)
-      })
-      .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
-      .finally(() => setInstalling(null))
-  }
-
-  // 安装过程的逐行输出：安装期间订阅，退订随安装结束；最多留 200 行，自动滚到底
-  useEffect(() => {
-    if (installing === null) return
-    return window.api.sessions.onWebInstallProgress(props.sessionId, (line) =>
-      setInstallLog((cur) => [...cur.slice(-199), line])
-    )
-  }, [installing, props.sessionId])
+  const install = () => startWeb(props.sessionId, webTab)
   useEffect(() => {
     const el = installLogRef.current
     if (el) el.scrollTop = el.scrollHeight
@@ -1483,7 +1447,7 @@ function WebSection(props: { sessionId: string }) {
         ) : info && svc && !svc.state ? (
           <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
             <p>还没有安装 {webTab}</p>
-            <Button size="sm" disabled={installing !== null} onClick={install}>
+            <Button size="sm" disabled={webInstalling} onClick={install}>
               {installing === webTab ? '安装中…' : `一键安装 ${webTab}:alpine`}
             </Button>
             {installing === webTab && installLog.length > 0 && (
