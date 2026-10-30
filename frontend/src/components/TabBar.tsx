@@ -504,6 +504,9 @@ export function TabBar() {
                       <X strokeWidth={2} />
                     </span>
                   </span>
+                  {(termState[t.id]?.status === 'disconnected' || termState[t.id]?.status === 'error') && (
+                    <span className="size-1.5 shrink-0 rounded-full bg-destructive" title="连接已断开" />
+                  )}
                   {renamingId === t.id ? (
                     <InlineRename
                       tabId={t.id}

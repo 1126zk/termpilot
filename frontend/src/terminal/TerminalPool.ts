@@ -322,6 +322,13 @@ class TerminalPool {
     this.entries.get(termId)?.term.focus()
   }
 
+  clear(termId: string): void {
+    const term = this.entries.get(termId)?.term
+    if (!term) return
+    term.clear()
+    term.scrollToTop()
+  }
+
   /** 读出缓冲里的行。start 含、end 不含。没传范围时返回当前画面。 */
   bufferLines(
     termId: string,

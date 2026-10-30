@@ -448,11 +448,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeTabId: tabId,
       activeEditorKey: null
     })
+    if (tab.kind === 'local') {
+      terminalPool.clear(tab.id)
+      window.api.term.bindView(tab.id)
+    }
     window.api.term.create({
       termId: tab.id,
       kind: tab.kind,
       sessionId: tab.sessionId ?? undefined,
       title: tab.title,
+      shell: tab.kind === 'local' ? tab.shell : undefined,
       ...(terminalPool.size(tab.id) ?? { cols: 80, rows: 24 })
     })
   },
@@ -496,6 +501,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   onTermStatus: (e) => {
+    const previous = get().termState[e.termId]
     const termState = { ...get().termState, [e.termId]: { status: e.status, error: e.error } }
     const patch: Partial<AppState> = { termState }
     // 终端状态点亮所属会话
@@ -504,9 +510,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       patch.sessionStatus = { ...get().sessionStatus, [e.sessionId]: st }
     }
     set(patch)
-    // 连接失败时把错误写进终端，用户能直接看到（翻译成中文）
-    if (e.status === 'error' && e.error) {
-      terminalPool.write(e.termId, `\r\n\x1b[1;31m✗ ${connErrorText(e.error)}\x1b[0m\r\n`)
+    if (e.status === 'connected') {
+      requestAnimationFrame(() => terminalPool.focus(e.termId))
+    }
+    const down = e.status === 'error' || e.status === 'disconnected'
+    const changed = previous?.status !== e.status || (e.error && e.error !== previous?.error)
+    if (down && changed) {
+      const message = e.error || '连接已断开，请重新连接'
+      terminalPool.write(e.termId, `\r\n\x1b[1;31m✗ ${connErrorText(message)}\x1b[0m\r\n`)
     }
   },
 

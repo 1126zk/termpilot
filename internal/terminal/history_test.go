@@ -110,3 +110,24 @@ func TestCaptureInputHistoryRejectedNoEvent(t *testing.T) {
 		t.Fatalf("没落库不该发 HistoryChanged: %v", em.history)
 	}
 }
+
+func TestInputDisconnectedSkipsHistoryAndNotifiesOnce(t *testing.T) {
+	svc, hist, em := newTestService()
+	addFakeTerm(svc, "term-1", KindSSH, nil)
+	svc.BindView("term-1")
+	svc.sendStatus("term-1", "conn-1", StatusDisconnected, "")
+	svc.Input("term-1", "ls\r")
+	svc.Input("term-1", "pwd\r")
+	if len(hist.commands) != 0 {
+		t.Fatalf("断开输入不应进历史: %v", hist.commands)
+	}
+	if len(em.data) != 1 {
+		t.Fatalf("重复输入只提示一次，data events = %d", len(em.data))
+	}
+	svc.sendStatus("term-1", "conn-1", StatusConnected, "")
+	svc.sendStatus("term-1", "conn-1", StatusDisconnected, "")
+	svc.Input("term-1", "pwd\r")
+	if len(em.data) != 2 {
+		t.Fatalf("重连后再次断开应重新提示，data events = %d", len(em.data))
+	}
+}

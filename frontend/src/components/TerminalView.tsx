@@ -6,6 +6,7 @@ import {
   ContextMenuShortcut,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
+import { Button } from '@/components/ui/button'
 import { useAppStore } from '../stores/useAppStore'
 import { captureTerminalView, type CaptureDone } from '../terminal/captureView'
 import { normalizeTerminalCopy, terminalPool } from '../terminal/TerminalPool'
@@ -18,6 +19,9 @@ import { insertPaths, TREE_PATH_MIME } from '../terminal/dropPath'
 export function TerminalView(props: { termId: string; active: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const setNotice = useAppStore((s) => s.setNotice)
+  const reconnectTab = useAppStore((s) => s.reconnectTab)
+  const status = useAppStore((s) => s.termState[props.termId]?.status)
+  const disconnected = status === 'disconnected' || status === 'error'
   const [selection, setSelection] = useState<{ text: string; startLine: number; endLine: number } | null>(null)
   const [shot, setShot] = useState<CaptureDone | null>(null)
   const [shotError, setShotError] = useState<string | null>(null)
@@ -121,7 +125,7 @@ export function TerminalView(props: { termId: string; active: boolean }) {
         <ContextMenuTrigger asChild>
           <div
             ref={ref}
-            className={cn('min-h-0 flex-1 px-3 py-1', dragging && 'ring-2 ring-primary/60 ring-inset')}
+            className={cn('relative min-h-0 flex-1 px-3 py-1', dragging && 'ring-2 ring-primary/60 ring-inset')}
             style={{ ...DROP_TARGET_STYLE, background: 'var(--terminal-background)' }}
             data-drop-term={props.termId}
             onContextMenu={() => setSelection(terminalPool.selectionRange(props.termId))}
@@ -147,7 +151,13 @@ export function TerminalView(props: { termId: string; active: boolean }) {
                 /* 不是文件树拖出来的 */
               }
             }}
-          />
+          >
+            {disconnected && (
+              <Button className="absolute top-3 right-3 z-10" size="sm" onClick={() => reconnectTab(props.termId)}>
+                重新连接
+              </Button>
+            )}
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem disabled={!selection?.text} onClick={() => void copy()}>

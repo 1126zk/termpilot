@@ -61,11 +61,12 @@ type Service struct {
 	emitter  Emitter
 	pool     *sshx.Pool
 
-	mu         sync.Mutex
-	terms      map[string]*Entry
-	output     map[string]*ringBuffer
-	lastStatus map[string]StatusEvent
-	watchers   map[*statusWatcher]struct{}
+	mu           sync.Mutex
+	terms        map[string]*Entry
+	output       map[string]*ringBuffer
+	lastStatus   map[string]StatusEvent
+	inputNoticed map[string]bool
+	watchers     map[*statusWatcher]struct{}
 	// 界面已经订上输出。之前的内容先补一次，避免重启后的记录被新输出盖掉。
 	viewReady   map[string]bool
 	bindWaiters map[string]chan struct{}
@@ -82,18 +83,19 @@ type Service struct {
 // emitter 可以为 nil（事件丢弃），sessions 为 nil 时 SSH 终端不可用（本地终端不受影响）。
 func NewService(sessions SessionStore, history HistoryStore, emitter Emitter, pool *sshx.Pool) *Service {
 	return &Service{
-		sessions:    sessions,
-		history:     history,
-		emitter:     emitter,
-		pool:        pool,
-		terms:       map[string]*Entry{},
-		output:      map[string]*ringBuffer{},
-		lastStatus:  map[string]StatusEvent{},
-		watchers:    map[*statusWatcher]struct{}{},
-		viewReady:   map[string]bool{},
-		bindWaiters: map[string]chan struct{}{},
-		lines:       map[string]*lineState{},
-		sizes:       map[string][2]int{},
+		sessions:     sessions,
+		history:      history,
+		emitter:      emitter,
+		pool:         pool,
+		terms:        map[string]*Entry{},
+		output:       map[string]*ringBuffer{},
+		lastStatus:   map[string]StatusEvent{},
+		inputNoticed: map[string]bool{},
+		watchers:     map[*statusWatcher]struct{}{},
+		viewReady:    map[string]bool{},
+		bindWaiters:  map[string]chan struct{}{},
+		lines:        map[string]*lineState{},
+		sizes:        map[string][2]int{},
 	}
 }
 
@@ -115,11 +117,25 @@ func (s *Service) Create(opts CreateOptions) {
 	s.createSSH(opts, false)
 }
 
-// Input 对应 TS input：先结算按键流进历史，再写进通道。
+// Input 对应 TS input：先结算按键流进历史，再写进通道。断开后不记历史，只提示一次输入未发送。
 func (s *Service) Input(termID, data string) {
-	s.captureInput(termID, data)
 	if ch := s.channelOf(termID); ch != nil {
+		s.captureInput(termID, data)
 		_ = ch.Write([]byte(data))
+		return
+	}
+	s.mu.Lock()
+	status := s.lastStatus[termID]
+	notify := (status.Status == StatusDisconnected || status.Status == StatusError) && !s.inputNoticed[termID]
+	if notify {
+		s.inputNoticed[termID] = true
+	}
+	s.mu.Unlock()
+	if status.Status != StatusDisconnected && status.Status != StatusError {
+		s.captureInput(termID, data)
+	}
+	if notify {
+		s.sendData(termID, []byte("\r\n\x1b[1;31m✗ 连接已断开，输入未发送\x1b[0m\r\n"))
 	}
 }
 
@@ -206,6 +222,7 @@ func (s *Service) Close(termID string) {
 	delete(s.output, termID)
 	delete(s.lines, termID)
 	delete(s.lastStatus, termID)
+	delete(s.inputNoticed, termID)
 	delete(s.viewReady, termID)
 	delete(s.sizes, termID)
 	s.mu.Unlock()
@@ -532,6 +549,9 @@ func (s *Service) sendStatus(termID, sessionID string, status Status, errText st
 	}
 	s.mu.Lock()
 	s.lastStatus[termID] = payload
+	if status == StatusConnected || status == StatusConnecting {
+		delete(s.inputNoticed, termID)
+	}
 	watchers := make([]*statusWatcher, 0, len(s.watchers))
 	for w := range s.watchers {
 		watchers = append(watchers, w)
