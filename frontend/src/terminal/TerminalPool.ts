@@ -58,15 +58,11 @@ class TerminalPool {
   /** 换终端字体/字号。已经打开的终端一起改并重排，后面新建的也用这一套。 */
   setFont(family: string, size: number): void {
     this.font = { family, size }
-    for (const entry of this.entries.values()) {
+    for (const [termId, entry] of this.entries) {
       entry.term.options.fontFamily = family
       entry.term.options.fontSize = size
       entry.term.refresh(0, Math.max(0, entry.term.rows - 1))
-      try {
-        entry.fit.fit()
-      } catch {
-        /* 容器不可见时 fit 会抛错，忽略 */
-      }
+      this.fit(termId)
     }
     // @font-face 用到才下载。上面量格子、画字形时内嵌字体多半还没到，
     // 用的是后备字体，xterm 之后也不会自己重量，所以等字体到了再按新字体重排一遍。
@@ -209,6 +205,9 @@ class TerminalPool {
   fit(termId: string): void {
     const e = this.entries.get(termId)
     if (!e || !e.host.parentElement) return
+    // 标签切走后外层是 display:none，FitAddon 读到的计算宽高是 "100%"，按 100px 算出十来列，
+    // 远端 PTY 跟着缩窄重排，切回来就先看到窄成一列的画面。没布局时不量。
+    if (!e.host.offsetWidth || !e.host.offsetHeight) return
     try {
       e.fit.fit()
     } catch {
