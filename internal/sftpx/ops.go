@@ -241,7 +241,7 @@ func readAll(client *sftp.Client, path string) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
-// writeAll 对应 TS writeAll：32KB 分块写；写失败时关句柄后抛，关失败也算失败。
+// writeAll 对应 TS writeAll：按 chunkSize 分块写；写失败时关句柄后抛，关失败也算失败。
 func writeAll(client *sftp.Client, path string, data []byte) error {
 	file, err := client.Create(path)
 	if err != nil {

@@ -21,8 +21,9 @@ var ErrCancelled = errors.New("已取消")
 // errInterrupted 对应 TS 的「传输中断」：流提前结束，字节数不够。
 var errInterrupted = errors.New("传输中断")
 
-// chunkSize 对应 TS CHUNK。
-const chunkSize = 32 * 1024
+// chunkSize 每次读写的块大小。pkg/sftp 单个请求上限 32KB，块比它大时会拆成多个请求同时发，
+// 不再是传一块等一个往返，远的服务器也能跑满带宽。256KB 时取消最多多等一块，进度也不至于跳得太粗。
+const chunkSize = 256 * 1024
 
 // transferGroup 文件夹传输的聚合进度：整棵树共用一条事件，Transferred 跨文件累计。
 type transferGroup struct {

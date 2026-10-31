@@ -277,7 +277,9 @@ func (s *Service) armSftp(sessionID string, isolated bool) (*liveConn, error) {
 		return nil, errors.New("只能浏览正向 SSH 的文件")
 	}
 	client, err := withTimeout(func() (*sftp.Client, error) {
-		return sftp.NewClient(hold.Conn.Client)
+		// 并发写：上传时一块拆成的多个请求同时发。中途失败可能留下空洞，
+		// 但传输按字节数核对，不够就报中断，不会当成成功。
+		return sftp.NewClient(hold.Conn.Client, sftp.UseConcurrentWrites(true))
 	}, 12*time.Second, "SFTP 子系统没有响应")
 	if err != nil {
 		hold.Release()
