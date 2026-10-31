@@ -936,6 +936,18 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                     style={{ width: `${percent}%` }}
                   />
                 </div>
+                {!t.error && t.total > 0 && (
+                  <div className="flex gap-2 pl-[18px] tabular-nums">
+                    <span className="min-w-0 flex-1">
+                      {t.done ? formatSize(t.total) : `${formatSize(t.transferred)} / ${formatSize(t.total)}`}
+                    </span>
+                    {!t.done && t.speed > 0 && (
+                      <span className="shrink-0">
+                        {formatSize(Math.round(t.speed))}/s · 剩余 {formatEta((t.total - t.transferred) / t.speed)}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
@@ -1148,4 +1160,13 @@ function formatSize(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+/** 剩余秒数 → 1:05 / 1:02:30 */
+function formatEta(seconds: number): string {
+  const s = Math.max(0, Math.ceil(seconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`
 }

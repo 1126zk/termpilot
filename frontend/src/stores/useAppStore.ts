@@ -60,8 +60,8 @@ interface AppState {
   dockerBySession: Record<string, { info: DockerInfo | null; at: number }>
   /** 网站服务（nginx/caddy）配置采集缓存，按会话存，at 用法同 dockerBySession */
   webBySession: Record<string, { info: WebInfo | null; at: number }>
-  /** SFTP 传输记录按服务器会话归属，同一服务器的多个终端标签共用 */
-  transfersBySession: Record<string, SftpTransferEvent[]>
+  /** SFTP 传输记录按服务器会话归属，同一服务器的多个终端标签共用。speed 为字节/秒 */
+  transfersBySession: Record<string, (SftpTransferEvent & { speed: number })[]>
   /** 主机地址归一化后的备注，同一台机器上的连接共用 */
   hostNotes: Record<string, string>
   sessionStatus: Record<string, SessionStatus>
@@ -183,6 +183,30 @@ function closeOverlaysPatch(get: () => AppState): Partial<AppState> {
 /** 标签/备注文本清洗：压缩空白、去头尾、截断。 */
 function cleanLabel(text: string, max: number): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+/**
+ * 传输速度（字节/秒）。后端每写一块就推一次进度，太密，直接相邻两次相除会乱跳。
+ * 攒够 500ms 才算一次，再和上一次的速度做平滑。传完就丢掉采样。
+ */
+const transferSamples = new Map<string, { at: number; bytes: number; speed: number }>()
+function transferSpeed(event: SftpTransferEvent): number {
+  if (event.done) {
+    transferSamples.delete(event.id)
+    return 0
+  }
+  const now = performance.now()
+  const last = transferSamples.get(event.id)
+  if (!last) {
+    transferSamples.set(event.id, { at: now, bytes: event.transferred, speed: 0 })
+    return 0
+  }
+  const elapsed = (now - last.at) / 1000
+  if (elapsed < 0.5) return last.speed
+  const current = Math.max(0, event.transferred - last.bytes) / elapsed
+  const speed = last.speed ? last.speed * 0.6 + current * 0.4 : current
+  transferSamples.set(event.id, { at: now, bytes: event.transferred, speed })
+  return speed
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -527,7 +551,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
-  onSftpTransfer: (event) => {
+  onSftpTransfer: (raw) => {
+    const event = { ...raw, speed: transferSpeed(raw) }
     const list = get().transfersBySession[event.sessionId] ?? []
     const index = list.findIndex((item) => item.id === event.id)
     const transfers = index < 0 ? [...list, event] : list.map((item, i) => (i === index ? event : item))
