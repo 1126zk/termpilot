@@ -64,7 +64,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   // 两个榜各先显示 5 个，可展开到 10 个
   const [cpuShown, setCpuShown] = useState(5)
   const [memShown, setMemShown] = useState(5)
-  // 杀进程两步确认：第一次点进入确认态，3 秒不点第二次就恢复
+  // 杀进程两步确认：第一次点进入确认态，移出列表或再次点击才退出
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
   const [killing, setKilling] = useState<Set<number>>(new Set())
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
@@ -75,7 +75,6 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   const killProc = (pid: number) => {
     if (confirmKill !== pid) {
       setConfirmKill(pid)
-      window.setTimeout(() => setConfirmKill((cur) => (cur === pid ? null : cur)), 3000)
       return
     }
     setConfirmKill(null)
@@ -123,11 +122,11 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
     if (!sessionId || !props.active) return
     let stopped = false
     const collect = async () => {
-      if (inFlight.current) return
+      if (inFlight.current || confirmKill !== null) return
       inFlight.current = true
       try {
         const m = await window.api.sessions.metrics(sessionId)
-        if (stopped) return
+        if (stopped || confirmKill !== null) return
         setMetrics(m)
         setError('')
       } catch (e) {
@@ -143,7 +142,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
       stopped = true
       window.clearInterval(timer)
     }
-  }, [sessionId, props.active])
+  }, [sessionId, props.active, confirmKill])
 
   useEffect(() => {
     if (sessionId && props.active) loadServerInfo(sessionId)
@@ -272,6 +271,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
               confirmKill={confirmKill}
               killing={killing}
               onKill={killProc}
+              onCancelKill={() => setConfirmKill(null)}
               loaded={metrics !== null}
             />
             <ProcSection
@@ -282,6 +282,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
               confirmKill={confirmKill}
               killing={killing}
               onKill={killProc}
+              onCancelKill={() => setConfirmKill(null)}
               loaded={metrics !== null}
               divider
             />
@@ -319,13 +320,14 @@ function ProcSection(props: {
   confirmKill: number | null
   killing: Set<number>
   onKill: (pid: number) => void
+  onCancelKill: () => void
   /** 第一笔数据还没回来时是 false，空表先不显示「没有采集到」 */
   loaded: boolean
   divider?: boolean
 }) {
   const list = props.procs.slice(0, props.shown)
   return (
-    <div>
+    <div onMouseLeave={props.onCancelKill}>
       <div
         className={cn(
           'flex items-center justify-between border-b bg-accent/40 px-3 py-1.5',
@@ -368,7 +370,7 @@ function ProcSection(props: {
                 <td className="px-2 py-1.5 text-muted-foreground">
                   <ProcCommand cmd={p.cmd} />
                 </td>
-                <td className="px-1 py-1.5 text-center">
+                <td className="relative px-1 py-1.5 text-center">
                   <button
                     type="button"
                     title={
@@ -380,7 +382,7 @@ function ProcSection(props: {
                     }
                     disabled={props.killing.has(p.pid)}
                     className={cn(
-                      'inline-flex h-6 min-w-6 items-center justify-center rounded px-0.5 text-sm disabled:opacity-60',
+                      'absolute right-0 top-1/2 inline-flex h-6 min-w-9 -translate-y-1/2 items-center justify-center rounded px-1.5 text-sm whitespace-nowrap disabled:opacity-60',
                       props.confirmKill === p.pid
                         ? 'bg-destructive/15 text-destructive'
                         : 'text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive'
