@@ -312,13 +312,6 @@ func toSshSession(s *storage.SessionConfig) *sshx.SessionConfig {
 		out.Jumps = append(out.Jumps, sshx.Hop{Host: hop.Host, Port: hop.Port, Username: hop.Username})
 	}
 	out.Options = toConnectOptions(s.SshOptions)
-	for _, f := range s.Forwards {
-		out.Forwards = append(out.Forwards, sshx.ForwardRule{
-			Type:       sshx.ForwardType(f.Type),
-			ListenPort: f.ListenPort,
-			TargetPort: f.TargetPort,
-		})
-	}
 	return out
 }
 

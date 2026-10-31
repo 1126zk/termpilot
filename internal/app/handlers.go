@@ -11,6 +11,7 @@ import (
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"termpilot/internal/sftpx"
+	"termpilot/internal/sshx"
 	"termpilot/internal/storage"
 	"termpilot/internal/terminal"
 )
@@ -37,6 +38,53 @@ func (a *App) hSessionUpdate(args []interface{}) (interface{}, error) {
 		return nil, err
 	}
 	return a.store.Update(id, &patch)
+}
+
+// ------------------------------------------------------------ 端口映射
+
+func (a *App) hForwardList(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	rules := []storage.ForwardRule{}
+	for _, r := range a.pool.ActiveForwards(id) {
+		rules = append(rules, storage.ForwardRule{Type: string(r.Type), ListenPort: r.ListenPort, TargetPort: r.TargetPort})
+	}
+	return rules, nil
+}
+
+func (a *App) hForwardStart(args []interface{}) (interface{}, error) {
+	id, rule, err := forwardArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.pool.StartForward(id, rule)
+}
+
+func (a *App) hForwardStop(args []interface{}) (interface{}, error) {
+	id, rule, err := forwardArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	a.pool.StopForward(id, rule)
+	return nil, nil
+}
+
+func forwardArgs(args []interface{}) (string, sshx.ForwardRule, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return "", sshx.ForwardRule{}, err
+	}
+	raw, err := arg[storage.ForwardRule](args, 1)
+	if err != nil {
+		return "", sshx.ForwardRule{}, err
+	}
+	valid := func(p int) bool { return p >= 1 && p <= 65535 }
+	if (raw.Type != "local" && raw.Type != "remote") || !valid(raw.ListenPort) || !valid(raw.TargetPort) {
+		return "", sshx.ForwardRule{}, errors.New("端口映射规则不合法")
+	}
+	return id, sshx.ForwardRule{Type: sshx.ForwardType(raw.Type), ListenPort: raw.ListenPort, TargetPort: raw.TargetPort}, nil
 }
 
 func (a *App) hSessionDelete(args []interface{}) (interface{}, error) {

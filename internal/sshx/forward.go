@@ -3,57 +3,48 @@ package sshx
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
 
-// Logf 转发失败的日志出口，默认打到标准日志；上层可替换。
-var Logf = log.Printf
-
 const loopback = "127.0.0.1"
 
-// AttachForwards 把会话的端口映射挂到已经连好的共享 SSH 连接上，每条连接只挂一次。
+// key 一条映射的身份。同一方向同一个监听端口只能有一条。
+func (r ForwardRule) key() string {
+	return fmt.Sprintf("%s:%d", r.Type, r.ListenPort)
+}
+
+// activeForward 一条正在监听的映射。
+type activeForward struct {
+	rule   ForwardRule
+	closer io.Closer
+}
+
+// openForward 在已经连好的 SSH 连接上开一条端口映射，连接期间随时可以调用。
 // local 对应 ssh -L（本机 127.0.0.1 监听 → SSH 通道到远端 127.0.0.1:targetPort），
 // remote 对应 ssh -R（远端 127.0.0.1 监听 → 回本机 127.0.0.1:targetPort）。
-// 单条规则失败（端口被占等）只记日志，不影响其他规则和连接本身；
-// 连接关闭时统一回收监听。
-func AttachForwards(client *ssh.Client, rules []ForwardRule) {
-	if len(rules) == 0 {
-		return
-	}
-	var closers []io.Closer
-	for _, rule := range rules {
-		switch rule.Type {
-		case ForwardLocal:
-			listener, err := net.Listen("tcp", net.JoinHostPort(loopback, fmt.Sprintf("%d", rule.ListenPort)))
-			if err != nil {
-				Logf("[TermPilot] 端口映射监听失败 127.0.0.1:%d: %v", rule.ListenPort, err)
-				continue
-			}
-			closers = append(closers, listener)
-			go serveLocal(client, listener, rule)
-		case ForwardRemote:
-			listener, err := client.Listen("tcp", net.JoinHostPort(loopback, fmt.Sprintf("%d", rule.ListenPort)))
-			if err != nil {
-				Logf("[TermPilot] 远程转发失败 127.0.0.1:%d: %v", rule.ListenPort, err)
-				continue
-			}
-			closers = append(closers, listener)
-			go serveRemote(listener, rule)
+// 返回的 Closer 关掉就停止监听。
+func openForward(client *ssh.Client, rule ForwardRule) (io.Closer, error) {
+	addr := net.JoinHostPort(loopback, fmt.Sprintf("%d", rule.ListenPort))
+	switch rule.Type {
+	case ForwardLocal:
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("本机端口 %d 监听失败: %w", rule.ListenPort, err)
 		}
-	}
-	if len(closers) == 0 {
-		return
-	}
-	go func() {
-		_ = client.Conn.Wait()
-		for _, closer := range closers {
-			_ = closer.Close()
+		go serveLocal(client, listener, rule)
+		return listener, nil
+	case ForwardRemote:
+		listener, err := client.Listen("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("服务器端口 %d 监听失败: %w", rule.ListenPort, err)
 		}
-	}()
+		go serveRemote(listener, rule)
+		return listener, nil
+	}
+	return nil, fmt.Errorf("未知的映射类型: %s", rule.Type)
 }
 
 // serveLocal ssh -L：本机来一条连接就用 SSH 通道打通到服务器上的目标端口，双向转发。

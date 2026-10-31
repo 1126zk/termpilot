@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Bot, ChevronLeft, ChevronRight, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { AppWindow, Bot, ChevronLeft, ChevronRight, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +24,16 @@ import { useMenuAction } from './PanelDialog'
 import { useAppStore } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import { OsIcon, osIconProps } from './OsIcon'
-import type { LocalShell } from '../../../shared/types'
+import type { ForwardRule, LocalShell } from '../../../shared/types'
+
+const forwardKey = (rule: ForwardRule) => `${rule.type}:${rule.listenPort}`
+
+/** 和主机表单一样按「本地 / 远程」说清楚哪一头在监听。 */
+function forwardLabel(rule: ForwardRule): string {
+  return rule.type === 'local'
+    ? `本地 ${rule.listenPort} → 远程 ${rule.targetPort}`
+    : `远程 ${rule.listenPort} → 本地 ${rule.targetPort}`
+}
 
 /** 本机终端三种壳的标签图标。PowerShell 用它的品牌蓝。 */
 function ShellIcon(props: { shell?: LocalShell }) {
@@ -164,6 +173,22 @@ export function TabBar() {
   const renameTab = useAppStore((s) => s.renameTab)
   const setNotice = useAppStore((s) => s.setNotice)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  // 右键菜单打开时问一次后端：每台服务器的共享连接上哪些端口映射正在监听
+  const [liveForwards, setLiveForwards] = useState<Record<string, string[]>>({})
+  const refreshForwards = async (sessionId: string) => {
+    const rules = await window.api.forwards.list(sessionId).catch(() => [] as ForwardRule[])
+    setLiveForwards((all) => ({ ...all, [sessionId]: (rules ?? []).map(forwardKey) }))
+  }
+  const toggleForward = async (sessionId: string, rule: ForwardRule, running: boolean) => {
+    try {
+      if (running) await window.api.forwards.stop(sessionId, rule)
+      else await window.api.forwards.start(sessionId, rule)
+      setNotice(`${running ? '已停止' : '已启动'}端口映射：${forwardLabel(rule)}`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    }
+    await refreshForwards(sessionId)
+  }
   // 右键选重命名后，菜单关闭时阻止 Radix 把焦点还给标签按钮，否则原地输入框会被顶得失焦
   const renameMenu = useMenuAction()
   const stripRef = useRef<HTMLDivElement>(null)
@@ -447,9 +472,14 @@ export function TabBar() {
         {tabs.map((t) => {
           const active = t.id === activeTabId && !hostsOpen && !settingsOpen
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
+          const forwardRules = termState[t.id]?.status === 'connected' ? (session?.forwards ?? []) : []
           return (
             <Fragment key={t.id}>
-            <ContextMenu>
+            <ContextMenu
+              onOpenChange={(open) => {
+                if (open && session && forwardRules.length > 0) void refreshForwards(session.id)
+              }}
+            >
               <ContextMenuTrigger asChild>
                 <button
                   type="button"
@@ -546,6 +576,23 @@ export function TabBar() {
                     <RefreshCw />
                     重新连接
                   </ContextMenuItem>
+                ) : null}
+                {session && forwardRules.length > 0 ? (
+                  <>
+                    <ContextMenuSeparator />
+                    {forwardRules.map((rule) => {
+                      const running = liveForwards[session.id]?.includes(forwardKey(rule)) ?? false
+                      return (
+                        <ContextMenuItem
+                          key={forwardKey(rule)}
+                          onClick={() => void toggleForward(session.id, rule, running)}
+                        >
+                          {running ? <Square /> : <Play />}
+                          {running ? '停止' : '启动'} {forwardLabel(rule)}
+                        </ContextMenuItem>
+                      )
+                    })}
+                  </>
                 ) : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem onClick={() => closeTab(t.id)}>

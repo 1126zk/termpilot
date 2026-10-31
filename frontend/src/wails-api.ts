@@ -5,6 +5,7 @@ import type {
   CaptureRun,
   CronEntry,
   DockerInfo,
+  ForwardRule,
   HistoryEntry,
   LocalShellInfo,
   McpAuditEntry,
@@ -110,6 +111,11 @@ const api = {
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)
+  },
+  forwards: {
+    list: (sessionId: string) => invoke<ForwardRule[]>(IPC.forwardList, [sessionId]),
+    start: (sessionId: string, rule: ForwardRule) => invoke<void>(IPC.forwardStart, [sessionId, rule]),
+    stop: (sessionId: string, rule: ForwardRule) => invoke<void>(IPC.forwardStop, [sessionId, rule])
   },
   shells: {
     list: () => invoke<LocalShellInfo[]>(IPC.shellsList, [])

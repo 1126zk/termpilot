@@ -128,6 +128,10 @@ export const IPC = {
   sessionCronDel: 'session:cron-del',
   sessionSetOs: 'session:set-os',
   sessionRevealSecret: 'session:reveal-secret',
+  /** 共享连接上正在监听的端口映射，以及单条启动 / 停止 */
+  forwardList: 'forward:list',
+  forwardStart: 'forward:start',
+  forwardStop: 'forward:stop',
   shellsList: 'shells:list',
 
   winMinimize: 'win:minimize',
