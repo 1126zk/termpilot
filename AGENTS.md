@@ -5,6 +5,17 @@
 `release.yml` 会校验 tag 和 `frontend/package.json` 的 version 一致，不一致三个平台全部直接挂。
 所以顺序永远是：先改 `frontend/package.json` 的 version 并提交（`chore: 版本 x.y.z。`），再打同号 tag 推上去。别打完 tag 才想起来改版本。
 
+## 构建应用前：必须先跑 prebuild
+
+禁止直接运行 `wails build`。正确顺序永远是：
+
+```bash
+node scripts/prebuild.mjs
+wails build
+```
+
+`prebuild.mjs` 会把 `resources/icon.png` 同步到 `build/appicon.png`，并删除旧的 `icon.ico` 强制重建。缺少这一步时，Wails 会生成默认图标，绝不能把它当成正常结果。
+
 ## 有现成的就复用，别重造
 
 动手写新东西之前，先找项目里有没有现成的：
