@@ -236,6 +236,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
               <div className="text-muted-foreground">—</div>
             )}
           </Ring>
+          <NetTile metrics={metrics} />
         </div>
 
         {/* 内容切换：进程 / Docker / 网站 / 脚本 / 手册 */}
@@ -2882,6 +2883,45 @@ function Ring(props: { label: string; percent: number; center: string; children:
       </div>
       <div className="invisible absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 rounded-lg border bg-popover px-3 py-2 text-sm whitespace-nowrap shadow-md group-hover:visible">
         {props.children}
+      </div>
+    </div>
+  )
+}
+
+/** 字节/秒 → 放得进圆环那么宽的速度文本；long 为真时给悬浮说明用的完整写法 */
+function formatRate(bps: number, long = false): string {
+  if (bps >= 1024 ** 2) return long ? `${(bps / 1024 ** 2).toFixed(2)} MB/s` : `${(bps / 1024 ** 2).toFixed(1)}M`
+  if (bps >= 1024) return long ? `${(bps / 1024).toFixed(1)} KB/s` : `${(bps / 1024).toFixed(0)}K`
+  return long ? `${Math.round(bps)} B/s` : `${Math.round(bps)}B`
+}
+
+/** 网速块：和圆环同尺寸同悬浮说明，但网速没有上限，不画百分比，直接写上下行 */
+function NetTile(props: { metrics: ServerMetrics | null }) {
+  const m = props.metrics
+  return (
+    <div className="group relative">
+      <div className="flex flex-col items-center gap-1 py-1">
+        <div className="flex size-16 flex-col items-center justify-center rounded-full border-[6px] border-accent text-xs font-semibold tabular-nums">
+          {m ? (
+            <>
+              <span>↑{formatRate(m.netTxBps)}</span>
+              <span>↓{formatRate(m.netRxBps)}</span>
+            </>
+          ) : (
+            <span className="text-sm">—</span>
+          )}
+        </div>
+        <div className="text-sm text-muted-foreground">网络</div>
+      </div>
+      <div className="invisible absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 rounded-lg border bg-popover px-3 py-2 text-sm whitespace-nowrap shadow-md group-hover:visible">
+        {m ? (
+          <>
+            <div>上行 {formatRate(m.netTxBps, true)}</div>
+            <div>下行 {formatRate(m.netRxBps, true)}</div>
+          </>
+        ) : (
+          <div className="text-muted-foreground">—</div>
+        )}
       </div>
     </div>
   )

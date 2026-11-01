@@ -12,15 +12,22 @@ import (
 // metricsScript 一条 POSIX sh 命令采完面板要的动态数据，段之间用 #TP-名字# 标记行
 // 分隔，Go 端按标记切段解析。每段命令独立加 2>/dev/null，一段失败只是那段没数据，
 // 不拖垮整体。CPU 行采两次（中间 sleep 1），用差值算使用率，比采瞬时值稳。
+// 网卡计数跟着 CPU 一起采两次，各带一行 /proc/uptime 当时间戳，按实际间隔算网速。
 // 进程用 ps aux 而不是 ps --sort，busybox 的 ps 不认 --sort。
 // 主机名/系统/内核/IP 是静态身份，不在这里，由 serverInfoScript 一次性采集。
 const metricsScript = `
 echo '#TP-CPU1#'
 grep '^cpu ' /proc/stat 2>/dev/null
 grep -c '^cpu[0-9]' /proc/stat 2>/dev/null
+echo '#TP-NET1#'
+cat /proc/uptime 2>/dev/null
+cat /proc/net/dev 2>/dev/null
 sleep 1
 echo '#TP-CPU2#'
 grep '^cpu ' /proc/stat 2>/dev/null
+echo '#TP-NET2#'
+cat /proc/uptime 2>/dev/null
+cat /proc/net/dev 2>/dev/null
 echo '#TP-MEM#'
 grep -E '^(MemTotal|MemAvailable):' /proc/meminfo 2>/dev/null
 echo '#TP-LOAD#'
@@ -99,7 +106,83 @@ func (s *ExecService) CollectMetrics(sessionID string) (*ServerMetrics, error) {
 
 	m.Disks = parseDf(sec["DF"])
 	m.Procs = parsePs(sec["PS"])
+	m.NetRxBps, m.NetTxBps = netRate(sec["NET1"], sec["NET2"])
 	return m, nil
+}
+
+// netCounters 一次网卡采样：uptime 秒数和真实网卡的收发字节合计（按网卡名存，算差值时一一对上）。
+type netCounters struct {
+	at float64
+	rx map[string]uint64
+	tx map[string]uint64
+}
+
+// virtualIfacePrefixes 不算进网速的网卡：回环和容器/虚拟机/集群网络的虚拟网卡。
+// 容器之间互相传数据也会走这些网卡，算进去网速会虚高。
+var virtualIfacePrefixes = []string{"lo", "docker", "veth", "br-", "virbr", "cni", "flannel", "cali", "vxlan", "kube"}
+
+// parseNetDev 解析一段「/proc/uptime 一行 + /proc/net/dev」。
+// net/dev 每行是「网卡名: 收字节 收包 … 发字节 …」，冒号后第 1 列是收、第 9 列是发。
+func parseNetDev(text string) *netCounters {
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return nil
+	}
+	up := strings.Fields(lines[0])
+	if len(up) == 0 {
+		return nil
+	}
+	at, err := strconv.ParseFloat(up[0], 64)
+	if err != nil {
+		return nil
+	}
+	c := &netCounters{at: at, rx: map[string]uint64{}, tx: map[string]uint64{}}
+lines:
+	for _, line := range lines[1:] {
+		name, rest, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		for _, prefix := range virtualIfacePrefixes {
+			if strings.HasPrefix(name, prefix) {
+				continue lines
+			}
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 9 {
+			continue
+		}
+		rx, err1 := strconv.ParseUint(fields[0], 10, 64)
+		tx, err2 := strconv.ParseUint(fields[8], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		c.rx[name] = rx
+		c.tx[name] = tx
+	}
+	return c
+}
+
+// netRate 两次采样之间真实网卡的收发速度（字节/秒）。计数回绕或网卡中途出现的不算。
+func netRate(before, after string) (rxBps, txBps float64) {
+	a, b := parseNetDev(before), parseNetDev(after)
+	if a == nil || b == nil || b.at <= a.at {
+		return 0, 0
+	}
+	var rx, tx uint64
+	for name, v := range b.rx {
+		if old, ok := a.rx[name]; ok && v >= old {
+			rx += v - old
+		}
+	}
+	for name, v := range b.tx {
+		if old, ok := a.tx[name]; ok && v >= old {
+			tx += v - old
+		}
+	}
+	dt := b.at - a.at
+	return float64(rx) / dt, float64(tx) / dt
 }
 
 // splitSections 按 #TP-名字# 标记行把输出切成段，标记行本身不进任何段。

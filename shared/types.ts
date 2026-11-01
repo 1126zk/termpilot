@@ -87,6 +87,9 @@ export interface ServerMetrics {
   memAvail: number
   disks: DiskUsage[]
   procs: ProcInfo[]
+  /** 真实网卡合计的收发速度，字节/秒。不含回环和容器、虚拟机的虚拟网卡 */
+  netRxBps: number
+  netTxBps: number
   /** 毫秒时间戳 */
   collectedAt: number
 }

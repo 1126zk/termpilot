@@ -86,7 +86,10 @@ type ServerMetrics struct {
 	MemAvail    uint64      `json:"memAvail"`
 	Disks       []DiskUsage `json:"disks"`
 	Procs       []ProcInfo  `json:"procs"`
-	CollectedAt int64       `json:"collectedAt"` // 毫秒时间戳
+	// 真实网卡合计的收发速度，字节/秒。不含回环和容器、虚拟机的虚拟网卡
+	NetRxBps    float64 `json:"netRxBps"`
+	NetTxBps    float64 `json:"netTxBps"`
+	CollectedAt int64   `json:"collectedAt"` // 毫秒时间戳
 }
 
 // ServerInfo 服务器的静态身份，基本不变，面板打开时采一次并缓存。
