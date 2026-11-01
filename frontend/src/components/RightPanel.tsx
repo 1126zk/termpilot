@@ -1,21 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { Braces, Folder, History, Palette } from 'lucide-react'
+import { Braces, Folder, History, Image, Palette } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore, type RightPanelPane } from '../stores/useAppStore'
 import { FileTree } from './FileTree'
 import { SnippetsPanel } from './SnippetsPanel'
 import { HistoryPanel } from './HistoryPanel'
+import { PastePanel } from './PastePanel'
 import { ThemePanel } from './ThemePanel'
 import { SessionFormPanel } from './SessionForm'
 
 const panes: { id: RightPanelPane; title: string; icon: typeof Folder }[] = [
   { id: 'files', title: '文件', icon: Folder },
+  { id: 'images', title: '剪贴板图片', icon: Image },
   { id: 'snippets', title: '指令片段', icon: Braces },
   { id: 'history', title: '历史指令', icon: History },
   { id: 'theme', title: '主题', icon: Palette }
 ]
 
-/** 右侧面板：顶部图标行切换四个板块，风格和顶栏按钮一致。新建/编辑主机时整块换成表单。 */
+/** 右侧面板：顶部图标行切换各板块，风格和顶栏按钮一致。新建/编辑主机时整块换成表单。 */
 export function RightPanel(props: { open: boolean }) {
   const pane = useAppStore((s) => s.rightPanelPane)
   const setPane = useAppStore((s) => s.setRightPanelPane)
@@ -63,6 +65,7 @@ export function RightPanel(props: { open: boolean }) {
       {pane === 'files' && <FileTrees watching={props.open} />}
       {pane === 'snippets' && <SnippetsPanel />}
       {pane === 'history' && <HistoryPanel />}
+      {pane === 'images' && <PastePanel />}
       {pane === 'theme' && <ThemePanel />}
     </div>
   )

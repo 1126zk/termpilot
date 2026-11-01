@@ -35,6 +35,8 @@ export const IPC = {
   sftpRead: 'sftp:read',
   sftpReadImage: 'sftp:read-image',
   sftpWrite: 'sftp:write',
+  /** 「图片」面板粘贴的图片写到服务器 ~/.termpilot/paste */
+  sftpSavePaste: 'sftp:save-paste',
   sftpRename: 'sftp:rename',
   /** main → renderer，安装 SFTP 的进度和远程日志 */
   sftpInstall: 'sftp:install',

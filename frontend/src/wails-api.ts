@@ -167,6 +167,9 @@ const api = {
     readImage: (sessionId: string, path: string) => invoke<string>(IPC.sftpReadImage, [sessionId, path]),
     write: (sessionId: string, path: string, text: string) =>
       invoke(IPC.sftpWrite, [sessionId, path, text]),
+    /** 粘贴的图片写到服务器 ~/.termpilot/paste，返回绝对路径 */
+    savePaste: (sessionId: string, name: string, base64: string) =>
+      invoke<string>(IPC.sftpSavePaste, [sessionId, name, base64]),
     onInstall: (cb: (event: SftpInstallEvent) => void) => on(IPC.sftpInstall, cb),
     onTransfer: (cb: (event: SftpTransferEvent) => void) => on(IPC.sftpTransfer, cb)
   },

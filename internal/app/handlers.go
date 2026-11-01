@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -658,6 +659,27 @@ func (a *App) hSftpWrite(args []interface{}) (interface{}, error) {
 		return nil, err
 	}
 	return nil, a.sftp.WriteText(sessionID, path, text)
+}
+
+// hSftpSavePaste 「图片」面板粘贴的图片：参数是会话、文件名、图片的 base64，返回服务器上的绝对路径。
+func (a *App) hSftpSavePaste(args []interface{}) (interface{}, error) {
+	sessionID, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	name, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, errors.New("图片数据不对")
+	}
+	return a.sftp.SavePaste(sessionID, name, data)
 }
 
 func (a *App) hSftpTransferCancel(args []interface{}) (interface{}, error) {

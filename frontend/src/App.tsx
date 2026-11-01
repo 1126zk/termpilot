@@ -15,7 +15,8 @@ import { HostsPage } from './components/HostsPage'
 import { startPointerDrag } from './components/flip'
 import { useAppStore, type SplitDir, type SplitState } from './stores/useAppStore'
 import { runCapture } from './terminal/captureView'
-import { terminalPool } from './terminal/TerminalPool'
+import { pasteClipboardImage } from './terminal/pasteImage'
+import { setAltVHandler, terminalPool } from './terminal/TerminalPool'
 
 export default function App() {
   const loadSessions = useAppStore((s) => s.loadSessions)
@@ -36,6 +37,18 @@ export default function App() {
 
   useEffect(() => window.api.capture.onRun((job) => void runCapture(job)), [])
   useEffect(() => window.api.sftp.onTransfer(useAppStore.getState().onSftpTransfer), [])
+
+  // SSH 终端里的 Alt+V：剪贴板是图片就传到服务器并填入路径，否则原样发给服务器。
+  // 本机终端不接手，里面的程序自己能读本机剪贴板
+  useEffect(() => {
+    setAltVHandler((termId) => {
+      const tab = useAppStore.getState().tabs.find((t) => t.id === termId)
+      if (tab?.kind !== 'ssh' || !tab.sessionId) return false
+      void pasteClipboardImage(tab)
+      return true
+    })
+    return () => setAltVHandler(null)
+  }, [])
 
   useEffect(() => {
     const open = () => {

@@ -86,6 +86,7 @@ func (b *Bridge) routes() map[string]handler {
 		"sftp:read":            a.hSftpRead,
 		"sftp:read-image":      a.hSftpReadImage,
 		"sftp:write":           a.hSftpWrite,
+		"sftp:save-paste":      a.hSftpSavePaste,
 		"sftp:transfer-cancel": a.hSftpTransferCancel,
 
 		// 本机文件

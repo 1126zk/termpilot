@@ -105,7 +105,7 @@ class TerminalPool {
     host.style.overflow = 'hidden'
     term.open(host)
     host.style.background = this.palette.background ?? ''
-    bindTerminalKeys(term)
+    bindTerminalKeys(term, termId)
     const disposeLinks = bindTerminalLinks(term)
     bindOsc52(term)
     bindIme(host, term)
@@ -142,7 +142,7 @@ class TerminalPool {
   attach(termId: string, el: HTMLElement): void {
     const e = this.ensure(termId)
     if (e.host.parentElement !== el) el.appendChild(e.host)
-    bindTerminalKeys(e.term)
+    bindTerminalKeys(e.term, termId)
     this.fit(termId)
     this.scheduleSettle(termId)
     // 菜单关掉时会把焦点还给「新建」按钮，而且往往排在下一帧之后。
@@ -430,9 +430,25 @@ export function normalizeTerminalCopy(text: string): string {
   return text.replace(/[ \t]+(?=\r\n|\n|\r|$)/g, '')
 }
 
-/** Shift+Enter 发送 Ctrl+J 换行；Ctrl/Cmd+C 有选区就复制，否则仍是中断；Ctrl/Cmd+V 只粘贴。 */
-function bindTerminalKeys(term: Terminal): void {
+/**
+ * Alt+V 交给上层决定：返回 true 表示接手了（SSH 终端去传剪贴板图片），xterm 不再发 ESC v；
+ * 返回 false 照常发。池子不认识标签和会话，所以由 App 注册进来。
+ */
+let altVHandler: ((termId: string) => boolean) | null = null
+export function setAltVHandler(handler: ((termId: string) => boolean) | null): void {
+  altVHandler = handler
+}
+
+/** Shift+Enter 发送 Ctrl+J 换行；Ctrl/Cmd+C 有选区就复制，否则仍是中断；Ctrl/Cmd+V 只粘贴；Alt+V 见 setAltVHandler。 */
+function bindTerminalKeys(term: Terminal, termId: string): void {
   term.attachCustomKeyEventHandler((event) => {
+    // 按物理键位认 V：macOS 上 Option+V 的 key 是 √
+    const altV =
+      event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === 'KeyV'
+    if (altV && event.type === 'keydown' && altVHandler?.(termId)) {
+      event.preventDefault()
+      return false
+    }
     if (event.type !== 'keydown' || event.altKey) return true
     if (event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault()

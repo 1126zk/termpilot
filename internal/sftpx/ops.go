@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -147,6 +149,46 @@ func (s *Service) WriteText(sessionID, path, text string) error {
 			return writeAll(conn.client, target, []byte(text))
 		})
 	})
+}
+
+// PasteDir 剪贴板图片上传到登录目录下的这里，「图片」面板列的也是它。
+const PasteDir = "~/.termpilot/paste"
+
+// pasteName 只收「字母数字点横线」组成的图片文件名，挡住带路径的名字写到别处去。
+var pasteName = regexp.MustCompile(`^[\w-]+\.(png|jpe?g|gif|webp|bmp)$`)
+
+// SavePaste 把粘贴的图片写进 PasteDir，目录没有就建，返回服务器上的绝对路径。
+func (s *Service) SavePaste(sessionID, name string, data []byte) (string, error) {
+	if !pasteName.MatchString(name) {
+		return "", errors.New("图片文件名不合法")
+	}
+	if err := AssertImageSize(int64(len(data))); err != nil {
+		return "", err
+	}
+	var saved string
+	err := s.run(sessionID, func(conn *liveConn) error {
+		dir := expandTilde(PasteDir, conn.loginDir())
+		if strings.HasPrefix(dir, "~") {
+			// 解析不出登录目录时用相对路径，SFTP 的当前目录就是登录目录
+			dir = strings.TrimPrefix(dir, "~/")
+		}
+		if err := conn.client.MkdirAll(dir); err != nil {
+			return err
+		}
+		target := remoteJoin(dir, name)
+		if err := writeAll(conn.client, target, data); err != nil {
+			return err
+		}
+		saved = target
+		if abs, err := conn.client.RealPath(target); err == nil && abs != "" {
+			saved = abs
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return saved, nil
 }
 
 // readdir 对应 TS readdir：滤掉 . 和 ..，按 compareRemoteFiles 排序。
