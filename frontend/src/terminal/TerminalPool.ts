@@ -1,5 +1,6 @@
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal, type IBufferLine, type ITheme } from '@xterm/xterm'
 import { composeTerminalRange } from './composeGl'
+import { formatCommand, type CopiedRow } from './copyCommand'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
@@ -310,6 +311,34 @@ class TerminalPool {
     return this.entries.get(termId)?.term.modes.applicationCursorKeysMode ?? false
   }
 
+  /**
+   * 右键「复制命令」：选区整理成粘贴就能跑的命令，规则见 copyCommand.ts。
+   * 按屏幕行取，终端自己软折的行先拼好，再记下每行最后一个屏幕行占到第几格。没有选区返回 null。
+   */
+  selectionAsCommand(termId: string): string | null {
+    const term = this.entries.get(termId)?.term
+    const pos = term?.getSelectionPosition()
+    if (!term || !pos) return null
+    // 内部坐标：y 是 0 起始的缓冲行，x 是 0 起始列，结束列不含
+    const backward = pos.start.y > pos.end.y || (pos.start.y === pos.end.y && pos.start.x > pos.end.x)
+    const from = backward ? pos.end : pos.start
+    const to = backward ? pos.start : pos.end
+    const buffer = term.buffer.active
+    const rows: CopiedRow[] = []
+    for (let y = from.y; y <= to.y; y++) {
+      const line = buffer.getLine(y)
+      if (!line) continue
+      const text = line.translateToString(true, y === from.y ? from.x : 0, y === to.y ? to.x : undefined)
+      const used = usedCells(line)
+      if (y > from.y && line.isWrapped && rows.length > 0) {
+        rows[rows.length - 1] = { text: rows[rows.length - 1].text + text, used }
+      } else {
+        rows.push({ text, used })
+      }
+    }
+    return formatCommand(rows, term.cols)
+  }
+
   paste(termId: string, text: string): void {
     const term = this.entries.get(termId)?.term
     if (!term || !text) return
@@ -521,6 +550,16 @@ function bindOsc52(term: Terminal): void {
 function clampLine(line: number, length: number): number {
   if (!Number.isFinite(line)) return 0
   return Math.max(0, Math.min(length, Math.floor(line)))
+}
+
+/** 一个屏幕行实际写到第几格：从右往左找第一个非空格子，宽字符算两格 */
+function usedCells(line: IBufferLine): number {
+  for (let x = line.length - 1; x >= 0; x--) {
+    const cell = line.getCell(x)
+    const chars = cell?.getChars() ?? ''
+    if (chars && chars !== ' ') return x + Math.max(1, cell!.getWidth())
+  }
+  return 0
 }
 
 function boxOf(el: HTMLElement): { x: number; y: number; width: number; height: number } | null {

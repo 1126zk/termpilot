@@ -67,6 +67,17 @@ export function TerminalView(props: { termId: string; active: boolean }) {
     }
   }
 
+  // 复制 AI 回复里的命令：去掉缩进，被程序按窗口宽度折开的长命令接回一行，\ 续行和多条命令照旧
+  const copyCommand = async () => {
+    const text = terminalPool.selectionAsCommand(props.termId)
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   // 截图：选区裁剪（右键菜单「截取选区」）
   const shoot = () => {
     if (!selection) return
@@ -163,6 +174,9 @@ export function TerminalView(props: { termId: string; active: boolean }) {
           <ContextMenuItem disabled={!selection?.text} onClick={() => void copy()}>
             复制
             <ContextMenuShortcut>{window.api.platform === 'darwin' ? '⌘C' : 'Ctrl+C'}</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem disabled={!selection?.text} onClick={() => void copyCommand()}>
+            复制命令
           </ContextMenuItem>
           <ContextMenuItem disabled={!selection} onClick={shoot}>
             截取选区
