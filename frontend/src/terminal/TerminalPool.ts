@@ -106,7 +106,7 @@ class TerminalPool {
     term.open(host)
     host.style.background = this.palette.background ?? ''
     bindTerminalKeys(term, termId)
-    const disposeLinks = bindTerminalLinks(term)
+    const disposeLinks = bindTerminalLinks(term, termId)
     bindOsc52(term)
     bindIme(host, term)
     const disposeMouse = bindFullscreenWheel(host, term)

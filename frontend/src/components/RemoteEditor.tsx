@@ -111,6 +111,11 @@ export function isImage(name: string): boolean {
   return imageType(name) !== undefined
 }
 
+/** 图片的 MIME，拼 data: 地址用；认不出时按 png */
+export function imageMime(name: string): string {
+  return imageType(name) ?? 'image/png'
+}
+
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '') : String(e)
 

@@ -16,6 +16,8 @@ import { startPointerDrag } from './components/flip'
 import { useAppStore, type SplitDir, type SplitState } from './stores/useAppStore'
 import { runCapture } from './terminal/captureView'
 import { pasteClipboardImage } from './terminal/pasteImage'
+import { setImageOpenHandler } from './terminal/imageHover'
+import { ImageHoverPreview } from './components/ImageHoverPreview'
 import { setAltVHandler, terminalPool } from './terminal/TerminalPool'
 
 export default function App() {
@@ -48,6 +50,19 @@ export default function App() {
       return true
     })
     return () => setAltVHandler(null)
+  }, [])
+
+  // 终端里 Ctrl+点击图片路径：用图片查看器打开，盖在这个终端所在的那一栏
+  useEffect(() => {
+    setImageOpenHandler((termId, path) => {
+      const { tabs, openRemoteEditor, setNotice } = useAppStore.getState()
+      const tab = tabs.find((t) => t.id === termId)
+      if (!tab) return
+      const remote = tab.kind === 'ssh' ? tab.sessionId : null
+      if (!remote && path.startsWith('~')) return setNotice('本机路径请写完整')
+      openRemoteEditor(termId, remote, { path, name: path.slice(path.replace(/\\/g, '/').lastIndexOf('/') + 1) })
+    })
+    return () => setImageOpenHandler(null)
   }, [])
 
   useEffect(() => {
@@ -218,6 +233,7 @@ export default function App() {
         <McpConfirmDialog />
         <SftpInstallDialog />
         <NoticeToast />
+        <ImageHoverPreview />
       </div>
     </TooltipProvider>
   )
