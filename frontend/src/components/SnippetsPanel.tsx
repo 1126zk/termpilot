@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Play, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import type { Snippet } from '../../../shared/types'
@@ -14,8 +13,8 @@ export function sendToActiveTerminal(command: string, execute = true): void {
   terminalPool.focus(activeTabId)
 }
 
-/** 指令片段：顶部输入框直接写命令，保存即入列；每条可编辑、填入、直接执行、删除。 */
-export function SnippetsPanel() {
+/** 指令片段：顶部输入框直接写命令，保存即入列；每条可填入、直接执行、删除。不带滚动，和历史指令共用「命令」栏的滚动条。 */
+export function SnippetsSection() {
   const [snippets, setSnippets] = useState<Snippet[]>([])
   const [command, setCommand] = useState('')
   const [error, setError] = useState('')
@@ -59,8 +58,9 @@ export function SnippetsPanel() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-start gap-1.5 px-2 pt-2 pb-1">
+    <section>
+      <h3 className="px-3 pt-2 text-xs font-medium text-muted-foreground">指令片段</h3>
+      <div className="flex items-start gap-1.5 px-2 pt-1.5 pb-1">
         <textarea
           value={command}
           placeholder="写一条命令，可以写多行"
@@ -81,62 +81,58 @@ export function SnippetsPanel() {
         </Button>
       </div>
       {error && <p className="px-3 pb-1 text-sm text-destructive">{error}</p>}
-      <ScrollArea className="min-h-0 flex-1">
-        {snippets.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm leading-5 text-muted-foreground">
-            把常用命令存成片段，一键复用
-          </p>
-        ) : (
-          <div className="grid gap-0.5 px-1 pb-2">
-            {snippets.map((snippet) => (
-              <div
-                key={snippet.id}
-                role="button"
-                title={snippet.command}
-                className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
-                onClick={() => sendToActiveTerminal(snippet.command, false)}
+      {snippets.length === 0 ? (
+        <p className="px-3 py-4 text-center text-sm leading-5 text-muted-foreground">把常用命令存成片段，一键复用</p>
+      ) : (
+        <div className="grid gap-0.5 px-1 pb-2">
+          {snippets.map((snippet) => (
+            <div
+              key={snippet.id}
+              role="button"
+              title={snippet.command}
+              className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+              onClick={() => sendToActiveTerminal(snippet.command, false)}
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                {snippet.command.split('\n')[0]}
+              </span>
+              <button
+                type="button"
+                title="填入终端（自己回车执行）"
+                className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  sendToActiveTerminal(snippet.command, false)
+                }}
               >
-                <span className="min-w-0 flex-1 truncate font-mono text-sm">
-                  {snippet.command.split('\n')[0]}
-                </span>
-                <button
-                  type="button"
-                  title="填入终端（自己回车执行）"
-                  className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    sendToActiveTerminal(snippet.command, false)
-                  }}
-                >
-                  <SquareTerminal className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  title="直接执行"
-                  className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    sendToActiveTerminal(snippet.command, true)
-                  }}
-                >
-                  <Play className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  title="删除"
-                  className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void remove(snippet)
-                  }}
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </ScrollArea>
-    </div>
+                <SquareTerminal className="size-4" />
+              </button>
+              <button
+                type="button"
+                title="直接执行"
+                className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  sendToActiveTerminal(snippet.command, true)
+                }}
+              >
+                <Play className="size-4" />
+              </button>
+              <button
+                type="button"
+                title="删除"
+                className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void remove(snippet)
+                }}
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

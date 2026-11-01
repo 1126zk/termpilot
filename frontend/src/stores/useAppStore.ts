@@ -49,7 +49,7 @@ interface TermState {
 }
 
 /** 右侧面板的四个板块 */
-export type RightPanelPane = 'files' | 'snippets' | 'history' | 'images' | 'theme'
+export type RightPanelPane = 'files' | 'images' | 'commands' | 'theme'
 
 interface AppState {
   sessions: SessionConfig[]
