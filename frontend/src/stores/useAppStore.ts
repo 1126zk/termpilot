@@ -68,7 +68,10 @@ interface AppState {
   /** 每个终端（标签）的连接状态 */
   termState: Record<string, TermState>
   tabs: Tab[]
+  /** 焦点所在的标签。分屏时是最后点过的那一栏显示的标签，文件面板、片段、历史都跟它走 */
   activeTabId: string | null
+  /** 左右或上下分屏，null 表示不分屏 */
+  split: SplitState | null
 
   /** 右侧面板是否打开 */
   rightPanelOpen: boolean
@@ -81,8 +84,8 @@ interface AppState {
   search: string
   /** 各终端标签下打开的文件，按 termId 归属，关终端时一起清掉 */
   editorTabs: EditorTab[]
-  /** 正在看的文件。null 表示回到这台机器的终端。 */
-  activeEditorKey: string | null
+  /** 每个终端标签正在看的文件 key，没有表示显示终端。分屏时两栏各看各的 */
+  editorKeyByTerm: Record<string, string>
   /** 已打开运维面板的终端标签，互不影响。 */
   opsPanelTermIds: string[]
 
@@ -128,8 +131,17 @@ interface AppState {
   reconnectTab: (tabId: string) => void
   renameTab: (tabId: string, title: string) => void
   setActiveTab: (tabId: string) => void
-  /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面） */
+  /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面）。
+      分屏时数组里带 SPLIT_MARK，它后面的标签归辅栏 */
   reorderTabs: (ids: string[]) => void
+  /** 右键标签「分到右栏 / 分到下栏」：这个标签单独进辅栏 */
+  splitTab: (tabId: string, dir: SplitDir) => void
+  /** 拖动两栏中间的分隔线，ratio 是主栏占比 */
+  setSplitRatio: (ratio: number) => void
+  /** 标签拖完调用：有一栏空了就取消分屏 */
+  settleSplit: () => void
+  /** 分屏时点进某一栏：焦点移过去，不像点标签那样收起面板 */
+  focusPane: (tabId: string) => void
   /** 主进程终端状态事件入口（App 中订阅一次） */
   onTermStatus: (e: TermStatusEvent) => void
   onTermMeta: (e: { termId: string; title: string; remark: string }) => void
@@ -154,8 +166,8 @@ interface AppState {
   editorWrap: boolean
   toggleEditorWrap: () => void
   closeEditorTab: (key: string) => void
-  /** null 表示回到终端，文件标签保留 */
-  activateEditorTab: (key: string | null) => void
+  /** 切换这个终端标签看的文件，key 为 null 表示回到终端，文件标签保留 */
+  activateEditorTab: (termId: string, key: string | null) => void
   setEditorDirty: (key: string, dirty: boolean) => void
   pinEditorTab: (key: string) => void
   setSearch: (v: string) => void
@@ -178,6 +190,60 @@ const bootAppearance = readCachedAppearance()
  */
 function closeOverlaysPatch(get: () => AppState): Partial<AppState> {
   return { editing: null, ...(get().editing ? { rightPanelOpen: false } : {}) }
+}
+
+export type SplitDir = 'right' | 'down'
+
+export interface SplitState {
+  dir: SplitDir
+  /** 辅栏（右 / 下）里的标签，其余都在主栏。tabs 数组里主栏的标签排在前面 */
+  secondary: string[]
+  /** 两栏各自显示的标签。拖动标签途中某一栏可能暂时是空的 */
+  primaryTab: string | null
+  secondaryTab: string | null
+  /** 主栏占比 */
+  ratio: number
+}
+
+/** 标签栏里那条分隔竖线在拖动排序时的占位 id */
+export const SPLIT_MARK = '__split__'
+
+/**
+ * 标签或焦点变了之后把分屏理顺：主栏标签排在前面；各栏显示的标签没了就换成这一栏最后一个；
+ * 焦点标签在哪一栏，那一栏就显示它。keepEmpty 为假时，有一栏空了就取消分屏。
+ */
+function withTabs(
+  get: () => AppState,
+  tabs: Tab[],
+  activeTabId: string | null,
+  keepEmpty = false
+): Pick<AppState, 'tabs' | 'activeTabId' | 'split'> {
+  const split = get().split
+  if (!split) return { tabs, activeTabId, split: null }
+  const inSecondary = new Set(split.secondary)
+  const primary = tabs.filter((tab) => !inSecondary.has(tab.id))
+  const secondary = tabs.filter((tab) => inSecondary.has(tab.id))
+  const pick = (list: Tab[], current: string | null) => {
+    if (list.some((tab) => tab.id === activeTabId)) return activeTabId
+    if (list.some((tab) => tab.id === current)) return current
+    return list[list.length - 1]?.id ?? null
+  }
+  const next: SplitState = {
+    ...split,
+    secondary: secondary.map((tab) => tab.id),
+    primaryTab: pick(primary, split.primaryTab),
+    secondaryTab: pick(secondary, split.secondaryTab)
+  }
+  const empty = !next.primaryTab || !next.secondaryTab
+  return { tabs: [...primary, ...secondary], activeTabId, split: empty && !keepEmpty ? null : next }
+}
+
+/** 去掉对象里的一个键；本来就没有时原样返回，免得无谓地触发重渲染 */
+function withoutKey<T>(map: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in map)) return map
+  const next = { ...map }
+  delete next[key]
+  return next
 }
 
 /** 标签/备注文本清洗：压缩空白、去头尾、截断。 */
@@ -221,13 +287,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   termState: {},
   tabs: [],
   activeTabId: null,
+  split: null,
   rightPanelOpen: false,
   opsPanelTermIds: [],
   hostsOpen: false,
   rightPanelPane: 'files',
   search: '',
   editorTabs: [],
-  activeEditorKey: null,
+  editorKeyByTerm: {},
   editing: null,
   settingsOpen: false,
   appearance: bootAppearance,
@@ -285,16 +352,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     terminalPool.ensure(tab.termId)
     window.api.mcp.bound(tab.termId)
     if (get().tabs.some((item) => item.id === tab.termId)) {
-      set({ activeTabId: tab.termId })
+      set(withTabs(get, get().tabs, tab.termId))
       return
     }
-    set({
-      tabs: [
-        ...get().tabs,
-        { id: tab.termId, sessionId: tab.sessionId, kind: tab.kind, title: tab.title }
-      ],
-      activeTabId: tab.termId
-    })
+    set(
+      withTabs(
+        get,
+        [...get().tabs, { id: tab.termId, sessionId: tab.sessionId, kind: tab.kind, title: tab.title }],
+        tab.termId
+      )
+    )
   },
 
   onMcpCloseTab: (termId) => {
@@ -378,7 +445,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!fresh) {
       const existing = get().tabs.find((t) => t.sessionId === session.id && t.kind === 'ssh')
       if (existing) {
-        set({ activeTabId: existing.id })
+        set(withTabs(get, get().tabs, existing.id))
         return
       }
     }
@@ -391,7 +458,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       title: termTitle(count + 1, session.name),
       ...known
     }
-    set({ tabs: [...get().tabs, tab], activeTabId: tab.id })
+    set(withTabs(get, [...get().tabs, tab], tab.id))
     window.api.term.create({
       termId: tab.id,
       kind: 'ssh',
@@ -432,8 +499,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       shell
     }
     set({
-      tabs: [...get().tabs, tab],
-      activeTabId: tab.id,
+      ...withTabs(get, [...get().tabs, tab], tab.id),
       hostsOpen: false,
       settingsOpen: false,
       ...closeOverlaysPatch(get)
@@ -469,8 +535,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const status = get().termState[tabId]?.status
     if (status === 'connected' || status === 'connecting') return
     set({
-      activeTabId: tabId,
-      activeEditorKey: null
+      ...withTabs(get, get().tabs, tabId),
+      editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId)
     })
     if (tab.kind === 'local') {
       terminalPool.clear(tab.id)
@@ -488,8 +554,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   closeTab: (tabId) => {
     const tabs = get().tabs.filter((t) => t.id !== tabId)
-    const activeTabId =
-      get().activeTabId === tabId ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId
+    const split = get().split
+    let activeTabId = get().activeTabId
+    if (activeTabId === tabId) {
+      // 分屏时先在同一栏里找下一个；这一栏空了，焦点落到另一栏显示的标签
+      const secondaryClosed = split?.secondary.includes(tabId) ?? false
+      const sameSide = split ? tabs.filter((t) => split.secondary.includes(t.id) === secondaryClosed) : tabs
+      const otherSide = split ? (secondaryClosed ? split.primaryTab : split.secondaryTab) : null
+      activeTabId = sameSide[sameSide.length - 1]?.id ?? otherSide ?? tabs[tabs.length - 1]?.id ?? null
+    }
     const termState = { ...get().termState }
     delete termState[tabId]
     const editorTabs = get().editorTabs.filter((t) => {
@@ -497,19 +570,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       dropBuffer(t.key)
       return false
     })
-    const activeEditorKey = editorTabs.some((t) => t.key === get().activeEditorKey) ? get().activeEditorKey : null
+    const editorKeyByTerm = withoutKey(get().editorKeyByTerm, tabId)
     const opsPanelTermIds = get().opsPanelTermIds.filter((id) => id !== tabId)
-    set({ tabs, activeTabId, termState, editorTabs, activeEditorKey, opsPanelTermIds })
+    set({ ...withTabs(get, tabs, activeTabId), termState, editorTabs, editorKeyByTerm, opsPanelTermIds })
     // 先断主进程连接，再销毁 xterm 实例
     window.api.term.close(tabId)
     terminalPool.dispose(tabId)
   },
 
   setActiveTab: (tabId) => {
-    const tab = get().tabs.find((t) => t.id === tabId)
+    // 点标签回到这个标签的终端，打开的文件标签保留
     set({
-      activeTabId: tabId,
-      activeEditorKey: null,
+      ...withTabs(get, get().tabs, tabId),
+      editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId),
       hostsOpen: false,
       settingsOpen: false,
       ...closeOverlaysPatch(get)
@@ -521,7 +594,43 @@ export const useAppStore = create<AppState>((set, get) => ({
     const tabs = [...get().tabs].sort(
       (a, b) => (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER)
     )
+    const split = get().split
+    const mark = ids.indexOf(SPLIT_MARK)
+    if (split && mark >= 0) {
+      // 拖过分隔竖线就换栏。拖动途中允许某一栏空着，松手时 settleSplit 再决定是否取消分屏
+      set({ split: { ...split, secondary: ids.slice(mark + 1) } })
+      set(withTabs(get, tabs, get().activeTabId, true))
+      return
+    }
     set({ tabs })
+  },
+
+  splitTab: (tabId, dir) => {
+    const { tabs, activeTabId, split } = get()
+    const tab = tabs.find((t) => t.id === tabId)
+    if (split || !tab || tabs.length < 2) return
+    const others = tabs.filter((t) => t.id !== tabId)
+    const primaryTab = activeTabId && activeTabId !== tabId ? activeTabId : others[others.length - 1].id
+    set({
+      split: { dir, secondary: [tabId], primaryTab, secondaryTab: tabId, ratio: 0.5 },
+      hostsOpen: false,
+      settingsOpen: false,
+      ...closeOverlaysPatch(get)
+    })
+    set(withTabs(get, [...others, tab], tabId))
+  },
+
+  setSplitRatio: (ratio) => {
+    const split = get().split
+    if (split) set({ split: { ...split, ratio: Math.min(0.85, Math.max(0.15, ratio)) } })
+  },
+
+  settleSplit: () => {
+    if (get().split) set(withTabs(get, get().tabs, get().activeTabId))
+  },
+
+  focusPane: (tabId) => {
+    if (get().split && get().activeTabId !== tabId) set(withTabs(get, get().tabs, tabId))
   },
 
   onTermStatus: (e) => {
@@ -576,7 +685,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(
       open.includes(termId)
         ? { opsPanelTermIds: open.filter((id) => id !== termId) }
-        : { opsPanelTermIds: [...open, termId], activeEditorKey: null }
+        : { opsPanelTermIds: [...open, termId], editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) }
     )
   },
 
@@ -598,7 +707,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? { ...t, preview: pin ? false : t.preview, readOnly: readOnly ?? t.readOnly }
             : t
         ),
-        activeEditorKey: key
+        editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }
       })
       return
     }
@@ -615,7 +724,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...next,
         { key, termId, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false, readOnly: readOnly ?? true }
       ],
-      activeEditorKey: key
+      editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }
     })
   },
   setEditorReadOnly: (key, readOnly) =>
@@ -639,13 +748,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     dropBuffer(key)
     const current = get().editorTabs.find((t) => t.key === key)
     const tabs = get().editorTabs.filter((t) => t.key !== key)
-    const sibling = tabs.filter((t) => t.termId === current?.termId)
-    set({
-      editorTabs: tabs,
-      activeEditorKey: get().activeEditorKey === key ? (sibling.at(-1)?.key ?? null) : get().activeEditorKey
-    })
+    const editorKeyByTerm = { ...get().editorKeyByTerm }
+    // 关的是这个终端正在看的文件，就换成它剩下的最后一个；都关了回到终端
+    if (current && editorKeyByTerm[current.termId] === key) {
+      const sibling = tabs.filter((t) => t.termId === current.termId).at(-1)
+      if (sibling) editorKeyByTerm[current.termId] = sibling.key
+      else delete editorKeyByTerm[current.termId]
+    }
+    set({ editorTabs: tabs, editorKeyByTerm })
   },
-  activateEditorTab: (key) => set({ activeEditorKey: key }),
+  activateEditorTab: (termId, key) =>
+    set({
+      editorKeyByTerm: key ? { ...get().editorKeyByTerm, [termId]: key } : withoutKey(get().editorKeyByTerm, termId)
+    }),
   setEditorDirty: (key, dirty) =>
     set({
       editorTabs: get().editorTabs.map((t) => (t.key === key && t.dirty !== dirty ? { ...t, dirty } : t))

@@ -29,7 +29,7 @@ function unsaved(tab: EditorTab): boolean {
 }
 
 /** 连接标签下面的文件标签。点 × 关闭；没保存会先确认。 */
-export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | null }) {
+export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeKey: string | null }) {
   const closeEditorTab = useAppStore((s) => s.closeEditorTab)
   const activateEditorTab = useAppStore((s) => s.activateEditorTab)
   const setEditorReadOnly = useAppStore((s) => s.setEditorReadOnly)
@@ -266,7 +266,7 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
             'flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent',
             props.activeKey === null && 'bg-primary/15 text-primary hover:bg-primary/15'
           )}
-          onClick={() => activateEditorTab(null)}
+          onClick={() => activateEditorTab(props.termId, null)}
         >
           <SquareTerminal className="size-4" />
           终端
@@ -290,7 +290,7 @@ export function EditorTabBar(props: { tabs: EditorTab[]; activeKey: string | nul
               <button
                 type="button"
                 className="flex min-w-0 flex-1 items-center gap-1.5"
-                onClick={() => clickAllowed() && activateEditorTab(tab.key)}
+                onClick={() => clickAllowed() && activateEditorTab(props.termId, tab.key)}
               >
                 <FileIcon name={tab.name} kind="file" />
                 <span className={cn('truncate', tab.preview && 'italic')}>{tab.name}</span>

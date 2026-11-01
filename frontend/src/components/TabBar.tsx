@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Bot, ChevronLeft, ChevronRight, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Rows2, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +21,7 @@ import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt } from '../agentPr
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { applyOrder, readMenuOrder, writeMenuOrder } from '../menuOrder'
 import { useMenuAction } from './PanelDialog'
-import { useAppStore } from '../stores/useAppStore'
+import { useAppStore, SPLIT_MARK } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import { OsIcon, osIconProps } from './OsIcon'
 import type { ForwardRule, LocalShell } from '../../../shared/types'
@@ -90,6 +90,7 @@ function WindowControls(props: { terminalActive: boolean }) {
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel)
   const tabs = useAppStore((s) => s.tabs)
   const activeTabId = useAppStore((s) => s.activeTabId)
+  const split = useAppStore((s) => s.split)
   const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
   const toggleOpsPanel = useAppStore((s) => s.toggleOpsPanel)
 
@@ -98,8 +99,8 @@ function WindowControls(props: { terminalActive: boolean }) {
     return window.api.win.onMaximizeChanged(setMaximized)
   }, [])
 
-  // 运维面板只给 Linux 服务器的 SSH 连接，本地终端和探测不出系统的都没有
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  // 运维面板只给 Linux 服务器的 SSH 连接，本地终端和探测不出系统的都没有。分屏时只管主栏
+  const activeTab = tabs.find((t) => t.id === (split ? split.primaryTab : activeTabId))
   const opsOk = props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
   const opsOpen = !!activeTab && opsPanelTermIds.includes(activeTab.id)
 
@@ -164,6 +165,9 @@ export function TabBar() {
   const openSessionTab = useAppStore((s) => s.openSessionTab)
   const loadSessions = useAppStore((s) => s.loadSessions)
   const reorderTabs = useAppStore((s) => s.reorderTabs)
+  const split = useAppStore((s) => s.split)
+  const splitTab = useAppStore((s) => s.splitTab)
+  const settleSplit = useAppStore((s) => s.settleSplit)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   // 截图和面板按钮只为终端服务，不在终端页就不出现
@@ -269,7 +273,10 @@ export function TabBar() {
   const tabDropOrder = (clientX: number, dragId: string): string[] | null => {
     const strip = stripRef.current
     if (!strip) return null
-    const ids = useAppStore.getState().tabs.map((tab) => tab.id)
+    const { tabs: current, split: currentSplit } = useAppStore.getState()
+    const ids = current.map((tab) => tab.id)
+    // 分屏时分隔竖线也算一项，标签越过它就换栏
+    if (currentSplit) ids.splice(ids.length - currentSplit.secondary.length, 0, SPLIT_MARK)
     // 交换判定也按限位后的视觉位置算，指针拖出首尾标签外沿时不会乱换
     const items = strip.querySelectorAll<HTMLElement>('[data-tab-id]')
     const first = items[0]
@@ -337,6 +344,7 @@ export function TabBar() {
         prevLeft.current.clear()
         setDragTabId(null)
         setDragOffset(0)
+        settleSplit()
       }
     })
   }
@@ -417,6 +425,10 @@ export function TabBar() {
     stripRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' })
   }
 
+  // 分屏时标签条里的竖线：左边的标签归主栏，右边的归辅栏。它也参与拖动排序，标签越过它就换栏
+  const primaryCount = split ? tabs.length - split.secondary.length : -1
+  const splitLine = <div data-tab-id={SPLIT_MARK} className="mx-1 h-5 w-px shrink-0 bg-foreground/30" />
+
   return (
     <>
     <div
@@ -469,12 +481,16 @@ export function TabBar() {
           <Server className="size-4 shrink-0" strokeWidth={2} />
           Host
         </button>
-        {tabs.map((t) => {
+        {tabs.map((t, index) => {
           const active = t.id === activeTabId && !hostsOpen && !settingsOpen
+          // 分屏时另一栏正在显示的标签，比焦点标签淡一档
+          const shown =
+            !active && !hostsOpen && !settingsOpen && !!split && (t.id === split.primaryTab || t.id === split.secondaryTab)
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
           const forwardRules = termState[t.id]?.status === 'connected' ? (session?.forwards ?? []) : []
           return (
             <Fragment key={t.id}>
+            {index === primaryCount && splitLine}
             <ContextMenu
               onOpenChange={(open) => {
                 if (open && session && forwardRules.length > 0) void refreshForwards(session.id)
@@ -488,6 +504,7 @@ export function TabBar() {
                   className={cn(
                     'group/tab flex h-7 max-w-48 min-w-0 shrink-0 items-center gap-1.5 overflow-hidden rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
                     active && 'bg-primary/15 text-primary hover:bg-primary/15',
+                    shown && 'bg-primary/[0.07] text-primary/70',
                     dragTabId === t.id && 'relative z-10 shadow-lg ring-1 ring-foreground/30',
                     renamingId === t.id && 'max-w-none'
                   )}
@@ -577,6 +594,19 @@ export function TabBar() {
                     重新连接
                   </ContextMenuItem>
                 ) : null}
+                {!split && tabs.length > 1 ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => splitTab(t.id, 'right')}>
+                      <Columns2 />
+                      分到右栏
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => splitTab(t.id, 'down')}>
+                      <Rows2 />
+                      分到下栏
+                    </ContextMenuItem>
+                  </>
+                ) : null}
                 {session && forwardRules.length > 0 ? (
                   <>
                     <ContextMenuSeparator />
@@ -604,6 +634,7 @@ export function TabBar() {
             </Fragment>
           )
         })}
+        {primaryCount === tabs.length && splitLine}
         <DropdownMenu onOpenChange={(open) => { if (open) void loadSessions() }}>
           <DropdownMenuTrigger asChild>
             <button type="button" className={cn(topBtn, 'shrink-0')} style={noDrag} title="新建终端">

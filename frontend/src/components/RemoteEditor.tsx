@@ -500,7 +500,13 @@ function TextEditor(props: { tab: EditorTab }) {
               remember(next, savedRef.current)
             }}
             onMount={(ed, api) => {
-              ed.addCommand(api.KeyMod.CtrlCmd | api.KeyCode.KeyS, () => void save())
+              // 用 addAction 不用 addCommand：后者的快捷键是全局的，分屏两栏都开着文件时会保存到后建的那个
+              ed.addAction({
+                id: 'termpilot.save',
+                label: '保存',
+                keybindings: [api.KeyMod.CtrlCmd | api.KeyCode.KeyS],
+                run: () => void save()
+              })
               const unbind = bindMiddleScroll(ed.getContainerDomNode(), (dx, dy) =>
                 ed.setScrollPosition({ scrollLeft: ed.getScrollLeft() + dx, scrollTop: ed.getScrollTop() + dy })
               )
