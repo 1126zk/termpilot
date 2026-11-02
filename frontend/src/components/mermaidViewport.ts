@@ -1,7 +1,15 @@
 const MIN_SCALE = 0.2
 const MAX_SCALE = 4
 
-export function mountMermaidViewport(container: HTMLElement): void {
+/** 挂在缩放控件左侧的自定义按钮，html 是按钮内部的 SVG。 */
+export interface MermaidViewportAction {
+  key: string
+  title: string
+  html: string
+  onClick: () => void
+}
+
+export function mountMermaidViewport(container: HTMLElement, actions: MermaidViewportAction[] = []): void {
   const content = document.createElement('div')
   content.className = 'absolute inset-0 cursor-grab'
   while (container.firstChild) content.appendChild(container.firstChild)
@@ -9,6 +17,17 @@ export function mountMermaidViewport(container: HTMLElement): void {
 
   const controls = document.createElement('div')
   controls.className = 'absolute top-2 right-2 z-10 flex items-center rounded-md border bg-card/95 shadow-sm'
+  for (const action of actions) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.viewportAction = action.key
+    button.className = 'flex size-7 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+    button.title = action.title
+    button.setAttribute('aria-label', action.title)
+    button.innerHTML = action.html
+    button.addEventListener('click', action.onClick)
+    controls.appendChild(button)
+  }
   const percent = document.createElement('button')
   const zoomOut = document.createElement('button')
   const zoomIn = document.createElement('button')
@@ -35,6 +54,11 @@ export function mountMermaidViewport(container: HTMLElement): void {
   const baseWidth = box?.width ? Math.min(container.clientWidth || box.width, box.width) : 0
   const baseHeight = box?.width ? box.height * (baseWidth / box.width) : 0
   if (svg) svg.style.maxWidth = 'none'
+  const center = () => {
+    x = (container.clientWidth - baseWidth) / 2
+    y = (container.clientHeight - baseHeight) / 2
+  }
+  center()
   const apply = () => {
     content.style.transform = `translate(${x}px, ${y}px)`
     if (svg && baseWidth > 0) {
@@ -54,8 +78,7 @@ export function mountMermaidViewport(container: HTMLElement): void {
   const zoomCenter = (factor: number) => zoomAt(factor, container.clientWidth / 2, container.clientHeight / 2)
   const reset = () => {
     scale = 1
-    x = 0
-    y = 0
+    center()
     apply()
   }
   zoomOut.addEventListener('click', () => zoomCenter(1 / 1.2))
