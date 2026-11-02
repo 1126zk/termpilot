@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Rows2, Server, Square, SquareTerminal, Terminal, X } from 'lucide-react'
+import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Rows2, Server, Square, SquareTerminal, Terminal, Wrench, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -169,10 +169,12 @@ export function TabBar() {
   const splitTab = useAppStore((s) => s.splitTab)
   const settleSplit = useAppStore((s) => s.settleSplit)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
+  const toolsOpen = useAppStore((s) => s.toolsOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   // 截图和面板按钮只为终端服务，不在终端页就不出现
-  const terminalActive = Boolean(activeTabId) && !hostsOpen && !settingsOpen
+  const terminalActive = Boolean(activeTabId) && !hostsOpen && !toolsOpen && !settingsOpen
   const setHostsOpen = useAppStore((s) => s.setHostsOpen)
+  const setToolsOpen = useAppStore((s) => s.setToolsOpen)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
   const setNotice = useAppStore((s) => s.setNotice)
@@ -468,12 +470,25 @@ export function TabBar() {
         }}
         className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {/* 主机标签：固定在标签条最前，和其他标签同一套三档背景，没有右键 */}
+        {/* 工具标签：固定在主机标签前，行为与主机标签一致 */}
         <button
           type="button"
           className={cn(
             'flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
-            (hostsOpen || !activeTabId) && !settingsOpen && 'bg-primary/15 text-primary hover:bg-primary/15'
+            toolsOpen && !settingsOpen && 'bg-primary/15 text-primary hover:bg-primary/15'
+          )}
+          style={noDrag}
+          onClick={() => setToolsOpen(true)}
+        >
+          <Wrench className="size-4 shrink-0" strokeWidth={2} />
+          Tool
+        </button>
+        {/* 主机标签：和其他标签同一套三档背景，没有右键 */}
+        <button
+          type="button"
+          className={cn(
+            'flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-3 text-[14px] font-semibold text-muted-foreground transition-colors hover:bg-accent',
+            (hostsOpen || !activeTabId) && !settingsOpen && !toolsOpen && 'bg-primary/15 text-primary hover:bg-primary/15'
           )}
           style={noDrag}
           onClick={() => setHostsOpen(true)}
@@ -482,10 +497,10 @@ export function TabBar() {
           Host
         </button>
         {tabs.map((t, index) => {
-          const active = t.id === activeTabId && !hostsOpen && !settingsOpen
+          const active = t.id === activeTabId && !hostsOpen && !toolsOpen && !settingsOpen
           // 分屏时另一栏正在显示的标签，比焦点标签淡一档
           const shown =
-            !active && !hostsOpen && !settingsOpen && !!split && (t.id === split.primaryTab || t.id === split.secondaryTab)
+            !active && !hostsOpen && !toolsOpen && !settingsOpen && !!split && (t.id === split.primaryTab || t.id === split.secondaryTab)
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
           const forwardRules = termState[t.id]?.status === 'connected' ? (session?.forwards ?? []) : []
           return (
@@ -648,8 +663,8 @@ export function TabBar() {
             onCloseAutoFocus={(event) => {
               // 关掉菜单时 Radix 会把焦点还给「+」按钮，新终端就收不到按键
               event.preventDefault()
-              const { activeTabId, hostsOpen, settingsOpen } = useAppStore.getState()
-              if (!activeTabId || hostsOpen || settingsOpen) return
+              const { activeTabId, hostsOpen, toolsOpen, settingsOpen } = useAppStore.getState()
+              if (!activeTabId || hostsOpen || toolsOpen || settingsOpen) return
               terminalPool.focus(activeTabId)
               window.setTimeout(() => terminalPool.focus(activeTabId), 60)
               window.setTimeout(() => terminalPool.focus(activeTabId), 180)

@@ -83,6 +83,10 @@ interface AppState {
   hostsOpen: boolean
   toggleHostsOpen: () => void
   setHostsOpen: (open: boolean) => void
+  /** 工具页是否打开，行为与主机页一致 */
+  toolsOpen: boolean
+  toggleToolsOpen: () => void
+  setToolsOpen: (open: boolean) => void
   /** 右侧面板当前板块 */
   rightPanelPane: RightPanelPane
   search: string
@@ -305,6 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   rightPanelOpen: false,
   opsPanelTermIds: [],
   hostsOpen: false,
+  toolsOpen: false,
   rightPanelPane: 'files',
   search: '',
   editorTabs: [],
@@ -480,7 +485,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSettingsOpen: (open) =>
-    set(open ? { settingsOpen: true, hostsOpen: false, rightPanelOpen: false, editing: null } : { settingsOpen: false }),
+    set(open ? { settingsOpen: true, hostsOpen: false, toolsOpen: false, rightPanelOpen: false, editing: null } : { settingsOpen: false }),
 
   setNotice: (notice, sticky = false) => {
     if (noticeTimer) clearTimeout(noticeTimer)
@@ -500,6 +505,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   openSessionTab: (session, fresh = false) => {
     set({
       hostsOpen: false,
+      toolsOpen: false,
       settingsOpen: false,
       ...closeOverlaysPatch(get)
     })
@@ -567,6 +573,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       ...withTabs(get, [...get().tabs, tab], tab.id),
       hostsOpen: false,
+      toolsOpen: false,
       settingsOpen: false,
       ...closeOverlaysPatch(get)
     })
@@ -650,6 +657,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...withTabs(get, get().tabs, tabId),
       editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId),
       hostsOpen: false,
+      toolsOpen: false,
       settingsOpen: false,
       ...closeOverlaysPatch(get)
     })
@@ -680,6 +688,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       split: { dir, secondary: [tabId], primaryTab, secondaryTab: tabId, ratio: 0.5 },
       hostsOpen: false,
+      toolsOpen: false,
       settingsOpen: false,
       ...closeOverlaysPatch(get)
     })
@@ -756,10 +765,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   toggleHostsOpen: () =>
-    get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, settingsOpen: false }),
+    get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, toolsOpen: false, settingsOpen: false }),
   setHostsOpen: (open) => {
-    set(open ? { hostsOpen: true, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false })
+    set(open ? { hostsOpen: true, toolsOpen: false, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false })
     if (open) void get().loadSessions()
+  },
+  toggleToolsOpen: () =>
+    get().toolsOpen ? set({ toolsOpen: false }) : set({ toolsOpen: true, hostsOpen: false, settingsOpen: false }),
+  setToolsOpen: (open) => {
+    set(open ? { toolsOpen: true, hostsOpen: false, settingsOpen: false, rightPanelOpen: false } : { toolsOpen: false })
   },
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
   openRemoteEditor: (termId, sessionId, file, pin = false, readOnly) => {

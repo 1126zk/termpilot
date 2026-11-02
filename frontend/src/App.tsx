@@ -12,6 +12,7 @@ import { TerminalView } from './components/TerminalView'
 import { OpsPanel } from './components/OpsPanel'
 import { RemoteEditor } from './components/RemoteEditor'
 import { HostsPage } from './components/HostsPage'
+import { ToolsPage } from './components/ToolsPage'
 import { startPointerDrag } from './components/flip'
 import { useAppStore, type SplitDir, type SplitState } from './stores/useAppStore'
 import { runCapture } from './terminal/captureView'
@@ -144,12 +145,13 @@ export default function App() {
   const split = useAppStore((s) => s.split)
   const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
+  const toolsOpen = useAppStore((s) => s.toolsOpen)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
-  // 文件标签跟着终端页走，切到主机页、设置页时收起
-  const onTerminalPage = !!activeTab && !hostsOpen && !settingsOpen
+  // 文件标签跟着终端页走，切到主机页、工具页、设置页时收起
+  const onTerminalPage = !!activeTab && !hostsOpen && !toolsOpen && !settingsOpen
   const editing = useAppStore((s) => s.editing)
-  const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !settingsOpen && activeTab))
+  const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab))
   const gridRef = useRef<HTMLDivElement>(null)
 
   // a 是主栏（左 / 上），b 是辅栏（右 / 下）；不分屏时只有 a。每一栏有自己的文件标签和正在看的文件
@@ -198,6 +200,10 @@ export default function App() {
             {settingsOpen ? (
               <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
                 <SettingsPage />
+              </div>
+            ) : toolsOpen ? (
+              <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
+                <ToolsPage />
               </div>
             ) : hostsOpen || !activeTab ? (
               <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
