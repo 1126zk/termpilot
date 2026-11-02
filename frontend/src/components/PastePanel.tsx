@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ClipboardPaste, RefreshCw, X } from 'lucide-react'
+import { ClipboardPaste, RefreshCw, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
@@ -30,6 +30,7 @@ export function PastePanel() {
   const [files, setFiles] = useState<RemoteFile[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   // 打开时和上传后各列一次目录，慢的那次后回来不能把新列表盖掉，只认最后一次
   const loadSeq = useRef(0)
@@ -80,7 +81,7 @@ export function PastePanel() {
     }
   }
 
-  // 粘贴的图本来就是临时文件，点叉直接删，不再确认
+  // 粘贴的图本来就是临时文件，点叉或清空都直接删，不再确认
   const remove = async (file: RemoteFile) => {
     if (!sessionId) return
     try {
@@ -88,6 +89,21 @@ export function PastePanel() {
       await load()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const clearAll = async () => {
+    if (!sessionId || files.length === 0 || clearing) return
+    setClearing(true)
+    try {
+      const results = await Promise.allSettled(
+        files.map((file) => window.api.sftp.remove(sessionId, file.path, 'file'))
+      )
+      const failed = results.filter((result) => result.status === 'rejected').length
+      await load()
+      setNotice(failed ? `${failed} 张图片删除失败` : '已清理所有图片')
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -114,10 +130,37 @@ export function PastePanel() {
           )}
         >
           <ClipboardPaste className="size-3.5 shrink-0" />
-          <span className="truncate">{uploading ? '正在上传…' : '点这里后按 Ctrl+V 粘贴图片'}</span>
+          {!uploading && (
+            <span className="hidden size-1.5 shrink-0 rounded-full bg-primary group-focus-within/paste:block" />
+          )}
+          {uploading ? (
+            <span className="truncate">正在上传…</span>
+          ) : (
+            <>
+              <span className="truncate group-focus-within/paste:hidden">点击面板后按 Ctrl+V 粘贴图片</span>
+              <span className="hidden truncate group-focus-within/paste:inline">面板已激活，按 Ctrl+V 粘贴图片</span>
+            </>
+          )}
         </div>
-        <Button variant="ghost" size="sm" className="h-7 px-2" title="刷新" disabled={loading} onClick={() => void load()}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          title="刷新"
+          disabled={loading || clearing}
+          onClick={() => void load()}
+        >
           <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          title={clearing ? '正在清理…' : '清理所有图片'}
+          disabled={files.length === 0 || clearing}
+          onClick={() => void clearAll()}
+        >
+          <Trash2 className={cn('size-3.5', clearing && 'animate-pulse')} />
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
