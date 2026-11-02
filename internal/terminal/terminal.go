@@ -229,6 +229,28 @@ func (s *Service) Close(termID string) {
 	s.releaseLive(t)
 }
 
+// SessionOf 终端属于哪个保存的连接；本机终端或已经关掉的返回空串。
+func (s *Service) SessionOf(termID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.terms[termID]; t != nil {
+		return t.sessionID
+	}
+	return ""
+}
+
+// HasSession 这个连接还有没有开着的终端。
+func (s *Service) HasSession(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.terms {
+		if t.sessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
 // BindView 界面订上之后，把这次运行里已经到达、还没画上的输出补上。
 func (s *Service) BindView(termID string) {
 	s.mu.Lock()

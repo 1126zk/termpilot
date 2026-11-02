@@ -450,7 +450,12 @@ func (a *App) hTermClose(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	sessionID := a.terminal.SessionOf(termID)
 	a.terminal.Close(termID)
+	// 这台服务器的标签全关了，端口映射跟着停（容易忘）；文件传输不动，让它跑完
+	if sessionID != "" && !a.terminal.HasSession(sessionID) {
+		a.pool.StopAllForwards(sessionID)
+	}
 	return nil, nil
 }
 

@@ -206,6 +206,23 @@ func (p *Pool) StartForward(sessionID string, rule ForwardRule) error {
 	return nil
 }
 
+// StopAllForwards 停掉这个会话上所有正在监听的端口映射，连接本身不动。
+// 这台服务器的终端标签全关掉时调用：映射容易忘了关，文件传输还要靠这条连接跑完。
+func (p *Pool) StopAllForwards(sessionID string) {
+	p.mu.Lock()
+	var closing []*activeForward
+	if slot := p.liveSlot(sessionID); slot != nil {
+		for key, f := range slot.forwards {
+			closing = append(closing, f)
+			delete(slot.forwards, key)
+		}
+	}
+	p.mu.Unlock()
+	for _, f := range closing {
+		_ = f.closer.Close()
+	}
+}
+
 // StopForward 停掉一条端口映射。已经建立的转发连接不受影响，只是不再接新连接。
 func (p *Pool) StopForward(sessionID string, rule ForwardRule) {
 	p.mu.Lock()
