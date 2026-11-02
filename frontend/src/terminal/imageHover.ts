@@ -25,12 +25,16 @@ export function hideImageHover(termId: string, path: string): void {
   if (current && current.termId === termId && current.path === path) useImageHover.setState({ hover: null })
 }
 
-/** Ctrl+点击图片路径：用图片查看器打开。打开要用到标签和会话，由 App 注册进来 */
+/** Ctrl+点击路径：用查看器/编辑器打开。打开要用到标签和会话，由 App 注册进来 */
 let openHandler: ((termId: string, path: string) => void) | null = null
 export function setImageOpenHandler(handler: ((termId: string, path: string) => void) | null): void {
   openHandler = handler
 }
 export function openImagePath(termId: string, path: string): void {
+  openHandler?.(termId, path)
+}
+/** 普通文件路径和图片走同一个打开通道，RemoteEditor 按文件类型分派编辑器或查看器 */
+export function openFilePath(termId: string, path: string): void {
   openHandler?.(termId, path)
 }
 
@@ -43,5 +47,23 @@ const BODY = `[^\\s'"\`<>|;&()]*?`
  */
 export const IMAGE_PATH = new RegExp(
   `(?<![\\w:/.~\\\\-])(~?/${BODY}\\.${EXT}|[A-Za-z]:[\\\\/]${BODY}\\.${EXT})(?![\\w.])`,
+  'gi'
+)
+
+// 常见文本文件扩展名，不含图片（图片走 IMAGE_PATH，带悬停预览）
+const FILE_EXT =
+  '(?:md|markdown|txt|json|ya?ml|toml|xml|csv|ts|tsx|js|jsx|mjs|cjs|go|py|sh|bash|zsh|fish|ps1|bat|cmd|rs|c|h|cc|cpp|cxx|hpp|java|kt|rb|php|pl|lua|sql|log|conf|cfg|ini|env|properties|gradle|mk|html?|css|scss|less|vue|svelte|swift|cs|vb|r|m|mm|tex|patch|diff)'
+// 路径最后一段：隐藏文件通用识别，最后一段以 . 开头即可，不枚举具体文件名。
+// SEG 不含路径分隔符，只匹配段名，避免把 .config/git/config 这种目录前缀误认成隐藏文件
+const SEG = `[^\\s'"\`<>|;&()/\\\\]+`
+// 段名后面只能是空白 / shell 分隔符或行尾，防止在 - 等字符处截断、或把目录前缀当文件
+const HIDDEN_FILE = `(?:~?/(?:${BODY}/)?\\.${SEG}|[A-Za-z]:[\\\\/](?:${BODY}[\\\\/])?\\.${SEG})(?![^\\s'"\`<>|;&()])`
+/**
+ * 一行里的普通文件路径：/ 或 ~/ 开头的绝对路径、Windows 盘符路径。
+ * 两类都认：以文本文件扩展名结尾的普通文件，以及最后一段以 . 开头的隐藏文件（.bashrc、.profile 等）。
+ * Ctrl+点击进入编辑器，没有悬停预览。
+ */
+export const FILE_PATH = new RegExp(
+  `(?<![\\w:/.~\\\\-])(${HIDDEN_FILE}|~?/${BODY}\\.${FILE_EXT}|[A-Za-z]:[\\\\/]${BODY}\\.${FILE_EXT})(?![\\w.])`,
   'gi'
 )

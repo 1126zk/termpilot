@@ -1,5 +1,5 @@
 import type { IBufferLine, ILink, Terminal } from '@xterm/xterm'
-import { hideImageHover, IMAGE_PATH, openImagePath, showImageHover } from './imageHover'
+import { FILE_PATH, hideImageHover, IMAGE_PATH, openFilePath, openImagePath, showImageHover } from './imageHover'
 
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/g
 const TRAILING_PUNCTUATION = /[.,;:!?，。；！？、]+$/
@@ -49,9 +49,10 @@ function linkBox(
 }
 
 /**
- * 终端里的两种链接，都是按住 Ctrl/Cmd 才有下划线、才能点：
+ * 终端里的三种链接，都是按住 Ctrl/Cmd 才有下划线、才能点：
  * - 网址：Ctrl+点击用系统浏览器打开
  * - 图片路径：悬停弹出预览（不用按 Ctrl），Ctrl+点击用图片查看器打开
+ * - 普通文件路径：Ctrl+点击进入编辑器，没有悬停预览
  */
 export function bindTerminalLinks(term: Terminal, termId: string): () => void {
   let hovered: ILink | null = null
@@ -136,6 +137,11 @@ export function bindTerminalLinks(term: Terminal, termId: string): () => void {
             () => hideImageHover(termId, path)
           )
         )
+      }
+      for (const match of line.matchAll(FILE_PATH)) {
+        const path = match[1]
+        if (!path || match.index === undefined) continue
+        links.push(makeLink(path, match.index, lineNumber, cells, () => openFilePath(termId, path)))
       }
       callback(links.length > 0 ? links : undefined)
     }
