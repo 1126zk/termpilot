@@ -227,9 +227,13 @@
   background: rgba(128, 128, 128, 0.8);
 }
 
-/* 组字条超出右边界时，浏览器会把终端横向滚走。宽度由 TerminalPool 收到组字时写上。 */
+/* 组字条超出右边界时，浏览器会把终端横向滚走。宽度由 TerminalPool 收到组字时写上。
+   screen 和 scrollable-element 要用 clip 不能用 hidden：一个方向 hidden 会把另一个方向的 visible
+   变成 auto。窗口缩小后 screen 里的内容还是旧高度，会多出一条带箭头的原生竖向滚动条。 */
 .xterm .xterm-screen,
-.xterm .xterm-scrollable-element,
+.xterm .xterm-scrollable-element {
+  overflow-x: clip;
+}
 .xterm .xterm-viewport {
   overflow-x: hidden;
 }
