@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Check, Copy, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,27 @@ const UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
 const LOWER = 'abcdefghijkmnpqrstuvwxyz'
 const DIGIT = '23456789'
 const SYMBOL = '!@#$%^&*()-_=+[]{};:,.<>?'
+const STORAGE_KEY = 'termpilot.tool.passwordGenerator'
+
+interface Settings {
+  lengthInput: string
+  upper: boolean
+  lower: boolean
+  digit: boolean
+  symbol: boolean
+}
+
+const defaults: Settings = { lengthInput: '16', upper: true, lower: true, digit: true, symbol: true }
+
+function readSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return { ...defaults, ...(JSON.parse(raw) as Partial<Settings>) }
+  } catch {
+    // 本地数据损坏时回落到默认配置
+  }
+  return defaults
+}
 
 function generate(length: number, upper: boolean, lower: boolean, digit: boolean, symbol: boolean): string {
   const pools: string[] = []
@@ -32,13 +53,26 @@ function generate(length: number, upper: boolean, lower: boolean, digit: boolean
 /** 密码生成器：一行工具，生成结果可直接复制。 */
 export function PasswordGenerator() {
   const setNotice = useAppStore((s) => s.setNotice)
-  const [lengthInput, setLengthInput] = useState('16')
-  const [upper, setUpper] = useState(true)
-  const [lower, setLower] = useState(true)
-  const [digit, setDigit] = useState(true)
-  const [symbol, setSymbol] = useState(true)
-  const [password, setPassword] = useState(() => generate(16, true, true, true, true))
+  const [initial] = useState(readSettings)
+  const [lengthInput, setLengthInput] = useState(initial.lengthInput)
+  const [upper, setUpper] = useState(initial.upper)
+  const [lower, setLower] = useState(initial.lower)
+  const [digit, setDigit] = useState(initial.digit)
+  const [symbol, setSymbol] = useState(initial.symbol)
+  const [password, setPassword] = useState(() =>
+    generate(
+      Math.min(512, Math.max(1, Number(initial.lengthInput) || 16)),
+      initial.upper,
+      initial.lower,
+      initial.digit,
+      initial.symbol
+    )
+  )
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ lengthInput, upper, lower, digit, symbol }))
+  }, [lengthInput, upper, lower, digit, symbol])
 
   const length = () => Math.min(512, Math.max(1, Number(lengthInput) || 16))
   const regenerate = useCallback(() => {
