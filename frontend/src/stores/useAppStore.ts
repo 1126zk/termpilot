@@ -11,6 +11,7 @@ import {
   type McpSettings,
   type McpSettingsInput,
   type ServerInfo,
+  type ServerMetrics,
   type SessionConfig,
   type SessionStatus,
   type SftpTransferEvent,
@@ -56,6 +57,9 @@ interface AppState {
   localShells: LocalShellInfo[]
   /** 服务器静态身份缓存（主机名/系统/内核/IP），按会话存，带采集时间戳 */
   serverInfoBySession: Record<string, { info: ServerInfo; at: number }>
+  /** 运维面板的动态采集（CPU/内存/进程…），按会话存，同一服务器的多个标签共用。
+      error 是最近一次失败的原始信息，成功后清空 */
+  metricsBySession: Record<string, { metrics: ServerMetrics | null; error: string; at: number }>
   /** Docker 采集缓存，按会话存。at 在采集开始时就写，兼作在途标记 */
   dockerBySession: Record<string, { info: DockerInfo | null; at: number }>
   /** 网站服务（nginx/caddy）配置采集缓存，按会话存，at 用法同 dockerBySession */
@@ -114,6 +118,10 @@ interface AppState {
   onSessionsChanged: (sessions: SessionConfig[]) => void
   /** 取服务器静态身份：有缓存且 10 分钟内就直接用，否则重新采一次 */
   loadServerInfo: (sessionId: string) => void
+  /** 采一次动态指标写进共用缓存；同一会话上一次没回来就跳过。quiet 时失败不记错误（连上时的预取） */
+  collectMetrics: (sessionId: string, quiet?: boolean) => Promise<void>
+  /** 有面板在显示这台服务器时调用：同一会话只有一个 3 秒采集器，最后一个面板退订才停。返回退订函数 */
+  watchMetrics: (sessionId: string) => () => void
   /** 取 Docker 列表：15 秒内有缓存（含在途）就直接用，force 强制重采 */
   loadDockerInfo: (sessionId: string, force?: boolean) => Promise<void>
   loadWebInfo: (sessionId: string, force?: boolean) => void
@@ -255,6 +263,11 @@ function cleanLabel(text: string, max: number): string {
  * 传输速度（字节/秒）。后端每写一块就推一次进度，太密，直接相邻两次相除会乱跳。
  * 攒够 500ms 才算一次，再和上一次的速度做平滑。传完就丢掉采样。
  */
+/** 每台服务器一个指标采集器：watchers 是正在显示的面板数，归零就停；inFlight 防止慢链路上请求叠起来 */
+const metricsWatch = new Map<string, { watchers: number; timer: number }>()
+const metricsInFlight = new Set<string>()
+const METRICS_INTERVAL = 3000
+
 const transferSamples = new Map<string, { at: number; bytes: number; speed: number }>()
 function transferSpeed(event: SftpTransferEvent): number {
   if (event.done) {
@@ -279,6 +292,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessions: [],
   localShells: [],
   serverInfoBySession: {},
+  metricsBySession: {},
   dockerBySession: {},
   webBySession: {},
   transfersBySession: {},
@@ -390,6 +404,53 @@ export const useAppStore = create<AppState>((set, get) => ({
       .catch(() => undefined)
   },
 
+  collectMetrics: async (sessionId, quiet = false) => {
+    if (metricsInFlight.has(sessionId)) return
+    metricsInFlight.add(sessionId)
+    try {
+      const metrics = await window.api.sessions.metrics(sessionId)
+      set({ metricsBySession: { ...get().metricsBySession, [sessionId]: { metrics, error: '', at: Date.now() } } })
+    } catch (e) {
+      if (quiet) return
+      // 失败保留上一次成功的数据，只记错误
+      const prev = get().metricsBySession[sessionId]
+      set({
+        metricsBySession: {
+          ...get().metricsBySession,
+          [sessionId]: {
+            metrics: prev?.metrics ?? null,
+            error: e instanceof Error ? e.message : String(e),
+            at: prev?.at ?? 0
+          }
+        }
+      })
+    } finally {
+      metricsInFlight.delete(sessionId)
+    }
+  },
+
+  watchMetrics: (sessionId) => {
+    const existing = metricsWatch.get(sessionId)
+    if (existing) {
+      existing.watchers++
+    } else {
+      void get().collectMetrics(sessionId)
+      const timer = window.setInterval(() => void get().collectMetrics(sessionId), METRICS_INTERVAL)
+      metricsWatch.set(sessionId, { watchers: 1, timer })
+    }
+    let done = false
+    return () => {
+      if (done) return
+      done = true
+      const w = metricsWatch.get(sessionId)
+      if (!w) return
+      w.watchers--
+      if (w.watchers > 0) return
+      window.clearInterval(w.timer)
+      metricsWatch.delete(sessionId)
+    }
+  },
+
   loadDockerInfo: (sessionId, force = false) => {
     const cached = get().dockerBySession[sessionId]
     const now = Date.now()
@@ -471,6 +532,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     void window.api.sessions
       .detectOs(session.id)
       .then((info) => {
+        // 连上了就顺手预取一次运维面板的数据，第一次打开面板不用等。Windows 跑不了采集脚本，跳过
+        if (info?.os && info.os !== 'unknown' && info.os !== 'windows') {
+          void get().collectMetrics(session.id, true)
+          get().loadServerInfo(session.id)
+        }
         // 连接抖一下就会探成 unknown，别把之前认出来的系统冲掉
         if (!info?.os || (info.os === 'unknown' && known.os)) return
         set({

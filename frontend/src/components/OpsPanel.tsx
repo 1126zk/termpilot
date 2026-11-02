@@ -50,10 +50,11 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   const activeTab = tabs.find((t) => t.id === props.termId)
   const sessionId = activeTab?.sessionId ?? null
 
-  const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
-  const [error, setError] = useState('')
-  // 上一次采集没回来就不发下一次，避免请求在慢链路上叠起来
-  const inFlight = useRef(false)
+  // 动态指标按服务器共用：同一台服务器的标签读同一份，采集器也只有一个（store.watchMetrics）
+  const shared = useAppStore((s) => (sessionId ? s.metricsBySession[sessionId] : undefined))
+  const watchMetrics = useAppStore((s) => s.watchMetrics)
+  const collectMetrics = useAppStore((s) => s.collectMetrics)
+  const error = shared?.error ? connErrorText(shared.error) : ''
   // 静态身份（主机名/系统/内核/IP）走 store 缓存：同一会话 10 分钟内只采一次
   const loadServerInfo = useAppStore((s) => s.loadServerInfo)
   const serverInfo = useAppStore((s) => (sessionId ? s.serverInfoBySession[sessionId]?.info : undefined))
@@ -67,6 +68,10 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   // 杀进程两步确认：第一次点进入确认态，移出列表或再次点击才退出
   const [confirmKill, setConfirmKill] = useState<number | null>(null)
   const [killing, setKilling] = useState<Set<number>>(new Set())
+  // 确认结束进程期间画面定住，列表不在鼠标底下跳；共用数据照常更新，退出确认再跟上
+  const frozen = useRef<ServerMetrics | null>(null)
+  if (confirmKill === null) frozen.current = shared?.metrics ?? null
+  const metrics = confirmKill === null ? (shared?.metrics ?? null) : frozen.current
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
   const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual'>('proc')
   // 面板和脚本页都操作当前标签的主终端，开关面板不新建 Shell
@@ -85,9 +90,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
       .killProc(sessionId, pid)
       .then(async () => {
         setNotice(`已向进程 ${pid} 发送结束信号`)
-        const m = await window.api.sessions.metrics(sessionId)
-        setMetrics(m)
-        setError('')
+        await collectMetrics(sessionId)
       })
       .catch((e) => {
         setNotice(connErrorText(e instanceof Error ? e.message : String(e)))
@@ -118,31 +121,11 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
     window.addEventListener('pointerup', onUp)
   }
 
+  // 只有正在显示的面板订阅采集器；同一台服务器所有面板都退订后采集器停下，数据留着
   useEffect(() => {
     if (!sessionId || !props.active) return
-    let stopped = false
-    const collect = async () => {
-      if (inFlight.current || confirmKill !== null) return
-      inFlight.current = true
-      try {
-        const m = await window.api.sessions.metrics(sessionId)
-        if (stopped || confirmKill !== null) return
-        setMetrics(m)
-        setError('')
-      } catch (e) {
-        // 采集失败保留上一次成功的数据，只提示一句
-        if (!stopped) setError(connErrorText(e instanceof Error ? e.message : String(e)))
-      } finally {
-        inFlight.current = false
-      }
-    }
-    void collect()
-    const timer = window.setInterval(() => void collect(), 3000)
-    return () => {
-      stopped = true
-      window.clearInterval(timer)
-    }
-  }, [sessionId, props.active, confirmKill])
+    return watchMetrics(sessionId)
+  }, [sessionId, props.active, watchMetrics])
 
   useEffect(() => {
     if (sessionId && props.active) loadServerInfo(sessionId)
