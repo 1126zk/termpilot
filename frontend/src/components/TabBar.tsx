@@ -313,6 +313,8 @@ export function TabBar() {
   }
 
   const startTabDrag = (event: React.PointerEvent, id: string) => {
+    // 拖拽前的激活标签：拖拽排序 / 取消分屏都不该改变焦点，结束时恢复
+    const activeBefore = useAppStore.getState().activeTabId
     startPointerDrag({
       event,
       axis: 'x',
@@ -347,6 +349,10 @@ export function TabBar() {
         setDragTabId(null)
         setDragOffset(0)
         settleSplit()
+        // 拖拽不应该切换焦点：聚焦哪个就展示哪个，与被拖标签无关
+        if (useAppStore.getState().activeTabId !== activeBefore) {
+          useAppStore.setState({ activeTabId: activeBefore })
+        }
       }
     })
   }
