@@ -2012,11 +2012,17 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
 
   const run = (scope: ScriptScope, s: ScriptItem) => {
     if (s.interactive) {
-      // 交互式：落成临时文件再跑（不是 echo|bash 管道——管道会占住 stdin，read 没法用），
-      // stdin 留给终端，read/select/apt 确认这些都能正常交互；跑完即删不留痕
-      const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(s.content)))
-      window.api.term.input(props.panelTermId, `f=$(mktemp); echo ${b64} | base64 -d > "$f"; bash "$f"; rm -f "$f"\n`)
-      setNotice(`${s.name} 已在右侧终端运行`)
+      // 只跑脚本本身。开头擦掉启动命令，终端里只留下等用户输入的输出。
+      const script = `/tmp/t${Math.random().toString(36).slice(2, 8)}.sh`
+      const body = s.content.endsWith('\n') ? s.content : `${s.content}\n`
+      const wrapped = `printf '\\033[1A\\033[2K\\r'\n${body}`
+      void window.api.sftp
+        .write(props.sessionId, script, wrapped)
+        .then(() => {
+          window.api.term.input(props.panelTermId, `bash '${script}'; rm -f '${script}'\n`)
+          setNotice(`${s.name} 已在右侧终端运行`)
+        })
+        .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       return
     }
     setRunning(s.id)
