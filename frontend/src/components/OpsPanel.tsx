@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { CircleHelp, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
-import type { CronEntry, DockerInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
+import type { CronEntry, DockerInfo, PortInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -270,6 +270,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
               loaded={metrics !== null}
               divider
             />
+            <PortSection ports={metrics?.ports ?? []} loaded={metrics !== null} divider />
           </div>
         ) : opsTab === 'docker' ? (
           <DockerSection sessionId={sessionId} active={props.active} />
@@ -396,6 +397,79 @@ function ProcSection(props: {
       </div>
     </div>
   )
+}
+
+/** 端口榜一节：本机正在监听的端口（TCP/UDP），按端口升序全部列出。
+    展开 / 收起是整节折叠：收起时只留标题栏，展开时显示全部端口。
+    非 root 时其他进程的 PID/程序名拿不到，显示 -。 */
+function PortSection(props: { ports: PortInfo[]; loaded: boolean; divider?: boolean }) {
+  const [expanded, setExpanded] = useState(true)
+  const list = props.ports
+  return (
+    <div>
+      <div
+        className={cn(
+          'flex items-center justify-between border-b bg-accent/40 px-3 py-1.5',
+          props.divider && 'border-t'
+        )}
+      >
+        <span className="text-sm text-muted-foreground">占用端口的程序</span>
+        {list.length > 0 && (
+          <button
+            type="button"
+            className="text-sm text-muted-foreground hover:text-foreground"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? '收起' : '展开'}
+          </button>
+        )}
+      </div>
+      {expanded && (
+      <div>
+        <table className="w-full table-fixed text-sm">
+          <thead className="sticky top-0 bg-background">
+            <tr className="border-b text-muted-foreground">
+              <th className="w-14 px-2 py-1.5 text-left font-medium">协议</th>
+              <th className="w-36 px-2 py-1.5 text-left font-medium">监听地址</th>
+              <th className="w-18 px-2 py-1.5 text-right font-medium">端口</th>
+              <th className="w-18 px-2 py-1.5 text-right font-medium">PID</th>
+              <th className="px-2 py-1.5 text-left font-medium">程序</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((p) => (
+              <tr key={`${p.proto}:${p.addr}:${p.port}:${p.pid}`} className="border-b border-border/50 last:border-0">
+                <td className="px-2 py-1.5 uppercase text-muted-foreground">{p.proto}</td>
+                <td className="truncate px-2 py-1.5 font-mono text-xs">{p.addr}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{p.port}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{p.pid > 0 ? p.pid : '-'}</td>
+                <td className="truncate px-2 py-1.5">
+                  <PortCommand port={p} />
+                </td>
+              </tr>
+            ))}
+            {props.loaded && list.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
+                  没有采集到端口信息（需要 ss 或 netstat）
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      )}
+    </div>
+  )
+}
+
+/** 端口榜的程序列：有完整命令行时与进程「命令」列一致（可执行文件只留 basename，参数全展示，
+    hover 浮层是完整命令行）；拿不到命令行时退回 ss 给的程序名。 */
+function PortCommand(props: { port: PortInfo }) {
+  const p = props.port
+  if (p.cmd) return <ProcCommand cmd={p.cmd} />
+  if (p.name) return <span className="block truncate text-foreground">{p.name}</span>
+  return <span className="text-muted-foreground">-</span>
 }
 
 function ProcCommand(props: { cmd: string }) {

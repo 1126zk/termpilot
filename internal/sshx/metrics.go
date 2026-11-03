@@ -38,6 +38,15 @@ echo '#TP-DF#'
 df -P -x tmpfs -x devtmpfs 2>/dev/null || df -P 2>/dev/null
 echo '#TP-PS#'
 ps aux 2>/dev/null
+echo '#TP-PORTS#'
+(ss -tulnp 2>/dev/null || netstat -tulnp 2>/dev/null)
+echo '#TP-PORTCMDS#'
+for pid in $( (ss -tulnp 2>/dev/null || netstat -tulnp 2>/dev/null) | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p; s#.* \([0-9][0-9]*\)/.*#\1#p' | sort -u ); do
+  echo "#PID:$pid#"
+  tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null
+  echo
+  readlink /proc/$pid/exe 2>/dev/null
+done
 echo '#TP-END#'
 `
 
@@ -52,6 +61,7 @@ func (s *ExecService) CollectMetrics(sessionID string) (*ServerMetrics, error) {
 	m := &ServerMetrics{
 		Disks:       []DiskUsage{},
 		Procs:       []ProcInfo{},
+		Ports:       []PortInfo{},
 		CollectedAt: time.Now().UnixMilli(),
 	}
 
@@ -106,6 +116,15 @@ func (s *ExecService) CollectMetrics(sessionID string) (*ServerMetrics, error) {
 
 	m.Disks = parseDf(sec["DF"])
 	m.Procs = parsePs(sec["PS"])
+	m.Ports = parsePorts(sec["PORTS"])
+	// 按 PID 补完整命令行和可执行路径，面板展开时用来区分同名程序
+	cmds := parsePortCmds(sec["PORTCMDS"])
+	for i := range m.Ports {
+		if c, ok := cmds[m.Ports[i].Pid]; ok {
+			m.Ports[i].Cmd = c.cmd
+			m.Ports[i].Exe = c.exe
+		}
+	}
 	m.NetRxBps, m.NetTxBps = netRate(sec["NET1"], sec["NET2"])
 	return m, nil
 }
@@ -309,6 +328,110 @@ func parsePs(text string) []ProcInfo {
 		}
 	}
 	return merged
+}
+
+// ssProcRe 从 ss 的 Process 列提取程序名和 PID：users:(("nginx",pid=1234,fd=6),...)
+var ssProcRe = regexp.MustCompile(`"([^"]+)",pid=(\d+)`)
+
+// localPortRe 找「地址:数字端口」字段，Peer 一列是 * 不会被误当本地地址。
+var localPortRe = regexp.MustCompile(`:\d+$`)
+
+// parsePorts 解析 ss -tulnp 或 netstat -tulnp 的输出，统一成监听端口列表。
+// 两种输出都只含监听 socket：ss 的 Local 在第 5 列、netstat 在第 4 列，
+// 这里不按列号，直接找第一个「:数字」结尾的字段当本地地址，兼容两种格式。
+// 非 root 时其他进程的 PID/程序名为空，分别留 0 和空串。
+func parsePorts(text string) []PortInfo {
+	ports := []PortInfo{}
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		proto := strings.ToLower(fields[0])
+		if proto != "tcp" && proto != "udp" {
+			continue
+		}
+		local := ""
+		for _, f := range fields[1:] {
+			if localPortRe.MatchString(f) {
+				local = f
+				break
+			}
+		}
+		if local == "" {
+			continue
+		}
+		// IPv6 是 [::]:22，按最后一个冒号切开；ss 的地址可能带 %eth0 后缀，去掉
+		i := strings.LastIndex(local, ":")
+		if i < 0 {
+			continue
+		}
+		addr := local[:i]
+		if j := strings.Index(addr, "%"); j >= 0 {
+			addr = addr[:j]
+		}
+		port, err := strconv.Atoi(local[i+1:])
+		if err != nil {
+			continue
+		}
+		p := PortInfo{Proto: proto, Addr: addr, Port: port}
+		if m := ssProcRe.FindStringSubmatch(line); m != nil {
+			p.Name = m[1]
+			p.Pid, _ = strconv.Atoi(m[2])
+		} else if j := strings.Index(fields[len(fields)-1], "/"); j > 0 {
+			// netstat 的 PID/Program name 列：1234/sshd
+			last := fields[len(fields)-1]
+			if pid, err := strconv.Atoi(last[:j]); err == nil {
+				p.Pid = pid
+				p.Name = last[j+1:]
+			}
+		}
+		ports = append(ports, p)
+	}
+	sort.SliceStable(ports, func(i, j int) bool {
+		if ports[i].Port != ports[j].Port {
+			return ports[i].Port < ports[j].Port
+		}
+		if ports[i].Proto != ports[j].Proto {
+			return ports[i].Proto < ports[j].Proto
+		}
+		return ports[i].Addr < ports[j].Addr
+	})
+	return ports
+}
+
+// portCmd 一个监听进程的完整命令行和可执行路径。
+type portCmd struct {
+	cmd string
+	exe string
+}
+
+// parsePortCmds 解析 PORTCMDS 段：#PID:<pid># 行开始一条，接下来两行分别是
+// cmdline（NUL 已换成空格，可能为空行）和 exe 路径（可能为空）。
+func parsePortCmds(text string) map[int]portCmd {
+	out := map[int]portCmd{}
+	pid := 0
+	lineIdx := 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "#PID:") && strings.HasSuffix(line, "#") {
+			pid, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(line, "#PID:"), "#"))
+			lineIdx = 0
+			continue
+		}
+		if pid == 0 {
+			continue
+		}
+		c := out[pid]
+		switch lineIdx {
+		case 0:
+			c.cmd = strings.TrimSpace(line)
+		case 1:
+			c.exe = strings.TrimSpace(line)
+		}
+		out[pid] = c
+		lineIdx++
+	}
+	return out
 }
 
 // KillProcess 给远端进程发 SIGTERM（温和杀）。面板杀进程按钮用；

@@ -87,6 +87,8 @@ export interface ServerMetrics {
   memAvail: number
   disks: DiskUsage[]
   procs: ProcInfo[]
+  /** 本机正在监听的端口（TCP LISTEN 与 UDP），按端口升序 */
+  ports: PortInfo[]
   /** 真实网卡合计的收发速度，字节/秒。不含回环和容器、虚拟机的虚拟网卡 */
   netRxBps: number
   netTxBps: number
@@ -203,6 +205,22 @@ export interface ProcInfo {
   rss: number
   name: string
   cmd: string
+}
+
+/** 一个监听端口。非 root 采集时其他进程的 pid / name 可能拿不到，分别为 0 和空串。
+    cmd 是完整命令行、exe 是可执行文件路径，用来区分同名程序，读不到时为空串。 */
+export interface PortInfo {
+  /** tcp / udp */
+  proto: string
+  /** 监听地址：0.0.0.0、127.0.0.1、[::] 等 */
+  addr: string
+  port: number
+  pid: number
+  name: string
+  /** /proc/<pid>/cmdline 完整命令行 */
+  cmd: string
+  /** readlink /proc/<pid>/exe 可执行文件路径 */
+  exe: string
 }
 
 export interface Tab {

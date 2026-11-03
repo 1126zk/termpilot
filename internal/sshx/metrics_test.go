@@ -38,3 +38,79 @@ func TestNetRateCounterWrapAndMissing(t *testing.T) {
 		t.Fatalf("empty: rx=%v tx=%v", rx, tx)
 	}
 }
+
+func TestParsePortsSs(t *testing.T) {
+	text := `Netid State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+udp   UNCONN 0      0      127.0.0.53%lo:53   0.0.0.0:*        users:(("systemd-resolve",pid=123,fd=12))
+tcp   LISTEN 0      128    0.0.0.0:22         0.0.0.0:*        users:(("sshd",pid=1234,fd=3))
+tcp   LISTEN 0      128    [::]:22             [::]:*           users:(("sshd",pid=1234,fd=4))
+tcp   LISTEN 0      128    0.0.0.0:8080       0.0.0.0:*
+`
+	ports := parsePorts(text)
+	if len(ports) != 4 {
+		t.Fatalf("len=%d, want 4: %+v", len(ports), ports)
+	}
+	// 按端口升序：22 的两条（IPv4 在前）、53、8080
+	if ports[0].Port != 22 || ports[0].Addr != "0.0.0.0" || ports[0].Pid != 1234 || ports[0].Name != "sshd" {
+		t.Fatalf("ports[0]=%+v", ports[0])
+	}
+	if ports[1].Port != 22 || ports[1].Addr != "[::]" || ports[1].Proto != "tcp" {
+		t.Fatalf("ports[1]=%+v", ports[1])
+	}
+	if ports[2].Port != 53 || ports[2].Proto != "udp" || ports[2].Addr != "127.0.0.53" || ports[2].Pid != 123 || ports[2].Name != "systemd-resolve" {
+		t.Fatalf("ports[2]=%+v", ports[2])
+	}
+	// 没权限的一行：端口留住，PID/程序名为空
+	if ports[3].Port != 8080 || ports[3].Pid != 0 || ports[3].Name != "" {
+		t.Fatalf("ports[3]=%+v", ports[3])
+	}
+}
+
+func TestParsePortsNetstat(t *testing.T) {
+	text := `Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      1234/sshd
+udp        0      0 127.0.0.53:53           0.0.0.0:*                           123/systemd-resolve
+tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN      -
+`
+	ports := parsePorts(text)
+	if len(ports) != 3 {
+		t.Fatalf("len=%d, want 3: %+v", len(ports), ports)
+	}
+	if ports[0].Port != 22 || ports[0].Pid != 1234 || ports[0].Name != "sshd" {
+		t.Fatalf("ports[0]=%+v", ports[0])
+	}
+	if ports[1].Port != 53 || ports[1].Pid != 123 || ports[1].Name != "systemd-resolve" {
+		t.Fatalf("ports[1]=%+v", ports[1])
+	}
+	if ports[2].Port != 8080 || ports[2].Pid != 0 || ports[2].Name != "" {
+		t.Fatalf("ports[2]=%+v", ports[2])
+	}
+	if got := parsePorts(""); len(got) != 0 {
+		t.Fatalf("empty: %+v", got)
+	}
+}
+
+func TestParsePortCmds(t *testing.T) {
+	text := `#PID:1234#
+/usr/sbin/sshd -D
+/usr/sbin/sshd
+#PID:123#
+/lib/systemd/systemd-resolved
+/lib/systemd/systemd-resolved
+#PID:999#
+
+
+`
+	cmds := parsePortCmds(text)
+	if cmds[1234].cmd != "/usr/sbin/sshd -D" || cmds[1234].exe != "/usr/sbin/sshd" {
+		t.Fatalf("1234=%+v", cmds[1234])
+	}
+	if cmds[123].cmd != "/lib/systemd/systemd-resolved" || cmds[123].exe != "/lib/systemd/systemd-resolved" {
+		t.Fatalf("123=%+v", cmds[123])
+	}
+	// 读不到的两行留空，不串到下一个 PID
+	if cmds[999].cmd != "" || cmds[999].exe != "" {
+		t.Fatalf("999=%+v", cmds[999])
+	}
+}

@@ -86,6 +86,8 @@ type ServerMetrics struct {
 	MemAvail    uint64      `json:"memAvail"`
 	Disks       []DiskUsage `json:"disks"`
 	Procs       []ProcInfo  `json:"procs"`
+	// 本机正在监听的端口（TCP LISTEN 与 UDP），按端口升序
+	Ports       []PortInfo  `json:"ports"`
 	// 真实网卡合计的收发速度，字节/秒。不含回环和容器、虚拟机的虚拟网卡
 	NetRxBps    float64 `json:"netRxBps"`
 	NetTxBps    float64 `json:"netTxBps"`
@@ -189,4 +191,18 @@ type ProcInfo struct {
 	Rss  uint64  `json:"rss"`
 	Name string  `json:"name"`
 	Cmd  string  `json:"cmd"`
+}
+
+// PortInfo 一个监听端口。Proto 是 tcp / udp；Addr 是监听地址（0.0.0.0、127.0.0.1、[::] 等）。
+// 非 root 采集时其他进程的 Pid / Name 可能拿不到，分别为 0 和空串。
+// Cmd 是 /proc/<pid>/cmdline 的完整命令行，Exe 是 readlink /proc/<pid>/exe 的可执行路径，
+// 用来区分同名程序；读不到时为空串。
+type PortInfo struct {
+	Proto string `json:"proto"`
+	Addr  string `json:"addr"`
+	Port  int    `json:"port"`
+	Pid   int    `json:"pid"`
+	Name  string `json:"name"`
+	Cmd   string `json:"cmd"`
+	Exe   string `json:"exe"`
 }
