@@ -117,7 +117,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     const dist = Math.abs(dy) - dead
     if (dist > 0) {
       const cells = dist / cellH
-      const perSec = Math.min(90, 10 + cells * 16)
+      const perSec = Math.min(180, 20 + cells * 32)
       carry += perSec / 60
       const count = Math.min(8, Math.floor(carry))
       carry -= count

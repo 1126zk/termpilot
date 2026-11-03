@@ -1,7 +1,7 @@
 /** 指针离起点这么近时不滚，免得手抖 */
 const DEAD_ZONE = 8
 /** 每离开起点 1px，速度加多少 px/秒 */
-const SPEED = 6
+const SPEED = 12
 
 /**
  * 鼠标中键自动滚动（Windows 浏览器的那种）：按下中键出现起点标记，
