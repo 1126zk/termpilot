@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { PasswordGenerator } from './tools/PasswordGenerator'
 import { MermaidViewer } from './tools/MermaidViewer'
+import { MarkdownViewer } from './tools/MarkdownViewer'
 
 const ORDER_KEY = 'termpilot.toolOrder'
 const HIDDEN_KEY = 'termpilot.toolHidden'
@@ -24,7 +25,8 @@ interface ToolDef {
 
 const tools: ToolDef[] = [
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
-  { id: 'mermaid', name: 'Mermaid 查看器', component: MermaidViewer }
+  { id: 'mermaid', name: 'Mermaid 查看器', component: MermaidViewer },
+  { id: 'markdown', name: 'Markdown 预览', component: MarkdownViewer }
 ]
 
 function readOrder(): string[] {
