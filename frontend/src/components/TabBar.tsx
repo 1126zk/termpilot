@@ -535,7 +535,20 @@ export function TabBar() {
                       : noDrag
                   }
                   title={t.remark?.trim() || undefined}
-                  onPointerDown={(e) => startTabDrag(e, t.id)}
+                  onPointerDown={(e) => {
+                    // 中键不拖标签，并拦住浏览器的中键自动滚动
+                    if (e.button === 1) {
+                      e.preventDefault()
+                      return
+                    }
+                    startTabDrag(e, t.id)
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button !== 1) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    closeTab(t.id)
+                  }}
                   onClick={() => {
                     if (suppressTabClick.current) {
                       suppressTabClick.current = false
