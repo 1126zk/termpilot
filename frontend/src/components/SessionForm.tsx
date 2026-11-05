@@ -24,11 +24,16 @@ import type { SshHopInput } from '../../../shared/ssh-options'
 const empty = () => ({
   name: '',
   host: '',
-  port: 22,
+  port: '22',
   username: '',
   secret: '',
   useKey: false
 })
+
+const validPort = (raw: string) => {
+  const port = Number(raw)
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
+}
 
 /** 表单里端口先用字符串存，空值留着，保存时再校验转换。左边永远是本机，右边永远是服务器。 */
 interface ForwardDraft {
@@ -40,7 +45,7 @@ interface ForwardDraft {
 interface JumpDraft {
   id: number
   host: string
-  port: number
+  port: string
   username: string
   secret: string
   hasSecret?: boolean
@@ -50,7 +55,7 @@ interface JumpDraft {
 const newJumpDraft = (id: number): JumpDraft => ({
   id,
   host: '',
-  port: 22,
+  port: '22',
   username: '',
   secret: '',
   showSecret: false
@@ -111,7 +116,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       setForm({
         name: s.name,
         host: s.host,
-        port: s.port,
+        port: String(s.port),
         username: s.username,
         secret: '',
         useKey: Boolean(s.useKey)
@@ -120,7 +125,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
         (s.jumps ?? []).map((hop) => ({
           id: nextJumpID.current++,
           host: hop.host,
-          port: hop.port,
+          port: String(hop.port),
           username: hop.username,
           secret: '',
           hasSecret: hop.hasSecret,
@@ -143,7 +148,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       setForm({
         ...empty(),
         host: editing.host ?? '',
-        port: editing.port ?? 22
+        port: String(editing.port ?? 22)
       })
       setForwards([])
       setJumps([])
@@ -190,10 +195,9 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     const rules: ForwardRule[] = []
     for (const draft of forwards) {
       if (!draft.localPort.trim() && !draft.remotePort.trim()) continue
-      const localPort = Number(draft.localPort)
-      const remotePort = Number(draft.remotePort)
-      const valid = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535
-      if (!valid(localPort) || !valid(remotePort)) return null
+      const localPort = validPort(draft.localPort)
+      const remotePort = validPort(draft.remotePort)
+      if (localPort == null || remotePort == null) return null
       // 数据模型按监听/目标存：本地转发听本机，远程转发听服务器
       rules.push(
         draft.type === 'local'
@@ -210,8 +214,9 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       const host = draft.host.trim()
       const username = draft.username.trim()
       if (!host && !username && !draft.secret) continue
-      if (!host || !username || !Number.isInteger(draft.port) || draft.port < 1 || draft.port > 65535) return null
-      collected.push({ host, port: draft.port, username, secret: draft.secret || undefined })
+      const port = validPort(draft.port)
+      if (!host || !username || port == null) return null
+      collected.push({ host, port, username, secret: draft.secret || undefined })
     }
     return collected
   }
@@ -221,7 +226,8 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     const name = form.name.trim()
     const host = form.host.trim()
     const username = form.username.trim()
-    if (!name || !host || !username) return
+    const port = validPort(form.port)
+    if (!name || !host || !username || port == null) return
     const rules = collectForwards()
     if (!rules) return
     const nextJumps = collectJumps()
@@ -230,7 +236,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       name,
       group: '',
       host,
-      port: form.port,
+      port,
       username,
       secret: form.useKey ? '' : form.secret ? form.secret : undefined,
       useKey: form.useKey,
@@ -301,10 +307,10 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
             />
             <Input
               className="h-10"
-              type="number"
+              inputMode="numeric"
               placeholder="22"
               value={form.port}
-              onChange={(e) => set('port', Number(e.target.value) || 22)}
+              onChange={(e) => set('port', e.target.value.replace(/\D/g, ''))}
             />
           </div>
           <IconInput
@@ -470,10 +476,10 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
                   />
                   <Input
                     className="h-10"
-                    type="number"
+                    inputMode="numeric"
                     placeholder="22"
                     value={jump.port}
-                    onChange={(e) => setJump(jump.id, { port: Number(e.target.value) || 22 })}
+                    onChange={(e) => setJump(jump.id, { port: e.target.value.replace(/\D/g, '') })}
                   />
                 </div>
                 <IconInput
