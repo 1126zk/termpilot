@@ -62,6 +62,8 @@ interface AppState {
   metricsBySession: Record<string, { metrics: ServerMetrics | null; error: string; at: number }>
   /** Docker 采集缓存，按会话存。at 在采集开始时就写，兼作在途标记 */
   dockerBySession: Record<string, { info: DockerInfo | null; at: number }>
+  /** 本次运行里记住的 sudo 密码，只在内存，关掉应用就没了。用来刷新 Docker 列表 */
+  dockerSudoBySession: Record<string, string>
   /** 网站服务（nginx/caddy）配置采集缓存，按会话存，at 用法同 dockerBySession */
   webBySession: Record<string, { info: WebInfo | null; at: number }>
   /** SFTP 传输记录按服务器会话归属，同一服务器的多个终端标签共用。speed 为字节/秒 */
@@ -128,6 +130,8 @@ interface AppState {
   watchMetrics: (sessionId: string) => () => void
   /** 取 Docker 列表：15 秒内有缓存（含在途）就直接用，force 强制重采 */
   loadDockerInfo: (sessionId: string, force?: boolean) => Promise<void>
+  /** 记住 sudo 密码并立刻重采。密码不对时 loadDockerInfo 会清掉 */
+  setDockerSudo: (sessionId: string, password: string) => Promise<void>
   loadWebInfo: (sessionId: string, force?: boolean) => void
   saveMcp: (input: McpSettingsInput) => Promise<void>
   setSettingsOpen: (open: boolean) => void
@@ -298,6 +302,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   serverInfoBySession: {},
   metricsBySession: {},
   dockerBySession: {},
+  dockerSudoBySession: {},
   webBySession: {},
   transfersBySession: {},
   hostNotes: {},
@@ -461,13 +466,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     const now = Date.now()
     // at 开始时就写：15 秒内的重复调用（含还在跑的）都跳过
     if (!force && cached && now - cached.at < 15 * 1000) return Promise.resolve()
+    const password = get().dockerSudoBySession[sessionId] ?? ''
     set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info: cached?.info ?? null, at: now } } })
+    const stillLatest = () => (get().dockerBySession[sessionId]?.at ?? 0) <= now
     return window.api.sessions
-      .docker(sessionId)
-      .then((info) =>
+      .docker(sessionId, password)
+      .then((info) => {
+        // 后发起的采集先回来时，丢掉这次，避免没权限的空列表盖住 sudo 结果
+        if (!stillLatest()) return
         set({ dockerBySession: { ...get().dockerBySession, [sessionId]: { info, at: Date.now() } } })
-      )
-      .catch(() => undefined)
+      })
+      .catch((e) => {
+        if (!stillLatest()) return
+        const message = e instanceof Error ? e.message : String(e)
+        if (!password || !message.includes('密码')) return
+        const next = { ...get().dockerSudoBySession }
+        delete next[sessionId]
+        const prev = get().dockerBySession[sessionId]?.info
+        const info: DockerInfo = {
+          available: true,
+          needSudo: true,
+          running: false,
+          containers: [],
+          images: [],
+          volumes: [],
+          networks: [],
+          daemonJson: prev?.daemonJson ?? ''
+        }
+        set({
+          dockerSudoBySession: next,
+          dockerBySession: { ...get().dockerBySession, [sessionId]: { info, at: Date.now() } }
+        })
+        get().setNotice('sudo 密码不对')
+      })
+  },
+
+  setDockerSudo: (sessionId, password) => {
+    set({ dockerSudoBySession: { ...get().dockerSudoBySession, [sessionId]: password } })
+    return get().loadDockerInfo(sessionId, true)
   },
 
   loadWebInfo: (sessionId, force = false) => {

@@ -76,18 +76,18 @@ type OsInfo struct {
 // 远端某段采集失败时对应字段留零值，只有 exec 通道本身失败才返回 error。
 // 主机名/系统/内核/IP 这些静态身份在 ServerInfo，不在这里。
 type ServerMetrics struct {
-	UptimeSec   int64       `json:"uptimeSec"`
-	Cores       int         `json:"cores"`
-	CpuPercent  float64     `json:"cpuPercent"`
-	Load1       float64     `json:"load1"`
-	Load5       float64     `json:"load5"`
-	Load15      float64     `json:"load15"`
-	MemTotal    uint64      `json:"memTotal"`
-	MemAvail    uint64      `json:"memAvail"`
-	Disks       []DiskUsage `json:"disks"`
-	Procs       []ProcInfo  `json:"procs"`
+	UptimeSec  int64       `json:"uptimeSec"`
+	Cores      int         `json:"cores"`
+	CpuPercent float64     `json:"cpuPercent"`
+	Load1      float64     `json:"load1"`
+	Load5      float64     `json:"load5"`
+	Load15     float64     `json:"load15"`
+	MemTotal   uint64      `json:"memTotal"`
+	MemAvail   uint64      `json:"memAvail"`
+	Disks      []DiskUsage `json:"disks"`
+	Procs      []ProcInfo  `json:"procs"`
 	// 本机正在监听的端口（TCP LISTEN 与 UDP），按端口升序
-	Ports       []PortInfo  `json:"ports"`
+	Ports []PortInfo `json:"ports"`
 	// 真实网卡合计的收发速度，字节/秒。不含回环和容器、虚拟机的虚拟网卡
 	NetRxBps    float64 `json:"netRxBps"`
 	NetTxBps    float64 `json:"netTxBps"`
@@ -106,9 +106,11 @@ type ServerInfo struct {
 
 // DockerInfo 一次 Docker 采集。Available 为假表示服务器没装 docker。
 type DockerInfo struct {
-	Available  bool              `json:"available"`
+	Available bool `json:"available"`
 	// Running 装了不等于在跑：daemon 活着（docker info 能通）才是 true。
-	Running    bool              `json:"running"`
+	Running bool `json:"running"`
+	// NeedSudo 当前用户连不上 docker.sock，列表是空的因为没权限，不是因为没有容器。
+	NeedSudo   bool              `json:"needSudo"`
 	Containers []DockerContainer `json:"containers"`
 	Images     []DockerImage     `json:"images"`
 	Volumes    []DockerVolume    `json:"volumes"`

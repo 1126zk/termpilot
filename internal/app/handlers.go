@@ -146,7 +146,14 @@ func (a *App) hSessionDocker(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.exec.CollectDocker(id)
+	password := ""
+	if len(args) > 1 && args[1] != nil {
+		password, err = argStr(args, 1)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return a.exec.CollectDocker(id, password)
 }
 
 func (a *App) hSessionDockerInstall(args []interface{}) (interface{}, error) {

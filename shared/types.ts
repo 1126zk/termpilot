@@ -110,6 +110,8 @@ export interface DockerInfo {
   available: boolean
   /** 装了不等于在跑：daemon 活着（docker info 能通）才是 true */
   running: boolean
+  /** 连不上 docker.sock。列表空是没权限，不是没有容器，也不是引擎停了 */
+  needSudo: boolean
   containers: DockerContainer[]
   images: DockerImage[]
   volumes: DockerVolume[]

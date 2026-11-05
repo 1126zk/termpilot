@@ -8,37 +8,77 @@ import (
 	"strings"
 )
 
-// dockerScript 一次性采集容器、镜像、卷、网络和 daemon.json。先探测有没有 docker，没有就标记出来，
-// 前端显示占位而不是报错。--format json 逐行输出，比按列解析稳。
-const dockerScript = `
+// dockerCollectScript 一次性采集容器、镜像、卷、网络和 daemon.json。先探测有没有 docker，没有就标记出来。
+// password 非空时，docker 子命令经 sudo -S 执行：密码放进管道，不进进程参数。
+// Exec 会把整段命令的 stdin 指到 /dev/null，所以密码不能靠 sudo 自己去读。
+func dockerCollectScript(password string) string {
+	docker := "docker"
+	prelude := ""
+	if password != "" {
+		// base64 没有引号，嵌进单引号字符串不会被 shell 拆开，脚本里也不出现明文密码
+		b64 := base64.StdEncoding.EncodeToString([]byte(password))
+		prelude = "TP_SUDO_B64='" + b64 + "'\n" +
+			"dock() { printf '%s\\n' \"$(printf '%s' \"$TP_SUDO_B64\" | base64 -d)\" | sudo -S -p '' docker \"$@\"; }\n"
+		docker = "dock"
+	}
+	return prelude + `
 echo '#TP-HAVE#'
 command -v docker >/dev/null 2>&1 && echo yes || echo no
 echo '#TP-RUNNING#'
-docker info >/dev/null 2>&1 && echo yes || echo no
+errf=$(mktemp)
+if ` + docker + ` info >/dev/null 2>"$errf"; then echo yes; else echo no; fi
+echo '#TP-DOCKER-ERR#'
+cat "$errf" 2>/dev/null
+rm -f "$errf"
 echo '#TP-PS#'
-docker ps -a --format '{{json .}}' 2>/dev/null
+` + docker + ` ps -a --format '{{json .}}' 2>/dev/null
 echo '#TP-IMAGES#'
-docker images --format '{{json .}}' 2>/dev/null
+` + docker + ` images --format '{{json .}}' 2>/dev/null
 echo '#TP-VOLUMES#'
-docker volume ls --format '{{json .}}' 2>/dev/null
+` + docker + ` volume ls --format '{{json .}}' 2>/dev/null
 echo '#TP-NETWORKS#'
-docker network ls --format '{{json .}}' 2>/dev/null
+` + docker + ` network ls --format '{{json .}}' 2>/dev/null
 echo '#TP-DAEMON#'
 # 文件可能不以换行结尾（比如 base64 写入的），补一个 echo 防止结束标记粘到最后一行
 cat /etc/docker/daemon.json 2>/dev/null; echo
 echo '#TP-END#'
 `
+}
+
+// dockerNeedsSudo 普通用户连不上 docker.sock。引擎真停了是另一句 “Cannot connect ... daemon running”。
+func dockerNeedsSudo(msg string) bool {
+	lower := strings.ToLower(msg)
+	if !strings.Contains(lower, "permission denied") {
+		return false
+	}
+	return strings.Contains(lower, "docker.sock") || strings.Contains(lower, "docker daemon")
+}
+
+// sudoRejected sudo -S 没接受这份密码。
+func sudoRejected(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "sorry, try again") ||
+		strings.Contains(lower, "incorrect password") ||
+		strings.Contains(lower, "no password was provided") ||
+		strings.Contains(lower, "a password is required")
+}
 
 // CollectDocker 采一次 Docker 容器、镜像、卷、网络列表和 daemon.json，只在面板 Docker 页激活时调用。
-func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
-	res, err := s.Exec(sessionID, ExecOptions{Command: dockerScript, TimeoutMs: 10000})
+// sudoPassword 非空时用 sudo -S 再采；密码不对返回错误，调用方不要把空列表当成「没有容器」。
+func (s *ExecService) CollectDocker(sessionID, sudoPassword string) (*DockerInfo, error) {
+	res, err := s.Exec(sessionID, ExecOptions{Command: dockerCollectScript(sudoPassword), TimeoutMs: 10000})
 	if err != nil {
 		return nil, err
 	}
 	sec := splitSections(res.Stdout)
+	dockerErr := sec["DOCKER-ERR"]
+	if sudoPassword != "" && sudoRejected(dockerErr) {
+		return nil, fmt.Errorf("sudo 密码不对")
+	}
 	info := &DockerInfo{
 		Available:  strings.TrimSpace(sec["HAVE"]) == "yes",
 		Running:    strings.TrimSpace(sec["RUNNING"]) == "yes",
+		NeedSudo:   sudoPassword == "" && dockerNeedsSudo(dockerErr),
 		Containers: []DockerContainer{},
 		Images:     []DockerImage{},
 		Volumes:    []DockerVolume{},
@@ -48,6 +88,9 @@ func (s *ExecService) CollectDocker(sessionID string) (*DockerInfo, error) {
 		return info, nil
 	}
 	info.DaemonJson = strings.TrimSpace(sec["DAEMON"])
+	if info.NeedSudo {
+		return info, nil
+	}
 	for _, line := range strings.Split(sec["PS"], "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {

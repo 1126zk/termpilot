@@ -74,7 +74,8 @@ const api = {
     metrics: (id: string) => invoke<ServerMetrics>(IPC.sessionMetrics, [id]),
     serverInfo: (id: string) => invoke<ServerInfo>(IPC.sessionServerInfo, [id]),
     killProc: (id: string, pid: number) => invoke<void>(IPC.sessionKillProc, [id, pid]),
-    docker: (id: string) => invoke<DockerInfo>(IPC.sessionDocker, [id]),
+    docker: (id: string, sudoPassword = '') =>
+      invoke<DockerInfo>(IPC.sessionDocker, sudoPassword ? [id, sudoPassword] : [id]),
     dockerInstall: (id: string, mirrors: string[]) => invoke<void>(IPC.sessionDockerInstall, [id, mirrors]),
     /** 安装过程的逐行输出订阅；返回退订函数 */
     onDockerInstallProgress: (id: string, cb: (line: string) => void) =>
