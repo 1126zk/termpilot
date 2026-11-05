@@ -165,7 +165,8 @@ pull_img() {
   img="$1"
   docker image inspect "$img" >/dev/null 2>&1 || timeout 90 docker pull "$img"
 }
-wanip=$(curl -fsS --max-time 1 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || curl -fsS --max-time 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)
+`+wanFn+`
+wanip=$(wan 1 http://100.100.100.200/latest/meta-data/eipv4 || wan 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 || wan 1 http://169.254.169.254/latest/meta-data/public-ipv4 || wan 3 https://ifconfig.me || true)
 mkdir -p "$HOME/.termpilot/caddy/data" "$HOME/.termpilot/caddy/config" "$HOME/.termpilot/caddy/sites" "$HOME/.termpilot/caddy/www" "$HOME/.termpilot/caddy/ssl"
 if [ ! -s "$HOME/.termpilot/caddy/Caddyfile" ]; then
   if [ -n "$wanip" ]; then
@@ -278,7 +279,8 @@ func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType
 	switch action {
 	case "add":
 		var body, prepare string
-		switch {		case service == "nginx" && siteType == "proxy":
+		switch {
+		case service == "nginx" && siteType == "proxy":
 			if !webTargetRe.MatchString(target) {
 				return fmt.Errorf("非法的反代目标（要 host:port）：%q", target)
 			}

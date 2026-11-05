@@ -157,21 +157,18 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
         className="flex shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
         style={{ width: leftWidth }}
       >
-        {/* 信息条：没采到的用 — 占位，有缓存的直接显示，不等第一笔数据 */}
-        <div className="flex flex-col gap-0.5 text-sm">
-          <div className="flex items-baseline gap-x-4 overflow-hidden">
-            <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} truncate />
-            <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} />
-            <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} truncate />
-          </div>
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
-            <InfoItem
-              label="已运行"
-              value={metrics && metrics.uptimeSec > 0 ? formatUptime(metrics.uptimeSec) : '—'}
-            />
-            <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '—'} />
-            <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '—'} />
-          </div>
+        {/* 信息条：三列上下对齐（主机名/已运行、系统/内网、内核/外网），列宽取两项里更宽的。
+            栏不够宽时主机名和内核省略。没采到的用 — 占位。 */}
+        <div className="grid min-w-0 grid-cols-[minmax(0,max-content)_max-content_minmax(0,max-content)] items-baseline gap-x-4 gap-y-0.5 text-sm">
+          <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} truncate />
+          <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} />
+          <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} truncate />
+          <InfoItem
+            label="已运行"
+            value={metrics && metrics.uptimeSec > 0 ? formatUptime(metrics.uptimeSec) : '—'}
+          />
+          <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '—'} />
+          <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '—'} />
         </div>
         {error && <p className="text-sm text-destructive">采集失败：{error}</p>}
 

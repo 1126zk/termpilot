@@ -454,10 +454,27 @@ func (s *ExecService) KillProcess(sessionID string, pid int) error {
 	return nil
 }
 
+// wanFn 在远端定义 wan：curl 一个来源，回的是 10/8、172.16/12、192.168/16 就当没查到（返回非 0），
+// 调用方用 || 继续问下一家。百度云的 public-ipv4 经常是这种内网映射，不是弹性公网 IP。
+// 面板采集和安装 Caddy 时写 default_sni 都嵌这段。
+const wanFn = `
+keepip() {
+  case "$1" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 1 ;;
+  esac
+  [ -n "$1" ] || return 1
+  echo "$1"
+}
+wan() {
+  ip=$(curl -fsS --max-time "$1" "$2" 2>/dev/null) || return 1
+  keepip "$ip"
+}
+`
+
 // serverInfoScript 一次性采集静态身份：主机名、系统、内核、内网 IPv4、外网出口 IP。
 // 内网用 ip 命令并滤掉 docker/veth 等虚拟网桥，没有 ip 就退回 hostname -I。
-// 外网 IP：先问云厂商元数据服务（虚拟化层本地应答，不出机房，毫秒级）——阿里云/腾讯云/AWS 通用；
-// 答不上才出站问外部服务（curl 两个互备、wget 兜底）。超时预算总和压在采集超时（10s）以内。
+// 外网 IP：先问云厂商元数据（虚拟化层本地应答，不出机房）——阿里云、腾讯云、169.254.169.254；
+// 没答上或答了内网段，才出站问 ifconfig.me、api.ipify.org，wget 再兜底。
 const serverInfoScript = `
 echo '#TP-HOST#'
 hostname 2>/dev/null
@@ -470,7 +487,13 @@ lan=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 !~ /^(lo|docker|br-|
 [ -z "$lan" ] && lan=$(hostname -I 2>/dev/null)
 echo "$lan"
 echo '#TP-WAN#'
-curl -fsS --max-time 1 http://100.100.100.200/latest/meta-data/eipv4 2>/dev/null || curl -fsS --max-time 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || wget -qO- --timeout=3 https://ifconfig.me 2>/dev/null
+` + wanFn + `
+wan 1 http://100.100.100.200/latest/meta-data/eipv4 \
+  || wan 1 http://metadata.tencentyun.com/latest/meta-data/public-ipv4 \
+  || wan 1 http://169.254.169.254/latest/meta-data/public-ipv4 \
+  || wan 3 https://ifconfig.me \
+  || wan 3 https://api.ipify.org \
+  || { ip=$(wget -qO- --timeout=3 https://ifconfig.me 2>/dev/null) && keepip "$ip"; }
 echo '#TP-END#'
 `
 
