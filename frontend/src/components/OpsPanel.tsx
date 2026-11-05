@@ -3,13 +3,6 @@ import { CircleHelp, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react
 import type { CronEntry, DockerInfo, PortInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -810,6 +803,10 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
   const setDockerSudo = useAppStore((s) => s.setDockerSudo)
   const loadWebInfo = useAppStore((s) => s.loadWebInfo)
   const setNotice = useAppStore((s) => s.setNotice)
+  // 启停整台引擎走 systemctl，不做提权。只有 root 点了能成功，其他用户只给状态。
+  const canManageDocker = useAppStore(
+    (s) => s.sessions.find((sess) => sess.id === props.sessionId)?.username === 'root'
+  )
   // 删除两步确认：菜单里点了删除，该行 ⋯ 变成红色「确认」，3 秒不点恢复
   const [confirmDel, setConfirmDel] = useState<{ action: string; id: string } | null>(null)
   // docker 服务操作（停止/重启/卸载）两步确认，同上
@@ -821,7 +818,6 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
   // 镜像加速输入框和生效中状态
   const [mirrorInput, setMirrorInput] = useState('')
   const [mirrorBusy, setMirrorBusy] = useState(false)
-  const [sudoOpen, setSudoOpen] = useState(false)
   const [sudoPassword, setSudoPassword] = useState('')
   const [sudoBusy, setSudoBusy] = useState(false)
 
@@ -951,38 +947,36 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
     }
     setMirrors([...daemonMirrors, url])
   }
+
+  const submitSudo = () => {
+    if (!sudoPassword || sudoBusy) return
+    setSudoBusy(true)
+    void setDockerSudo(props.sessionId, sudoPassword).finally(() => {
+      setSudoBusy(false)
+      const next = useAppStore.getState().dockerBySession[props.sessionId]?.info
+      if (next && !next.needSudo) setSudoPassword('')
+    })
+  }
   // 没缓存也直接渲染卡片，表格先空着，第一笔数据到了填上
 
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
       <div className="flex items-center justify-between border-b bg-accent/40 px-3 py-1.5">
-        <span className="flex items-center gap-2 text-sm text-muted-foreground">
-          容器
-          {info?.needSudo && (
-            <button
-              type="button"
-              className="text-xs text-primary hover:underline"
-              onClick={() => {
-                setSudoPassword('')
-                setSudoOpen(true)
-              }}
-            >
-              输入密码查看
-            </button>
-          )}
+        <span className="text-sm text-muted-foreground">容器</span>
+        <span className="flex items-center gap-1.5">
+          <button
+            type="button"
+            title="刷新"
+            disabled={refreshing}
+            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-40"
+            onClick={() => {
+              setRefreshing(true)
+              void loadDockerInfo(props.sessionId, true).finally(() => setRefreshing(false))
+            }}
+          >
+            <RefreshCw className={cn('size-3', refreshing && 'animate-spin')} />
+          </button>
         </span>
-        <button
-          type="button"
-          title="刷新"
-          disabled={refreshing}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-40"
-          onClick={() => {
-            setRefreshing(true)
-            void loadDockerInfo(props.sessionId, true).finally(() => setRefreshing(false))
-          }}
-        >
-          <RefreshCw className={cn('size-3', refreshing && 'animate-spin')} />
-        </button>
       </div>
       <div>
         <table className="w-full table-fixed text-sm">
@@ -1187,7 +1181,31 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
         ) : (
           <span>/etc/docker/daemon.json</span>
         )}
-        <span className="flex items-center gap-1 font-sans">
+        <span className="flex items-center gap-1.5 font-sans">
+          {info?.needSudo && (
+            <>
+              <Input
+                type="password"
+                value={sudoPassword}
+                placeholder="sudo 密码"
+                disabled={sudoBusy}
+                className="h-7 w-36 text-sm"
+                onChange={(e) => setSudoPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitSudo()
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 px-2"
+                disabled={sudoBusy || !sudoPassword}
+                onClick={submitSudo}
+              >
+                {sudoBusy ? '查看中…' : 'sudo'}
+              </Button>
+            </>
+          )}
           {!info?.needSudo && (opBusy || info) && (
             <StatusDot
               className="mr-2"
@@ -1195,7 +1213,8 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
               tone={opBusy ? 'busy' : info?.running ? 'running' : 'stopped'}
             />
           )}
-          {!info?.needSudo &&
+          {canManageDocker &&
+            !info?.needSudo &&
             (info?.running
               ? [opBtn('restart', '重启'), opBtn('stop', '停止'), opBtn('uninstall', '删除')]
               : [opBtn('start', '启动'), opBtn('uninstall', '删除')])}
@@ -1245,48 +1264,6 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
           </div>
         )}
       </div>
-      <Dialog open={sudoOpen} onOpenChange={setSudoOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>输入 sudo 密码</DialogTitle>
-          </DialogHeader>
-          <Input
-            type="password"
-            autoFocus
-            value={sudoPassword}
-            placeholder="当前用户的 sudo 密码"
-            onChange={(e) => setSudoPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && sudoPassword && !sudoBusy) {
-                setSudoBusy(true)
-                void setDockerSudo(props.sessionId, sudoPassword).finally(() => {
-                  setSudoBusy(false)
-                  setSudoOpen(false)
-                  setSudoPassword('')
-                })
-              }
-            }}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSudoOpen(false)}>
-              取消
-            </Button>
-            <Button
-              disabled={!sudoPassword || sudoBusy}
-              onClick={() => {
-                setSudoBusy(true)
-                void setDockerSudo(props.sessionId, sudoPassword).finally(() => {
-                  setSudoBusy(false)
-                  setSudoOpen(false)
-                  setSudoPassword('')
-                })
-              }}
-            >
-              {sudoBusy ? '查看中…' : '查看'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
