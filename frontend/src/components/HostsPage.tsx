@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Bot, Plus, Search, Trash2 } from 'lucide-react'
+import { Bot, Copy, Plus, Search, Trash2 } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -79,6 +79,7 @@ function HostCard(props: { session: SessionConfig }) {
   const editing = useAppStore((s) => s.editing)
   const setEditing = useAppStore((s) => s.setEditing)
   const deleteSession = useAppStore((s) => s.deleteSession)
+  const loadSessions = useAppStore((s) => s.loadSessions)
   const setNotice = useAppStore((s) => s.setNotice)
   const clickTimer = useRef<number>(0)
 
@@ -94,6 +95,17 @@ function HostCard(props: { session: SessionConfig }) {
   const openFresh = () => {
     window.clearTimeout(clickTimer.current)
     openSessionTab(session, true)
+  }
+
+  const duplicate = async () => {
+    const created = await window.api.sessions.duplicate(session.id).catch(() => null)
+    if (!created) {
+      setNotice('复制失败')
+      return
+    }
+    await loadSessions()
+    setEditing({ action: 'edit', session: created })
+    setNotice('已复制，改用户名即可')
   }
 
   return (
@@ -119,6 +131,10 @@ function HostCard(props: { session: SessionConfig }) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
+          <ContextMenuItem onClick={() => void duplicate()}>
+            <Copy />
+            复制主机
+          </ContextMenuItem>
           <ContextMenuItem onClick={() => void copyAgentPrompt(agentOnboardPrompt(), setNotice)}>
             <Bot />
             复制 Agent 提示词

@@ -278,8 +278,10 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
 
   const connect = () => {
     if (!session) return
-    // 每次都新开一扇终端，不复用已打开的
-    openSessionTab(session, true)
+    // 每次都新开一扇终端，不复用已打开的。标题用表单里的名字：
+    // 自动保存只刷新了主机列表，editing.session 还是打开面板时的那份。
+    const name = form.name.trim() || session.name
+    openSessionTab({ ...session, name }, true)
     setEditing(null)
   }
 
