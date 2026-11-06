@@ -1,3 +1,5 @@
+// 必须在 monaco 本体之前载入，查找替换等文案才会走中文
+import 'monaco-editor/nls/lang/zh-cn.js'
 import './wails-api'
 import React from 'react'
 import { createRoot } from 'react-dom/client'

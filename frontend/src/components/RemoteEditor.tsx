@@ -23,6 +23,7 @@ import cssWorker from 'monaco-editor/language/css/css.worker.js?worker'
 import htmlWorker from 'monaco-editor/language/html/html.worker.js?worker'
 import tsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
 import { readBuffer, writeBuffer } from '../editor/editorBuffers'
+import { bindFindCloseHover } from '../editor/findCloseHover'
 import { bindMiddleScroll } from '../editor/middleScroll'
 import { mountMermaidViewport } from './mermaidViewport'
 import { useAppStore, type EditorTab } from '../stores/useAppStore'
@@ -512,10 +513,15 @@ function TextEditor(props: { tab: EditorTab }) {
                 keybindings: [api.KeyMod.CtrlCmd | api.KeyCode.KeyS],
                 run: () => void save()
               })
-              const unbind = bindMiddleScroll(ed.getContainerDomNode(), (dx, dy) =>
+              const host = ed.getContainerDomNode()
+              const unbindScroll = bindMiddleScroll(host, (dx, dy) =>
                 ed.setScrollPosition({ scrollLeft: ed.getScrollLeft() + dx, scrollTop: ed.getScrollTop() + dy })
               )
-              ed.onDidDispose(unbind)
+              const unbindHover = bindFindCloseHover(host)
+              ed.onDidDispose(() => {
+                unbindScroll()
+                unbindHover()
+              })
             }}
             options={{
               automaticLayout: true,

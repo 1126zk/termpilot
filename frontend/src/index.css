@@ -279,6 +279,27 @@
 .monaco-editor .monaco-scrollable-element > .scrollbar > .slider {
   border-radius: 999px;
 }
+/* 查找条默认 419px，输入框被撑开，文字和右侧按钮中间空一截 */
+.monaco-editor .find-widget {
+  max-width: 320px !important;
+}
+
+/* 查找条按钮的提示（Close 等）会盖住按钮。提示在 .context-view 里，
+   只改提示自己没用：外面那层仍接着鼠标，一盖住就算离开按钮，提示关掉又马上出来，
+   来回闪，点不中。整层都不接收鼠标。 */
+.context-view:has(.monaco-hover.workbench-hover.compact),
+.context-view:has(.monaco-hover.workbench-hover.compact) * {
+  pointer-events: none !important;
+}
+/* 提示外层是绝对定位，宽度被收成最长的那个词，Close (Escape) 就折成两行，
+   盒子变高盖住按钮。按整句的宽度展开。 */
+.monaco-hover.workbench-hover.compact {
+  width: max-content;
+  max-width: none;
+}
+.monaco-hover.workbench-hover.compact .hover-contents {
+  white-space: nowrap !important;
+}
 
 /* 中键自动滚动的起点标记 */
 .middle-scroll-marker {
