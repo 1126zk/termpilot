@@ -136,6 +136,11 @@ export const IPC = {
   forwardStop: 'forward:stop',
   shellsList: 'shells:list',
 
+  sshkeyGenerate: 'sshkey:generate',
+  sshkeyImportPrivate: 'sshkey:import-private',
+  sshkeyInstallPublic: 'sshkey:install-public',
+  sshkeyReadPublicFile: 'sshkey:read-public-file',
+
   winMinimize: 'win:minimize',
   winToggleMaximize: 'win:toggle-maximize',
   winClose: 'win:close',

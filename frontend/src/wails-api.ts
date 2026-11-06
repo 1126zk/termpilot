@@ -19,6 +19,10 @@ import type {
   SessionInput,
   ServerInfo,
   ServerMetrics,
+  SshKeyFile,
+  SshKeyImport,
+  SshKeyInstall,
+  SshKeyPair,
   SftpInstallEvent,
   SftpTransferEvent,
   Snippet,
@@ -120,6 +124,15 @@ const api = {
   },
   shells: {
     list: () => invoke<LocalShellInfo[]>(IPC.shellsList, [])
+  },
+  sshkey: {
+    generate: () => invoke<SshKeyPair>(IPC.sshkeyGenerate, []),
+    /** 用户取消选择时返回 null */
+    importPrivate: () => invoke<SshKeyImport | null>(IPC.sshkeyImportPrivate, []),
+    installPublic: (sessionId: string, publicKey: string) =>
+      invoke<SshKeyInstall>(IPC.sshkeyInstallPublic, [sessionId, publicKey]),
+    /** 只读入公钥，不写主机。用户取消选择时返回 null */
+    readPublicFile: () => invoke<SshKeyFile | null>(IPC.sshkeyReadPublicFile, [])
   },
   hosts: {
     list: () => invoke<Record<string, string>>(IPC.hostNoteList, []),

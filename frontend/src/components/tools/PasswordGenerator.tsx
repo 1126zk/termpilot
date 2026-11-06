@@ -99,8 +99,8 @@ export function PasswordGenerator() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
           <Label htmlFor="pw-length" className="text-xs text-muted-foreground">
             长度
           </Label>
@@ -115,7 +115,7 @@ export function PasswordGenerator() {
             className="h-8 w-20"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-4 pb-1">
+        <div className="flex flex-wrap items-center gap-4">
           {option('大写', upper, setUpper)}
           {option('小写', lower, setLower)}
           {option('数字', digit, setDigit)}

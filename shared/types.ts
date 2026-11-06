@@ -60,6 +60,31 @@ export interface SessionInput {
   forwards?: ForwardRule[]
 }
 
+/** 本机新生成的一对密钥。publicKey 是单行 OpenSSH 公钥。 */
+export interface SshKeyPair {
+  privatePath: string
+  publicPath: string
+  publicKey: string
+}
+
+/** 放进本机 .ssh 的私钥。warning 非空表示钥匙在，但免密登录还差一步。 */
+export interface SshKeyImport {
+  path: string
+  publicKey: string
+  warning?: string
+}
+
+/** 公钥写到主机之后。added 是新写入，exists 是本来就有。 */
+export interface SshKeyInstall {
+  status: 'added' | 'exists'
+}
+
+/** 选中、尚未写入主机的公钥文件。 */
+export interface SshKeyFile {
+  name: string
+  publicKey: string
+}
+
 export type SessionStatus = 'disconnected' | 'connecting' | 'connected'
 
 export type TabKind = 'ssh' | 'local'

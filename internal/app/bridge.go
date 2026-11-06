@@ -63,6 +63,10 @@ func (b *Bridge) routes() map[string]handler {
 		"host:note-list":             func(_ []interface{}) (interface{}, error) { return a.store.ListHostNotes() },
 		"host:note-set":              a.hHostNoteSet,
 		"shells:list":                a.hShellsList,
+		"sshkey:generate":            a.hSshKeyGenerate,
+		"sshkey:import-private":      a.hSshKeyImportPrivate,
+		"sshkey:install-public":      a.hSshKeyInstallPublic,
+		"sshkey:read-public-file":    a.hSshKeyReadPublicFile,
 
 		// 终端
 		"term:create":    a.hTermCreate,

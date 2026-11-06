@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { PasswordGenerator } from './tools/PasswordGenerator'
 import { PreviewViewer } from './tools/PreviewViewer'
+import { SshKeyTool } from './tools/SshKeyTool'
 
 const ORDER_KEY = 'termpilot.toolOrder'
 const HIDDEN_KEY = 'termpilot.toolHidden'
@@ -24,6 +25,7 @@ interface ToolDef {
 
 const tools: ToolDef[] = [
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
+  { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
   { id: 'preview', name: '预览', component: PreviewViewer }
 ]
 

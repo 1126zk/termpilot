@@ -27,3 +27,7 @@ wails build
 - **IPC 通道**：加通道按 `shared/ipc-channels.ts` → `internal/app/bridge.go` → `handlers.go` → `frontend/src/wails-api.ts` 这条链走
 
 不确定有没有现成的，先 Glob/Grep 找一圈再问。
+
+## 界面上别写说明废话
+
+控件自己能看懂的，不要在下面再补一段解释：原理、前置条件、下一步该怎么点、文件名举例，都不要。按钮、输入框、占位符、报错把事情说完就停。
