@@ -12,7 +12,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { readBuffer } from '../editor/editorBuffers'
-import { termIdFromView, termViewId, useAppStore, type EditorTab } from '../stores/useAppStore'
+import { SPLIT_MARK, termIdFromView, termViewId, useAppStore, type EditorTab } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { ImageTools, isImage, isMarkdown, reloadTextFile, saveTextFile } from './RemoteEditor'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
@@ -45,6 +45,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   const splitSessionView = useAppStore((s) => s.splitSessionView)
   const cancelSessionSplit = useAppStore((s) => s.cancelSessionSplit)
   const activateSessionView = useAppStore((s) => s.activateSessionView)
+  const reorderSessionStrip = useAppStore((s) => s.reorderSessionStrip)
   const closeSideTerm = useAppStore((s) => s.closeSideTerm)
   const reconnectTab = useAppStore((s) => s.reconnectTab)
   const pane = sessionSplit[props.termId]
@@ -68,33 +69,60 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   const pointerX = useRef(0)
   const keys = props.tabs.map((t) => t.key)
 
-  /** 被拖标签跟手，限制在首尾文件标签之间，不盖住终端标签，也不飞到空白处 */
+  /** 标签左边缘允许落到的区间。分栏时最左只能贴着主终端，这样右边的项能拖过分隔线。 */
+  const dragSpan = (strip: HTMLElement, key: string, splitting: boolean) => {
+    const attr = splitting ? 'data-view-id' : 'data-file-key'
+    const el = strip.querySelector<HTMLElement>(`[${attr}="${CSS.escape(key)}"]`)
+    if (!el) return null
+    if (!splitting) {
+      const items = [...strip.querySelectorAll<HTMLElement>('[data-file-key]')]
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (!first || !last) return null
+      return { el, min: first.offsetLeft, max: last.offsetLeft + last.offsetWidth - el.offsetWidth }
+    }
+    const primaryEl = strip.querySelector<HTMLElement>(`[data-view-id="${CSS.escape(primaryTerm)}"]`)
+    const markEl = strip.querySelector<HTMLElement>(`[data-view-id="${SPLIT_MARK}"]`)
+    const min = primaryEl ? primaryEl.offsetLeft + primaryEl.offsetWidth + 4 : 0
+    let tail = el.offsetLeft + el.offsetWidth
+    for (const item of strip.querySelectorAll<HTMLElement>('[data-view-id]')) {
+      if (item.dataset.viewId === primaryTerm) continue
+      tail = Math.max(tail, item.offsetLeft + item.offsetWidth)
+    }
+    if (markEl) tail = Math.max(tail, markEl.offsetLeft + markEl.offsetWidth + el.offsetWidth)
+    return { el, min, max: tail - el.offsetWidth }
+  }
+
+  /** 被拖标签跟手。分栏时主终端固定在最左边，拖动范围从它右边开始。 */
   const followPointer = (key: string) => {
     const strip = stripRef.current
-    const el = strip?.querySelector<HTMLElement>(`[data-file-key="${CSS.escape(key)}"]`)
-    if (!strip || !el) return
-    const offset = pointerX.current - dragStart.current.pos - (el.offsetLeft - dragStart.current.layout)
-    const items = strip.querySelectorAll<HTMLElement>('[data-file-key]')
-    const first = items[0]
-    const last = items[items.length - 1]
-    if (!first || !last) return setDragOffset(offset)
-    const min = first.offsetLeft - el.offsetLeft
-    const max = last.offsetLeft + last.offsetWidth - el.offsetWidth - el.offsetLeft
-    setDragOffset(Math.min(max, Math.max(min, offset)))
+    const splitting = !!useAppStore.getState().sessionSplit[props.termId]
+    if (!strip) return
+    const span = dragSpan(strip, key, splitting)
+    if (!span) return
+    const offset = pointerX.current - dragStart.current.pos - (span.el.offsetLeft - dragStart.current.layout)
+    setDragOffset(Math.min(span.max - span.el.offsetLeft, Math.max(span.min - span.el.offsetLeft, offset)))
   }
-  useFlipSlide(dragKey !== null, stripRef, 'data-file-key', 'x', dragKey, prevLeft, [keys.join(), dragKey])
+  useFlipSlide(dragKey !== null, stripRef, pane ? 'data-view-id' : 'data-file-key', 'x', dragKey, prevLeft, [
+    keys.join(),
+    pane?.order?.join(),
+    pane?.secondary.join(),
+    dragKey
+  ])
   useLayoutEffect(() => {
     if (dragKey) followPointer(dragKey)
   }, [keys.join(), dragKey])
 
   const startDrag = (event: PointerEvent, key: string) => {
-    if (useAppStore.getState().sessionSplit[props.termId]) return
+    if (key === primaryTerm) return
+    const splitting = !!useAppStore.getState().sessionSplit[props.termId]
     startPointerDrag({
       event,
       axis: 'x',
       onActivate: () => {
         const strip = stripRef.current
-        const el = strip?.querySelector<HTMLElement>(`[data-file-key="${CSS.escape(key)}"]`)
+        const attr = splitting ? 'data-view-id' : 'data-file-key'
+        const el = strip?.querySelector<HTMLElement>(`[${attr}="${CSS.escape(key)}"]`)
         const pointer = strip ? event.clientX - strip.getBoundingClientRect().left + strip.scrollLeft : 0
         dragStart.current = {
           pos: event.clientX,
@@ -109,29 +137,38 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
         pointerX.current = x
         const strip = stripRef.current
         if (strip) {
-          // 闭包里的 props 停在拖动开始那一刻，重排后要从 store 取最新顺序
-          const termId = props.tabs.find((t) => t.key === key)?.termId
-          const ids = useAppStore
-            .getState()
-            .editorTabs.filter((t) => t.termId === termId)
-            .map((t) => t.key)
-          // 交换判定也按限位后的视觉位置算，指针拖出范围时不会来回乱换
-          const items = strip.querySelectorAll<HTMLElement>('[data-file-key]')
-          const first = items[0]
-          const last = items[items.length - 1]
+          const span = dragSpan(strip, key, splitting)
           const raw = x - strip.getBoundingClientRect().left + strip.scrollLeft - dragStart.current.grab
-          const start =
-            first && last
-              ? Math.min(last.offsetLeft + last.offsetWidth - dragStart.current.size, Math.max(first.offsetLeft, raw))
-              : raw
-          const next = moveTo(
-            ids,
-            key,
-            dropIndex(strip, 'data-file-key', 'x', start, start + dragStart.current.size, key, ids)
-          )
-          if (next) {
-            capturePositions(strip, 'data-file-key', 'x', prevLeft.current)
-            reorderEditorTabs(next)
+          const start = span ? Math.min(span.max, Math.max(span.min, raw)) : raw
+          if (splitting) {
+            const state = useAppStore.getState()
+            const current = state.sessionSplit[props.termId]
+            if (current) {
+              const right = new Set(current.secondary)
+              const files = state.editorTabs.filter((tab) => tab.termId === props.termId).map((tab) => tab.key)
+              const extra = state.sideTerms.filter((term) => term.parentId === props.termId).map((term) => termViewId(term.id))
+              const known = current.order?.length
+                ? current.order
+                : [...files.filter((id) => !right.has(id)), ...extra.filter((id) => !right.has(id)), ...current.secondary]
+              const movable = known.filter((id) => id !== primaryTerm)
+              const ids = [...movable.filter((id) => !right.has(id)), SPLIT_MARK, ...current.secondary.filter((id) => id !== primaryTerm)]
+              const next = moveTo(ids, key, dropIndex(strip, 'data-view-id', 'x', start, start + dragStart.current.size, key, ids))
+              if (next) {
+                capturePositions(strip, 'data-view-id', 'x', prevLeft.current)
+                reorderSessionStrip(props.termId, next)
+              }
+            }
+          } else {
+            const termId = props.tabs.find((t) => t.key === key)?.termId
+            const ids = useAppStore
+              .getState()
+              .editorTabs.filter((t) => t.termId === termId)
+              .map((t) => t.key)
+            const next = moveTo(ids, key, dropIndex(strip, 'data-file-key', 'x', start, start + dragStart.current.size, key, ids))
+            if (next) {
+              capturePositions(strip, 'data-file-key', 'x', prevLeft.current)
+              reorderEditorTabs(next)
+            }
           }
         }
         followPointer(key)
@@ -323,7 +360,13 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     const down = !!termId && (termState[termId]?.status === 'disconnected' || termState[termId]?.status === 'error')
     return menu(
       id,
-      <div key={id} data-view-id={id} className={chipClass(id, closable ? 'pl-2.5 pr-1' : 'px-2.5')}>
+      <div
+        key={id}
+        data-view-id={id}
+        className={chipClass(id, closable ? 'pl-2.5 pr-1' : 'px-2.5')}
+        style={dragKey === id ? { transform: `translateX(${dragOffset}px)` } : undefined}
+        onPointerDown={(e) => closable && startDrag(e, id)}
+      >
         <button
           type="button"
           title={closable ? title : '回到终端，已打开的文件保留'}
@@ -386,8 +429,16 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     ...sides.map((term) => [termViewId(term.id), termChip(termViewId(term.id), term.title, true)] as const)
   ])
   const right = new Set(pane?.secondary ?? [])
-  const leftIds = [primaryTerm, ...props.tabs.map((tab) => tab.key), ...sides.map((term) => termViewId(term.id))].filter((id) => !right.has(id))
-  const rightIds = pane ? pane.secondary.filter((id) => chips.has(id)) : []
+  const fallback = [
+    ...props.tabs.map((tab) => tab.key).filter((id) => !right.has(id)),
+    ...sides.map((term) => termViewId(term.id)).filter((id) => !right.has(id)),
+    ...(pane?.secondary ?? [])
+  ]
+  const ordered = (pane?.order?.length ? pane.order : fallback).filter((id) => chips.has(id))
+  const leftIds = right.has(primaryTerm)
+    ? ordered.filter((id) => !right.has(id))
+    : [primaryTerm, ...ordered.filter((id) => !right.has(id) && id !== primaryTerm)]
+  const rightIds = ordered.filter((id) => right.has(id))
 
   return (
     <>
@@ -413,7 +464,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
             {chips.get(id)}
           </Fragment>
         ))}
-        {rightIds.length > 0 && <div className="mx-1 h-5 w-px shrink-0 bg-foreground/30" />}
+        {pane && <div data-view-id={SPLIT_MARK} className="mx-1 h-5 w-px shrink-0 bg-foreground/30" />}
         {rightIds.map((id) => (
           <Fragment key={id}>{chips.get(id)}</Fragment>
         ))}

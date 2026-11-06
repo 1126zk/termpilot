@@ -355,10 +355,11 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
   const setSessionSplitRatio = useAppStore((s) => s.setSessionSplitRatio)
   const opsOpen = useAppStore((s) => s.opsPanelTermIds.includes(props.parentId))
   const gridRef = useRef<HTMLDivElement>(null)
+  const rightEmpty = props.pane.secondary.length === 0
   const leftFile = editorTabs.find((tab) => tab.key === props.pane.primaryView) ?? null
-  const rightFile = editorTabs.find((tab) => tab.key === props.pane.secondaryView) ?? null
+  const rightFile = rightEmpty ? null : (editorTabs.find((tab) => tab.key === props.pane.secondaryView) ?? null)
   const leftTerm = termIdFromView(props.pane.primaryView)
-  const rightTerm = termIdFromView(props.pane.secondaryView)
+  const rightTerm = rightEmpty ? null : termIdFromView(props.pane.secondaryView)
   const primary = `minmax(0, ${props.pane.ratio}fr)`
   const secondary = `minmax(0, ${1 - props.pane.ratio}fr)`
   const style: CSSProperties =
@@ -367,8 +368,8 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
       : { gridTemplateAreas: '"p d s"', gridTemplateColumns: `${primary} 4px ${secondary}`, gridTemplateRows: 'minmax(0, 1fr)' }
   const side = (which: 'primary' | 'secondary', file: typeof leftFile, termId: string | null) => (
     <div
-      className={paneCell}
-      style={{ gridArea: which === 'primary' ? 'p' : 's' }}
+      className={cn(paneCell, rightEmpty && 'flex-1')}
+      style={rightEmpty ? undefined : { gridArea: which === 'primary' ? 'p' : 's' }}
       onPointerDownCapture={() => focusSessionSide(props.parentId, which)}
     >
       {which === 'primary' && opsOpen ? (
@@ -380,6 +381,7 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
       ) : null}
     </div>
   )
+  if (rightEmpty) return side('primary', leftFile, leftTerm)
   return (
     <div ref={gridRef} className="grid min-h-0 min-w-0 flex-1" style={style}>
       {side('primary', leftFile, leftTerm)}
