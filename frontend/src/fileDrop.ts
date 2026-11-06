@@ -40,13 +40,14 @@ export function initFileDrop(): void {
     const termId = el?.closest<HTMLElement>('[data-drop-term]')?.dataset.dropTerm
     if (termId) {
       const state = useAppStore.getState()
-      const tab = state.tabs.find((t) => t.id === termId)
+      const side = state.sideTerms.find((item) => item.id === termId)
+      const tab = state.tabs.find((item) => item.id === (side?.parentId ?? termId))
       if (!tab || paths.length === 0) return
       if (tab.kind === 'ssh') {
         state.setNotice('服务器上用不了本机路径。要传到服务器，请拖到右侧文件树')
         return
       }
-      insertPaths(tab, paths, true)
+      insertPaths(tab, paths, true, termId)
       return
     }
     const dir = dropDirAt(el)

@@ -75,7 +75,7 @@ async function clipboardImage(): Promise<{ blob: Blob; type: string } | null> {
  * SSH 终端里的 Alt+V。剪贴板是图片：传上去，把路径填到这个终端的光标处；
  * 不是图片（或读不到剪贴板）：把 Alt+V 原样发给服务器，Emacs、less 这些照常用。
  */
-export async function pasteClipboardImage(tab: Tab): Promise<void> {
+export async function pasteClipboardImage(tab: Tab, termId = tab.id): Promise<void> {
   const { setNotice } = useAppStore.getState()
   let image: { blob: Blob; type: string } | null = null
   try {
@@ -85,15 +85,16 @@ export async function pasteClipboardImage(tab: Tab): Promise<void> {
     setNotice(`读不到剪贴板：${error instanceof Error ? error.message : String(error)}`)
   }
   if (!image || !tab.sessionId) {
-    window.api.term.input(tab.id, '\x1bv')
+    window.api.term.input(termId, '\x1bv')
     return
   }
   setNotice('正在上传图片…', true)
   try {
     const path = await uploadPasteImage(tab.sessionId, image.blob, image.type)
     // 上传期间标签可能被关了
-    if (!useAppStore.getState().tabs.some((t) => t.id === tab.id)) return setNotice(null)
-    insertPaths(tab, [path], false)
+    const alive = useAppStore.getState()
+    if (!alive.tabs.some((t) => t.id === termId) && !alive.sideTerms.some((t) => t.id === termId)) return setNotice(null)
+    insertPaths(tab, [path], false, termId)
     setNotice(`已上传：${path}`)
   } catch (error) {
     setNotice(error instanceof Error ? error.message : String(error))

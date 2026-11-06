@@ -51,7 +51,7 @@ function format(path: string, tab: Tab, localPath: boolean): string {
  * 把路径插到终端光标处，多个用空格隔开，末尾留一个空格接着打字。
  * localPath 表示是本机路径（系统拖进来的、本机文件树里的），WSL / Git Bash 里会转成 /mnt/c、/c 这种。
  */
-export function insertPaths(tab: Tab, paths: string[], localPath: boolean): void {
+export function insertPaths(tab: Tab, paths: string[], localPath: boolean, termId = tab.id): void {
   if (paths.length === 0) return
-  terminalPool.paste(tab.id, paths.map((p) => format(p, tab, localPath)).join(' ') + ' ')
+  terminalPool.paste(termId, paths.map((p) => format(p, tab, localPath)).join(' ') + ' ')
 }

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
-import { ArrowRightToLine, ChevronLeft, ChevronRight, Eye, FilePenLine, RefreshCw, Save, SquareTerminal, WrapText, X } from 'lucide-react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { ArrowRightToLine, ChevronLeft, ChevronRight, Columns2, Eye, FilePenLine, RefreshCw, Rows2, Save, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import {
   Dialog,
@@ -11,7 +12,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { readBuffer } from '../editor/editorBuffers'
-import { useAppStore, type EditorTab } from '../stores/useAppStore'
+import { termIdFromView, termViewId, useAppStore, type EditorTab } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { ImageTools, isImage, isMarkdown, reloadTextFile, saveTextFile } from './RemoteEditor'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
@@ -37,7 +38,20 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   const wrap = useAppStore((s) => s.editorWrap)
   const toggleEditorWrap = useAppStore((s) => s.toggleEditorWrap)
   const setNotice = useAppStore((s) => s.setNotice)
-  const activeTab = props.tabs.find((t) => t.key === props.activeKey)
+  const windowSplit = useAppStore((s) => s.split)
+  const sessionSplit = useAppStore((s) => s.sessionSplit)
+  const sideTerms = useAppStore((s) => s.sideTerms)
+  const termState = useAppStore((s) => s.termState)
+  const splitSessionView = useAppStore((s) => s.splitSessionView)
+  const cancelSessionSplit = useAppStore((s) => s.cancelSessionSplit)
+  const activateSessionView = useAppStore((s) => s.activateSessionView)
+  const closeSideTerm = useAppStore((s) => s.closeSideTerm)
+  const reconnectTab = useAppStore((s) => s.reconnectTab)
+  const pane = sessionSplit[props.termId]
+  const primaryTerm = termViewId(props.termId)
+  const focusedView = pane ? (pane.focus === 'secondary' ? pane.secondaryView : pane.primaryView) : props.activeKey ?? primaryTerm
+  const focusedFile = termIdFromView(focusedView) ? null : focusedView
+  const activeTab = props.tabs.find((t) => t.key === (pane ? focusedFile : props.activeKey))
   const reorderEditorTabs = useAppStore((s) => s.reorderEditorTabs)
   const [pending, setPending] = useState<EditorTab | null>(null)
   const [saving, setSaving] = useState(false)
@@ -74,6 +88,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   }, [keys.join(), dragKey])
 
   const startDrag = (event: PointerEvent, key: string) => {
+    if (useAppStore.getState().sessionSplit[props.termId]) return
     startPointerDrag({
       event,
       axis: 'x',
@@ -175,14 +190,14 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     observer.observe(el)
     if (toolsRef.current) observer.observe(toolsRef.current)
     return () => observer.disconnect()
-  }, [props.tabs.length, props.activeKey, compactTools, imageOpen])
+  }, [props.tabs.length, props.activeKey, compactTools, imageOpen, pane?.secondary.join(), sideTerms.length])
 
   useEffect(() => {
-    if (!props.activeKey) return
+    if (!focusedView) return
     stripRef.current
-      ?.querySelector(`[data-file-key="${CSS.escape(props.activeKey)}"]`)
+      ?.querySelector(`[data-view-id="${CSS.escape(focusedView)}"]`)
       ?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
-  }, [props.activeKey])
+  }, [focusedView])
 
   const scrollStrip = (dir: -1 | 1) => {
     stripRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' })
@@ -241,6 +256,139 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     }
   }
 
+  const mark = (id: string): 'focus' | 'shown' | null => {
+    if (!pane) {
+      if (id === primaryTerm) return props.activeKey ? null : 'focus'
+      return id === props.activeKey ? 'focus' : null
+    }
+    if (id === focusedView) return 'focus'
+    if (id === pane.primaryView || id === pane.secondaryView) return 'shown'
+    return null
+  }
+
+  const activate = (id: string) => {
+    if (!clickAllowed()) return
+    if (pane) activateSessionView(props.termId, id)
+    else if (id === primaryTerm) activateEditorTab(props.termId, null)
+    else activateEditorTab(props.termId, id)
+  }
+
+  const menu = (viewId: string, node: ReactNode) => {
+    if (windowSplit) return node
+    const termId = termIdFromView(viewId)
+    const down = !!termId && termId !== props.termId && (termState[termId]?.status === 'disconnected' || termState[termId]?.status === 'error')
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{node}</ContextMenuTrigger>
+        <ContextMenuContent>
+          {pane ? (
+            <ContextMenuItem onClick={() => cancelSessionSplit(props.termId)}>
+              <X />
+              取消分栏
+            </ContextMenuItem>
+          ) : (
+            <>
+              <ContextMenuItem onClick={() => splitSessionView(props.termId, viewId, 'right')}>
+                <Columns2 />
+                分到右栏
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => splitSessionView(props.termId, viewId, 'down')}>
+                <Rows2 />
+                分到下栏
+              </ContextMenuItem>
+            </>
+          )}
+          {down && termId ? (
+            <ContextMenuItem onClick={() => reconnectTab(termId)}>
+              <RefreshCw />
+              重新连接
+            </ContextMenuItem>
+          ) : null}
+        </ContextMenuContent>
+      </ContextMenu>
+    )
+  }
+
+  const chipClass = (id: string, extra?: string) =>
+    cn(
+      'flex h-7 max-w-52 min-w-0 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent',
+      extra,
+      mark(id) === 'focus' && 'bg-primary/15 text-primary hover:bg-primary/15',
+      mark(id) === 'shown' && 'bg-primary/10 text-foreground hover:bg-primary/10',
+      dragKey === id && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
+    )
+
+  const termChip = (id: string, title: string, closable: boolean) => {
+    const termId = termIdFromView(id)
+    const down = !!termId && (termState[termId]?.status === 'disconnected' || termState[termId]?.status === 'error')
+    return menu(
+      id,
+      <div key={id} data-view-id={id} className={chipClass(id, closable ? 'pl-2.5 pr-1' : 'px-2.5')}>
+        <button
+          type="button"
+          title={closable ? title : '回到终端，已打开的文件保留'}
+          className="flex min-w-0 items-center gap-1.5"
+          onClick={() => activate(id)}
+        >
+          <SquareTerminal className="size-4 shrink-0" />
+          <span className="truncate">{title}</span>
+          {down && <span className="size-1.5 shrink-0 rounded-full bg-destructive" />}
+        </button>
+        {closable && (
+          <button
+            type="button"
+            title="关闭"
+            className="flex size-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-foreground/10 hover:opacity-100"
+            onClick={() => clickAllowed() && termId && closeSideTerm(termId)}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const fileChip = (tab: EditorTab) =>
+    menu(
+      tab.key,
+      <div
+        key={tab.key}
+        data-view-id={tab.key}
+        data-file-key={tab.key}
+        title={tab.path}
+        className={chipClass(tab.key, 'pl-2.5 pr-1')}
+        style={dragKey === tab.key ? { transform: `translateX(${dragOffset}px)` } : undefined}
+        onPointerDown={(e) => startDrag(e, tab.key)}
+      >
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => activate(tab.key)}>
+          <FileIcon name={tab.name} kind="file" />
+          <span className={cn('truncate', tab.preview && 'italic')}>{tab.name}</span>
+          {tab.readOnly && <Eye className="size-3 shrink-0 opacity-70" />}
+          {tab.dirty && <span className="size-2 shrink-0 rounded-full bg-current" />}
+        </button>
+        <button
+          type="button"
+          title="关闭"
+          className="flex size-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-foreground/10 hover:opacity-100"
+          onClick={() => clickAllowed() && close(tab)}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    )
+
+  const sides = sideTerms.filter((term) => term.parentId === props.termId)
+  const chips = new Map<string, ReactNode>([
+    [primaryTerm, termChip(primaryTerm, '终端', false)],
+    ...props.tabs.map((tab) => [tab.key, fileChip(tab)] as const),
+    ...sides.map((term) => [termViewId(term.id), termChip(termViewId(term.id), term.title, true)] as const)
+  ])
+  const right = new Set(pane?.secondary ?? [])
+  const leftIds = [primaryTerm, ...props.tabs.map((tab) => tab.key), ...sides.map((term) => termViewId(term.id))].filter((id) => !right.has(id))
+  const rightIds = pane ? pane.secondary.filter((id) => chips.has(id)) : []
+
   return (
     <>
     <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
@@ -259,56 +407,16 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
         }}
         className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <button
-          type="button"
-          title="回到终端，已打开的文件保留"
-          className={cn(
-            'flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-2.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent',
-            props.activeKey === null && 'bg-primary/15 text-primary hover:bg-primary/15'
-          )}
-          onClick={() => activateEditorTab(props.termId, null)}
-        >
-          <SquareTerminal className="size-4" />
-          终端
-        </button>
-        <span className="mx-1 h-4 w-px shrink-0 bg-border" />
-        {props.tabs.map((tab) => {
-          const active = tab.key === props.activeKey
-          return (
-            <div
-              key={tab.key}
-              data-file-key={tab.key}
-              title={tab.path}
-              className={cn(
-                'flex h-7 max-w-52 min-w-0 shrink-0 items-center gap-1 rounded-md bg-muted/60 pl-2.5 pr-1 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent',
-                active && 'bg-primary/15 text-primary hover:bg-primary/15',
-                dragKey === tab.key && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
-              )}
-              style={dragKey === tab.key ? { transform: `translateX(${dragOffset}px)` } : undefined}
-              onPointerDown={(e) => startDrag(e, tab.key)}
-            >
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center gap-1.5"
-                onClick={() => clickAllowed() && activateEditorTab(props.termId, tab.key)}
-              >
-                <FileIcon name={tab.name} kind="file" />
-                <span className={cn('truncate', tab.preview && 'italic')}>{tab.name}</span>
-                {tab.readOnly && <Eye className="size-3 shrink-0 opacity-70" />}
-                {tab.dirty && <span className="size-2 shrink-0 rounded-full bg-current" />}
-              </button>
-              <button
-                type="button"
-                title="关闭"
-                className="flex size-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-foreground/10 hover:opacity-100"
-                onClick={() => clickAllowed() && close(tab)}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )
-        })}
+        {leftIds.map((id, index) => (
+          <Fragment key={id}>
+            {!pane && index === 1 && <span className="mx-1 h-4 w-px shrink-0 bg-border" />}
+            {chips.get(id)}
+          </Fragment>
+        ))}
+        {rightIds.length > 0 && <div className="mx-1 h-5 w-px shrink-0 bg-foreground/30" />}
+        {rightIds.map((id) => (
+          <Fragment key={id}>{chips.get(id)}</Fragment>
+        ))}
       </div>
       {overflowing && (
         <button type="button" className={STRIP_BUTTON} disabled={!canRight} title="向右" onClick={() => scrollStrip(1)}>

@@ -14,7 +14,7 @@ import { RemoteEditor } from './components/RemoteEditor'
 import { HostsPage } from './components/HostsPage'
 import { ToolsPage } from './components/ToolsPage'
 import { startPointerDrag } from './components/flip'
-import { useAppStore, type SplitDir, type SplitState } from './stores/useAppStore'
+import { useAppStore, termIdFromView, type SessionSplit, type SplitDir, type SplitState } from './stores/useAppStore'
 import { runCapture } from './terminal/captureView'
 import { pasteClipboardImage } from './terminal/pasteImage'
 import { setImageOpenHandler } from './terminal/imageHover'
@@ -36,6 +36,7 @@ export default function App() {
   const activeTabId = useAppStore((s) => s.activeTabId)
   const editorKeyByTerm = useAppStore((s) => s.editorKeyByTerm)
   const editorTabs = useAppStore((s) => s.editorTabs)
+  const sessionSplit = useAppStore((s) => s.sessionSplit)
   const focusPane = useAppStore((s) => s.focusPane)
 
   useEffect(() => window.api.capture.onRun((job) => void runCapture(job)), [])
@@ -45,9 +46,11 @@ export default function App() {
   // 本机终端不接手，里面的程序自己能读本机剪贴板
   useEffect(() => {
     setAltVHandler((termId) => {
-      const tab = useAppStore.getState().tabs.find((t) => t.id === termId)
+      const state = useAppStore.getState()
+      const side = state.sideTerms.find((item) => item.id === termId)
+      const tab = state.tabs.find((item) => item.id === (side?.parentId ?? termId))
       if (tab?.kind !== 'ssh' || !tab.sessionId) return false
-      void pasteClipboardImage(tab)
+      void pasteClipboardImage(tab, termId)
       return true
     })
     return () => setAltVHandler(null)
@@ -56,12 +59,22 @@ export default function App() {
   // 终端里 Ctrl+点击图片路径：用图片查看器打开，盖在这个终端所在的那一栏
   useEffect(() => {
     setImageOpenHandler((termId, path) => {
-      const { tabs, openRemoteEditor, setNotice } = useAppStore.getState()
-      const tab = tabs.find((t) => t.id === termId)
+      const state = useAppStore.getState()
+      const side = state.sideTerms.find((item) => item.id === termId)
+      const parentId = side?.parentId ?? termId
+      const tab = state.tabs.find((item) => item.id === parentId)
       if (!tab) return
+      const pane = state.sessionSplit[parentId]
+      if (pane) {
+        const view = `term:${termId}`
+        state.focusSessionSide(parentId, pane.secondary.includes(view) || pane.secondaryView === view ? 'secondary' : 'primary')
+      }
       const remote = tab.kind === 'ssh' ? tab.sessionId : null
-      if (!remote && path.startsWith('~')) return setNotice('本机路径请写完整')
-      openRemoteEditor(termId, remote, { path, name: path.slice(path.replace(/\\/g, '/').lastIndexOf('/') + 1) })
+      if (!remote && path.startsWith('~')) return state.setNotice('本机路径请写完整')
+      useAppStore.getState().openRemoteEditor(parentId, remote, {
+        path,
+        name: path.slice(path.replace(/\\/g, '/').lastIndexOf('/') + 1)
+      })
     })
     return () => setImageOpenHandler(null)
   }, [])
@@ -163,15 +176,17 @@ export default function App() {
   ).flatMap(([area, termId]) => {
     if (!onTerminalPage || !termId) return []
     const files = editorTabs.filter((t) => t.termId === termId)
-    const file = files.find((t) => t.key === editorKeyByTerm[termId]) ?? null
-    return [{ area, termId, files, file }]
+    const inner = sessionSplit[termId] ?? null
+    const file = inner ? null : (files.find((t) => t.key === editorKeyByTerm[termId]) ?? null)
+    return [{ area, termId, files, file, inner }]
   })
-  const bars = panes.filter((pane) => pane.files.length > 0).map((pane) => pane.area)
-  // 每个标签放进哪一栏：在看文件的那一栏不放终端；运维面板只在主栏出现，辅栏只放终端
+  const bars = panes.filter((pane) => pane.files.length > 0 || pane.inner).map((pane) => pane.area)
+  // 每个标签放进哪一栏：在看文件的那一栏不放终端；运维面板只在主栏出现，辅栏只放终端。
+  // 会话内部分栏自己画终端和文件，外层格子让出来
   const opsAreas: Record<string, PaneArea> = {}
   const termAreas: Record<string, PaneArea> = {}
   for (const pane of panes) {
-    if (pane.file) continue
+    if (pane.inner || pane.file) continue
     if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId)) opsAreas[pane.termId] = pane.area
     else termAreas[pane.termId] = pane.area
   }
@@ -183,7 +198,7 @@ export default function App() {
         <div className="flex min-h-0 flex-1">
           <div ref={gridRef} className="grid min-h-0 min-w-0 flex-1 overflow-hidden" style={paneGrid(split, bars)}>
             {panes.map((pane) =>
-              pane.files.length > 0 ? (
+              pane.files.length > 0 || pane.inner ? (
                 <div
                   key={`bar:${pane.termId}`}
                   className="min-w-0"
@@ -195,7 +210,7 @@ export default function App() {
               ) : null
             )}
             <OpsPanels areas={opsAreas} />
-            <TerminalViews areas={termAreas} />
+            <TerminalViews areas={termAreas} parked={Object.keys(sessionSplit)} />
             {split && onTerminalPage && <SplitDivider dir={split.dir} gridRef={gridRef} />}
             {settingsOpen ? (
               <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
@@ -211,7 +226,11 @@ export default function App() {
               </div>
             ) : null}
             {panes.map((pane) =>
-              pane.file ? (
+              pane.inner ? (
+                <div key={`split:${pane.termId}`} className={paneCell} style={{ gridArea: pane.area }}>
+                  <SessionSplitPane parentId={pane.termId} pane={pane.inner} />
+                </div>
+              ) : pane.file ? (
                 // 文件只盖住它所属的那一栏：面板/终端模式下点文件都能看，切走回落到之前的模式
                 <div
                   key={`file:${pane.termId}`}
@@ -272,8 +291,9 @@ function paneGrid(split: SplitState | null, bars: PaneArea[]): CSSProperties {
 }
 
 /** 两栏中间的分隔线，按住拖动调整主栏占比。 */
-function SplitDivider(props: { dir: SplitDir; gridRef: RefObject<HTMLDivElement | null> }) {
+function SplitDivider(props: { dir: SplitDir; gridRef: RefObject<HTMLDivElement | null>; onRatio?: (ratio: number) => void }) {
   const setSplitRatio = useAppStore((s) => s.setSplitRatio)
+  const apply = props.onRatio ?? setSplitRatio
   const axis = props.dir === 'right' ? 'x' : 'y'
   return (
     <div
@@ -291,7 +311,7 @@ function SplitDivider(props: { dir: SplitDir; gridRef: RefObject<HTMLDivElement 
           onActivate: () => undefined,
           onMove: (position) => {
             const rect = grid.getBoundingClientRect()
-            setSplitRatio(axis === 'x' ? (position - rect.left) / rect.width : (position - rect.top) / rect.height)
+            apply(axis === 'x' ? (position - rect.left) / rect.width : (position - rect.top) / rect.height)
           },
           onEnd: () => undefined
         })
@@ -306,8 +326,9 @@ function SplitDivider(props: { dir: SplitDir; gridRef: RefObject<HTMLDivElement 
 function OpsPanels(props: { areas: Record<string, PaneArea> }) {
   const tabs = useAppStore((s) => s.tabs)
   const openIds = useAppStore((s) => s.opsPanelTermIds)
+  const sessionSplit = useAppStore((s) => s.sessionSplit)
   const focusPane = useAppStore((s) => s.focusPane)
-  const openTabs = tabs.filter((tab) => openIds.includes(tab.id))
+  const openTabs = tabs.filter((tab) => openIds.includes(tab.id) && !sessionSplit[tab.id])
   return (
     <>
       {openTabs.map((tab) => {
@@ -327,8 +348,53 @@ function OpsPanels(props: { areas: Record<string, PaneArea> }) {
   )
 }
 
+/** 会话内部左主右辅。文件和两个终端各自占一半，终端进程互不影响。 */
+function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
+  const editorTabs = useAppStore((s) => s.editorTabs)
+  const focusSessionSide = useAppStore((s) => s.focusSessionSide)
+  const setSessionSplitRatio = useAppStore((s) => s.setSessionSplitRatio)
+  const opsOpen = useAppStore((s) => s.opsPanelTermIds.includes(props.parentId))
+  const gridRef = useRef<HTMLDivElement>(null)
+  const leftFile = editorTabs.find((tab) => tab.key === props.pane.primaryView) ?? null
+  const rightFile = editorTabs.find((tab) => tab.key === props.pane.secondaryView) ?? null
+  const leftTerm = termIdFromView(props.pane.primaryView)
+  const rightTerm = termIdFromView(props.pane.secondaryView)
+  const primary = `minmax(0, ${props.pane.ratio}fr)`
+  const secondary = `minmax(0, ${1 - props.pane.ratio}fr)`
+  const style: CSSProperties =
+    props.pane.dir === 'down'
+      ? { gridTemplateAreas: '"p" "d" "s"', gridTemplateRows: `${primary} 4px ${secondary}`, gridTemplateColumns: 'minmax(0, 1fr)' }
+      : { gridTemplateAreas: '"p d s"', gridTemplateColumns: `${primary} 4px ${secondary}`, gridTemplateRows: 'minmax(0, 1fr)' }
+  const side = (which: 'primary' | 'secondary', file: typeof leftFile, termId: string | null) => (
+    <div
+      className={paneCell}
+      style={{ gridArea: which === 'primary' ? 'p' : 's' }}
+      onPointerDownCapture={() => focusSessionSide(props.parentId, which)}
+    >
+      {which === 'primary' && opsOpen ? (
+        <OpsPanel termId={props.parentId} active />
+      ) : file ? (
+        <RemoteEditor key={file.key} tab={file} />
+      ) : termId ? (
+        <TerminalView termId={termId} active={props.pane.focus === which} />
+      ) : null}
+    </div>
+  )
+  return (
+    <div ref={gridRef} className="grid min-h-0 min-w-0 flex-1" style={style}>
+      {side('primary', leftFile, leftTerm)}
+      <SplitDivider
+        dir={props.pane.dir}
+        gridRef={gridRef}
+        onRatio={(ratio) => setSessionSplitRatio(props.parentId, ratio)}
+      />
+      {side('secondary', rightFile, rightTerm)}
+    </div>
+  )
+}
+
 /** 终端视图。看过的标签保持挂载，切回来不重挂；areas 决定谁显示在哪一栏。 */
-function TerminalViews(props: { areas: Record<string, PaneArea> }) {
+function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string[] }) {
   const tabs = useAppStore((s) => s.tabs)
   const focusPane = useAppStore((s) => s.focusPane)
   const [visited, setVisited] = useState<string[]>([])
@@ -338,7 +404,8 @@ function TerminalViews(props: { areas: Record<string, PaneArea> }) {
     setVisited((ids) => (shown.every((id) => ids.includes(id)) ? ids : [...ids, ...shown.filter((id) => !ids.includes(id))]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey])
-  const visible = tabs.filter((tab) => visited.includes(tab.id) || props.areas[tab.id])
+  const parked = new Set(props.parked ?? [])
+  const visible = tabs.filter((tab) => !parked.has(tab.id) && (visited.includes(tab.id) || props.areas[tab.id]))
   return (
     <>
       {visible.map((tab) => {

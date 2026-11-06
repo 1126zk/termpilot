@@ -21,7 +21,7 @@ import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt } from '../agentPr
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { applyOrder, readMenuOrder, writeMenuOrder } from '../menuOrder'
 import { useMenuAction } from './PanelDialog'
-import { useAppStore, SPLIT_MARK } from '../stores/useAppStore'
+import { termViewId, useAppStore, SPLIT_MARK } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import { OsIcon, osIconProps } from './OsIcon'
 import type { ForwardRule, LocalShell } from '../../../shared/types'
@@ -166,7 +166,11 @@ export function TabBar() {
   const loadSessions = useAppStore((s) => s.loadSessions)
   const reorderTabs = useAppStore((s) => s.reorderTabs)
   const split = useAppStore((s) => s.split)
+  const sessionSplit = useAppStore((s) => s.sessionSplit)
+  const sessionSplitOn = Object.keys(sessionSplit).length > 0
   const splitTab = useAppStore((s) => s.splitTab)
+  const splitSessionView = useAppStore((s) => s.splitSessionView)
+  const cancelSessionSplit = useAppStore((s) => s.cancelSessionSplit)
   const settleSplit = useAppStore((s) => s.settleSplit)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const toolsOpen = useAppStore((s) => s.toolsOpen)
@@ -628,7 +632,7 @@ export function TabBar() {
                     重新连接
                   </ContextMenuItem>
                 ) : null}
-                {!split && tabs.length > 1 ? (
+                {!split && !sessionSplitOn && tabs.length > 1 ? (
                   <>
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => splitTab(t.id, 'right')}>
@@ -641,6 +645,27 @@ export function TabBar() {
                     </ContextMenuItem>
                   </>
                 ) : null}
+                {!split && (sessionSplit[t.id] ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => cancelSessionSplit(t.id)}>
+                      <X />
+                      取消分栏
+                    </ContextMenuItem>
+                  </>
+                ) : (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => splitSessionView(t.id, termViewId(t.id), 'right')}>
+                      <Columns2 />
+                      标签内分到右栏
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => splitSessionView(t.id, termViewId(t.id), 'down')}>
+                      <Rows2 />
+                      标签内分到下栏
+                    </ContextMenuItem>
+                  </>
+                ))}
                 {session && forwardRules.length > 0 ? (
                   <>
                     <ContextMenuSeparator />

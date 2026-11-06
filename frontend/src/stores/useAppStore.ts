@@ -94,8 +94,12 @@ interface AppState {
   search: string
   /** 各终端标签下打开的文件，按 termId 归属，关终端时一起清掉 */
   editorTabs: EditorTab[]
-  /** 每个终端标签正在看的文件 key，没有表示显示终端。分屏时两栏各看各的 */
+  /** 每个终端标签正在看的文件 key，没有表示显示终端。会话分栏时是焦点那一侧的文件 */
   editorKeyByTerm: Record<string, string>
+  /** 会话窗口内部的分栏，按会话标签 id。和窗口 split 互斥 */
+  sessionSplit: Record<string, SessionSplit>
+  /** 会话分栏里另开的终端，不进顶栏 */
+  sideTerms: SideTerm[]
   /** 已打开运维面板的终端标签，互不影响。 */
   opsPanelTermIds: string[]
 
@@ -150,8 +154,19 @@ interface AppState {
   /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面）。
       分屏时数组里带 SPLIT_MARK，它后面的标签归辅栏 */
   reorderTabs: (ids: string[]) => void
-  /** 右键标签「分到右栏 / 分到下栏」：这个标签单独进辅栏 */
+  /** 右键标签「分到右栏 / 分到下栏」：这个标签单独进辅栏。已有会话分栏时不做 */
   splitTab: (tabId: string, dir: SplitDir) => void
+  /** 右键文件条「分到右栏 / 分到下栏」：当前会话内左主右辅。已有窗口分栏时不做 */
+  splitSessionView: (parentId: string, viewId: string, dir: SplitDir) => void
+  /** 收起这个会话的内部分栏，并关掉为它另开的终端 */
+  cancelSessionSplit: (parentId: string) => void
+  /** 点文件条上的一项：只换它所在的那一侧 */
+  activateSessionView: (parentId: string, viewId: string) => void
+  /** 点进某一侧，工具按钮跟着这一侧 */
+  focusSessionSide: (parentId: string, side: 'primary' | 'secondary') => void
+  setSessionSplitRatio: (parentId: string, ratio: number) => void
+  /** 关掉分栏里另开的那个终端。它是辅栏最后一项时收起分栏 */
+  closeSideTerm: (termId: string) => void
   /** 拖动两栏中间的分隔线，ratio 是主栏占比 */
   setSplitRatio: (ratio: number) => void
   /** 标签拖完调用：有一栏空了就取消分屏 */
@@ -210,6 +225,34 @@ function closeOverlaysPatch(get: () => AppState): Partial<AppState> {
 
 export type SplitDir = 'right' | 'down'
 
+/** 文件条上的终端项。文件项直接用 editor key。 */
+export function termViewId(termId: string): string {
+  return `term:${termId}`
+}
+
+export function termIdFromView(view: string): string | null {
+  return view.startsWith('term:') ? view.slice(5) : null
+}
+
+/** 会话分栏里另开的终端。进程独立，文件和运维面板仍归所属会话。 */
+export interface SideTerm {
+  id: string
+  parentId: string
+  title: string
+}
+
+/** 一个会话窗口内部的左右（或上下）分栏。左侧是主，右侧是辅。 */
+export interface SessionSplit {
+  dir: SplitDir
+  ratio: number
+  /** 辅栏里的文件条项。其余都在主栏 */
+  secondary: string[]
+  primaryView: string
+  secondaryView: string
+  /** 保存、换行这些按钮跟着这一侧 */
+  focus: 'primary' | 'secondary'
+}
+
 export interface SplitState {
   dir: SplitDir
   /** 辅栏（右 / 下）里的标签，其余都在主栏。tabs 数组里主栏的标签排在前面 */
@@ -252,6 +295,46 @@ function withTabs(
   }
   const empty = !next.primaryTab || !next.secondaryTab
   return { tabs: [...primary, ...secondary], activeTabId, split: empty && !keepEmpty ? null : next }
+}
+
+/** 关掉这个会话为分栏另开的终端，并拿掉分栏状态。 */
+function releaseSideTerms(state: AppState, parentId: string): Pick<AppState, 'sideTerms' | 'termState' | 'sessionSplit'> {
+  const sides = state.sideTerms.filter((term) => term.parentId === parentId)
+  for (const term of sides) {
+    window.api.term.close(term.id)
+    terminalPool.dispose(term.id)
+  }
+  const termState = { ...state.termState }
+  for (const term of sides) delete termState[term.id]
+  const sessionSplit = { ...state.sessionSplit }
+  delete sessionSplit[parentId]
+  return {
+    sideTerms: state.sideTerms.filter((term) => term.parentId !== parentId),
+    termState,
+    sessionSplit
+  }
+}
+
+/** 把一项放到焦点所在的那一侧。辅栏空了就返回 null，调用方收起分栏。 */
+function assignSessionView(pane: SessionSplit, parentId: string, viewId: string, side: 'primary' | 'secondary'): SessionSplit | null {
+  let secondary = pane.secondary.filter((id) => id !== viewId)
+  if (side === 'secondary') secondary = [...secondary, viewId]
+  let primaryView = pane.primaryView
+  let secondaryView = pane.secondaryView
+  if (side === 'primary') {
+    primaryView = viewId
+    if (secondaryView === viewId) secondaryView = secondary.at(-1) ?? ''
+  } else {
+    secondaryView = viewId
+    if (primaryView === viewId) primaryView = termViewId(parentId)
+  }
+  if (!secondary.length || !secondaryView || primaryView === secondaryView) return null
+  return { ...pane, secondary, primaryView, secondaryView, focus: side }
+}
+
+function editorKeyFor(map: Record<string, string>, parentId: string, view: string): Record<string, string> {
+  if (termIdFromView(view)) return withoutKey(map, parentId)
+  return { ...map, [parentId]: view }
 }
 
 /** 去掉对象里的一个键；本来就没有时原样返回，免得无谓地触发重渲染 */
@@ -311,6 +394,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   split: null,
+  sessionSplit: {},
+  sideTerms: [],
   rightPanelOpen: false,
   opsPanelTermIds: [],
   hostsOpen: false,
@@ -639,6 +724,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   reconnectTab: (tabId) => {
+    const side = get().sideTerms.find((item) => item.id === tabId)
+    if (side) {
+      const parent = get().tabs.find((item) => item.id === side.parentId)
+      const status = get().termState[tabId]?.status
+      if (!parent || status === 'connected' || status === 'connecting') return
+      if (parent.kind === 'local') {
+        terminalPool.clear(side.id)
+        window.api.term.bindView(side.id)
+      }
+      window.api.term.create({
+        termId: side.id,
+        kind: parent.kind,
+        sessionId: parent.sessionId ?? undefined,
+        title: side.title,
+        shell: parent.kind === 'local' ? parent.shell : undefined,
+        ...(terminalPool.size(side.id) ?? { cols: 80, rows: 24 })
+      })
+      return
+    }
     const tab = get().tabs.find((item) => item.id === tabId)
     if (!tab) return
     const status = get().termState[tabId]?.status
@@ -681,17 +785,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     const editorKeyByTerm = withoutKey(get().editorKeyByTerm, tabId)
     const opsPanelTermIds = get().opsPanelTermIds.filter((id) => id !== tabId)
-    set({ ...withTabs(get, tabs, activeTabId), termState, editorTabs, editorKeyByTerm, opsPanelTermIds })
-    // 先断主进程连接，再销毁 xterm 实例
+    const released = releaseSideTerms({ ...get(), termState }, tabId)
+    set({
+      ...withTabs(get, tabs, activeTabId),
+      termState: released.termState,
+      editorTabs,
+      editorKeyByTerm,
+      opsPanelTermIds,
+      sessionSplit: released.sessionSplit,
+      sideTerms: released.sideTerms
+    })
+    // 先断主进程连接，再销毁 xterm 实例。releaseSideTerms 已经关掉另开的终端
     window.api.term.close(tabId)
     terminalPool.dispose(tabId)
   },
 
   setActiveTab: (tabId) => {
-    // 点标签回到这个标签的终端，打开的文件标签保留
+    // 点标签回到这个标签的终端，打开的文件标签保留。会话分栏开着时不收起
+    const keepSplit = !!get().sessionSplit[tabId]
     set({
       ...withTabs(get, get().tabs, tabId),
-      editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId),
+      ...(keepSplit ? {} : { editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId) }),
       hostsOpen: false,
       toolsOpen: false,
       settingsOpen: false,
@@ -718,7 +832,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   splitTab: (tabId, dir) => {
     const { tabs, activeTabId, split } = get()
     const tab = tabs.find((t) => t.id === tabId)
-    if (split || !tab || tabs.length < 2) return
+    if (split || !tab || tabs.length < 2 || Object.keys(get().sessionSplit).length > 0) return
     const others = tabs.filter((t) => t.id !== tabId)
     const primaryTab = activeTabId && activeTabId !== tabId ? activeTabId : others[others.length - 1].id
     set({
@@ -742,6 +856,149 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   focusPane: (tabId) => {
     if (get().split && get().activeTabId !== tabId) set(withTabs(get, get().tabs, tabId))
+  },
+
+  splitSessionView: (parentId, viewId, dir) => {
+    if (get().split || get().sessionSplit[parentId]) return
+    const tab = get().tabs.find((item) => item.id === parentId)
+    if (!tab) return
+    const primaryTerm = termViewId(parentId)
+    const currentView = get().editorKeyByTerm[parentId] ?? primaryTerm
+    let sideTerms = get().sideTerms
+    let secondaryView = viewId
+    let primaryView = currentView === viewId ? primaryTerm : currentView
+    let created: { id: string; title: string } | null = null
+    if (viewId === primaryTerm && currentView === primaryTerm) {
+      const id = newTermId()
+      const title = `终端 (${sideTerms.filter((item) => item.parentId === parentId).length + 2})`
+      sideTerms = [...sideTerms, { id, parentId, title }]
+      secondaryView = termViewId(id)
+      primaryView = primaryTerm
+      created = { id, title }
+    } else if (viewId === primaryTerm) {
+      primaryView = currentView
+      secondaryView = primaryTerm
+    }
+    if (primaryView === secondaryView) return
+    set({
+      sideTerms,
+      sessionSplit: {
+        ...get().sessionSplit,
+        [parentId]: {
+          dir,
+          ratio: 0.5,
+          secondary: [secondaryView],
+          primaryView,
+          secondaryView,
+          focus: 'secondary'
+        }
+      },
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, secondaryView),
+      opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== parentId),
+      hostsOpen: false,
+      toolsOpen: false,
+      settingsOpen: false,
+      ...closeOverlaysPatch(get)
+    })
+    if (created) {
+      window.api.term.create({
+        termId: created.id,
+        kind: tab.kind,
+        sessionId: tab.sessionId ?? undefined,
+        title: created.title,
+        shell: tab.kind === 'local' ? tab.shell : undefined,
+        cols: 80,
+        rows: 24
+      })
+    }
+  },
+
+  cancelSessionSplit: (parentId) => {
+    const pane = get().sessionSplit[parentId]
+    if (!pane) return
+    const view = pane.primaryView
+    set({
+      ...releaseSideTerms(get(), parentId),
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, view)
+    })
+  },
+
+  activateSessionView: (parentId, viewId) => {
+    const pane = get().sessionSplit[parentId]
+    if (!pane) return
+    const onRight = pane.secondary.includes(viewId)
+    const next: SessionSplit = {
+      ...pane,
+      focus: onRight ? 'secondary' : 'primary',
+      primaryView: onRight ? pane.primaryView : viewId,
+      secondaryView: onRight ? viewId : pane.secondaryView
+    }
+    const shown = next.focus === 'secondary' ? next.secondaryView : next.primaryView
+    set({
+      sessionSplit: { ...get().sessionSplit, [parentId]: next },
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, shown)
+    })
+  },
+
+  focusSessionSide: (parentId, side) => {
+    const pane = get().sessionSplit[parentId]
+    if (!pane || pane.focus === side) return
+    const shown = side === 'secondary' ? pane.secondaryView : pane.primaryView
+    set({
+      sessionSplit: { ...get().sessionSplit, [parentId]: { ...pane, focus: side } },
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, shown)
+    })
+  },
+
+  setSessionSplitRatio: (parentId, ratio) => {
+    const pane = get().sessionSplit[parentId]
+    if (!pane) return
+    set({
+      sessionSplit: {
+        ...get().sessionSplit,
+        [parentId]: { ...pane, ratio: Math.min(0.85, Math.max(0.15, ratio)) }
+      }
+    })
+  },
+
+  closeSideTerm: (termId) => {
+    const side = get().sideTerms.find((item) => item.id === termId)
+    if (!side) return
+    window.api.term.close(termId)
+    terminalPool.dispose(termId)
+    const termState = { ...get().termState }
+    delete termState[termId]
+    const sideTerms = get().sideTerms.filter((item) => item.id !== termId)
+    const pane = get().sessionSplit[side.parentId]
+    const view = termViewId(termId)
+    if (!pane) {
+      set({ sideTerms, termState })
+      return
+    }
+    const secondary = pane.secondary.filter((id) => id !== view)
+    const secondaryView = pane.secondaryView === view ? (secondary.at(-1) ?? '') : pane.secondaryView
+    const primaryView = pane.primaryView === view ? termViewId(side.parentId) : pane.primaryView
+    if (!secondary.length || !secondaryView || primaryView === secondaryView) {
+      const sessionSplit = { ...get().sessionSplit }
+      delete sessionSplit[side.parentId]
+      set({
+        sideTerms,
+        termState,
+        sessionSplit,
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, side.parentId, primaryView)
+      })
+      return
+    }
+    const focusView = pane.focus === 'secondary' ? secondaryView : primaryView
+    set({
+      sideTerms,
+      termState,
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, side.parentId, focusView),
+      sessionSplit: {
+        ...get().sessionSplit,
+        [side.parentId]: { ...pane, secondary, primaryView, secondaryView }
+      }
+    })
   },
 
   onTermStatus: (e) => {
@@ -790,14 +1047,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 面板内容硬性互斥：开文件面板就关掉编辑表单
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen, editing: null }),
 
-  // 文件盖在最上层：开面板时把正在看的文件退到后台（tab 不丢），不然面板出不来
+  // 文件盖在最上层：没分栏时，开面板把正在看的文件退到后台（标签不丢），不然面板出不来。
+  // 会话分栏留着，面板只占主栏，辅栏的终端和文件不动
   toggleOpsPanel: (termId) => {
     const open = get().opsPanelTermIds
-    set(
-      open.includes(termId)
-        ? { opsPanelTermIds: open.filter((id) => id !== termId) }
-        : { opsPanelTermIds: [...open, termId], editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) }
-    )
+    if (open.includes(termId)) {
+      set({ opsPanelTermIds: open.filter((id) => id !== termId) })
+      return
+    }
+    const splitOn = !!get().sessionSplit[termId]
+    set({
+      opsPanelTermIds: [...open, termId],
+      ...(splitOn ? {} : { editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) })
+    })
   },
 
   toggleHostsOpen: () =>
@@ -816,6 +1078,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     const key = editorKey(termId, sessionId, file.path)
     const tabs = get().editorTabs
     const existing = tabs.find((t) => t.key === key)
+    const pane = get().sessionSplit[termId]
+    const place = (editorTabs: EditorTab[]) => {
+      if (!pane) return { editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key } }
+      const alive = new Set(editorTabs.map((tab) => tab.key))
+      const keep = (id: string) => termIdFromView(id) !== null || alive.has(id)
+      const secondary = pane.secondary.filter(keep)
+      const primaryView = keep(pane.primaryView) ? pane.primaryView : termViewId(termId)
+      const secondaryView = keep(pane.secondaryView) ? pane.secondaryView : (secondary.at(-1) ?? '')
+      const placed = assignSessionView({ ...pane, secondary, primaryView, secondaryView }, termId, key, pane.focus)
+      if (!placed) {
+        return {
+          ...releaseSideTerms(get(), termId),
+          editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }
+        }
+      }
+      const shown = placed.focus === 'secondary' ? placed.secondaryView : placed.primaryView
+      return {
+        sessionSplit: { ...get().sessionSplit, [termId]: placed },
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, termId, shown)
+      }
+    }
     if (existing) {
       set({
         editorTabs: tabs.map((t) =>
@@ -823,7 +1106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? { ...t, preview: pin ? false : t.preview, readOnly: readOnly ?? t.readOnly }
             : t
         ),
-        editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }
+        ...place(tabs)
       })
       return
     }
@@ -835,13 +1118,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         next = next.filter((t) => t.key !== preview.key)
       }
     }
-    set({
-      editorTabs: [
-        ...next,
-        { key, termId, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false, readOnly: readOnly ?? true }
-      ],
-      editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }
-    })
+    const editorTabs = [
+      ...next,
+      { key, termId, sessionId, path: file.path, name: file.name, preview: !pin, dirty: false, readOnly: readOnly ?? true }
+    ]
+    set({ editorTabs, ...place(editorTabs) })
   },
   setEditorReadOnly: (key, readOnly) =>
     set({
@@ -863,15 +1144,44 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeEditorTab: (key) => {
     dropBuffer(key)
     const current = get().editorTabs.find((t) => t.key === key)
-    const tabs = get().editorTabs.filter((t) => t.key !== key)
-    const editorKeyByTerm = { ...get().editorKeyByTerm }
-    // 关的是这个终端正在看的文件，就换成它剩下的最后一个；都关了回到终端
-    if (current && editorKeyByTerm[current.termId] === key) {
-      const sibling = tabs.filter((t) => t.termId === current.termId).at(-1)
-      if (sibling) editorKeyByTerm[current.termId] = sibling.key
-      else delete editorKeyByTerm[current.termId]
+    const editorTabs = get().editorTabs.filter((t) => t.key !== key)
+    if (!current) {
+      set({ editorTabs })
+      return
     }
-    set({ editorTabs: tabs, editorKeyByTerm })
+    const pane = get().sessionSplit[current.termId]
+    if (!pane) {
+      const editorKeyByTerm = { ...get().editorKeyByTerm }
+      // 关的是这个终端正在看的文件，就换成它剩下的最后一个；都关了回到终端
+      if (editorKeyByTerm[current.termId] === key) {
+        const sibling = editorTabs.filter((t) => t.termId === current.termId).at(-1)
+        if (sibling) editorKeyByTerm[current.termId] = sibling.key
+        else delete editorKeyByTerm[current.termId]
+      }
+      set({ editorTabs, editorKeyByTerm })
+      return
+    }
+    const secondary = pane.secondary.filter((id) => id !== key)
+    const leftFile = editorTabs.filter((t) => t.termId === current.termId && !secondary.includes(t.key)).at(-1)
+    const primaryTerm = termViewId(current.termId)
+    const primaryView = pane.primaryView === key ? (leftFile?.key ?? primaryTerm) : pane.primaryView
+    const secondaryView = pane.secondaryView === key ? (secondary.at(-1) ?? '') : pane.secondaryView
+    if (!secondary.length || !secondaryView || primaryView === secondaryView) {
+      const keep = pane.primaryView === key ? primaryView : pane.primaryView
+      set({
+        editorTabs,
+        ...releaseSideTerms(get(), current.termId),
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, current.termId, keep)
+      })
+      return
+    }
+    const next = { ...pane, secondary, primaryView, secondaryView }
+    const shown = next.focus === 'secondary' ? next.secondaryView : next.primaryView
+    set({
+      editorTabs,
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, current.termId, shown),
+      sessionSplit: { ...get().sessionSplit, [current.termId]: next }
+    })
   },
   activateEditorTab: (termId, key) =>
     set({

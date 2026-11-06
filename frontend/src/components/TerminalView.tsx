@@ -154,10 +154,12 @@ export function TerminalView(props: { termId: string; active: boolean }) {
               const raw = e.dataTransfer.getData(TREE_PATH_MIME)
               if (!raw) return
               e.preventDefault()
-              const tab = useAppStore.getState().tabs.find((t) => t.id === props.termId)
+              const state = useAppStore.getState()
+              const side = state.sideTerms.find((item) => item.id === props.termId)
+              const tab = state.tabs.find((item) => item.id === (side?.parentId ?? props.termId))
               try {
                 const item = JSON.parse(raw) as { path: string; local: boolean }
-                if (tab) insertPaths(tab, [item.path], item.local)
+                if (tab) insertPaths(tab, [item.path], item.local, props.termId)
               } catch {
                 /* 不是文件树拖出来的 */
               }
