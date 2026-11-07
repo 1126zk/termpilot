@@ -36,16 +36,17 @@
       -webkit-font-smoothing: antialiased;
     }
     a { color: inherit; text-decoration: none; }
-    .wrap { width: 760px; margin: 0 auto; }
+    .wrap { width: 1120px; margin: 0 auto; }
 
     .nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; }
     .brand img { width: 24px; height: 24px; border-radius: 6px; }
-    .nav a.gh { padding: 6px 12px; border-radius: 8px; color: var(--muted); font-size: 14px; transition: color .15s, background .15s; }
+    .nav a.gh { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; color: var(--muted); transition: color .15s, background .15s; }
+    .nav a.gh svg { width: 22px; height: 22px; }
     .nav a.gh:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
 
     /* 顶部：左边版本和下载按钮，右边三个平台 */
-    .top { display: grid; grid-template-columns: 1fr 340px; align-items: center; gap: 40px; padding: 56px 0 0; }
+    .top { display: grid; grid-template-columns: 1fr 420px; align-items: center; gap: 40px; padding: 56px 0 0; }
     .hero { display: flex; align-items: center; gap: 20px; }
     .hero img { width: 72px; height: 72px; border-radius: 17px; box-shadow: 0 16px 44px -16px rgba(33, 181, 104, 0.55); }
     .hero h1 { margin: 0; font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
@@ -135,7 +136,7 @@
     .changes .empty { color: var(--dim); }
 
     /* 界面截图：比正文栏宽，居中伸出去 */
-    .shots { width: 1120px; margin: 64px 0 0 -180px; }
+    .shots { margin-top: 64px; }
     .shot-tabs { display: flex; justify-content: center; gap: 4px; margin-bottom: 20px; }
     .shot-tabs button {
       height: 34px;
@@ -173,7 +174,7 @@
     .shot-frame img.on { opacity: 1; }
 
     /* 功能：左边分组列表，右边跟着换图 */
-    .features { display: grid; grid-template-columns: 260px 1fr; gap: 36px; width: 1120px; margin: 88px 0 0 -180px; align-items: center; }
+    .features { display: grid; grid-template-columns: 260px 1fr; gap: 36px; margin-top: 88px; align-items: center; }
     .features + .features { margin-top: 72px; }
     .features.flip { grid-template-columns: 1fr 260px; }
     .features.flip .feat-list { order: 2; }
@@ -212,7 +213,7 @@
     .stack img:last-child { right: 0; bottom: 0; }
 
     /* MCP：一句话 + 能力卡片 */
-    .mcp { width: 1120px; margin: 88px 0 0 -180px; }
+    .mcp { margin-top: 88px; }
     .mcp h3 { margin: 0; font-size: 18px; font-weight: 650; }
     .mcp > p { margin: 8px 0 22px; color: var(--muted); font-size: 15px; }
     .mcp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -274,7 +275,7 @@
   <div class="wrap">
     <nav class="nav">
       <a class="brand" href="./"><img src="icon.png" alt="">TermPilot</a>
-      <a class="gh" href="https://github.com/1126zk/termpilot">GitHub</a>
+      <a class="gh" href="https://github.com/1126zk/termpilot" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg></a>
     </nav>
 
     <div class="top">
@@ -410,7 +411,7 @@
     </section>
 
     <footer class="note">
-      <p>TermPilot 平时主要在 Windows 上使用，也主要在 Windows 上测试，macOS 和 Linux 上难免有照顾不到的地方。遇到问题，或者想让它更贴合自己的习惯，欢迎 <a href="https://github.com/1126zk/termpilot/fork">fork</a> 一份，按自己的想法改。</p>
+      <p>TermPilot 平时主要在 Windows 上使用，也主要在 Windows 上测试，macOS 和 Linux 上难免有照顾不到的地方。<br>遇到问题，或者想让它更贴合自己的习惯，欢迎 <a href="https://github.com/1126zk/termpilot/fork">fork</a> 一份，按自己的想法改。</p>
     </footer>
   </div>
 
