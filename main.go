@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"runtime"
 
 	"termpilot/internal/app"
@@ -15,7 +16,18 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// 版本号只在 frontend/package.json 里维护（发版校验 tag 也看它），编译时嵌进来。
+//
+//go:embed frontend/package.json
+var frontendPackage []byte
+
 func main() {
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(frontendPackage, &pkg) == nil {
+		app.SetVersion(pkg.Version)
+	}
 	a := app.NewApp()
 
 	err := wails.Run(&options.App{

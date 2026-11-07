@@ -22,8 +22,16 @@ import (
 	"termpilot/internal/terminal"
 )
 
-// appVersion 与根 package.json 的 version 保持一致。
-const appVersion = "0.0.8"
+// appVersion 是关于页显示的版本号。唯一来源是 frontend/package.json，
+// 由 main 在启动时通过 SetVersion 注入，这里不写死，免得发版时漏改。
+var appVersion = "dev"
+
+// SetVersion 设置关于页显示的版本号。空串忽略。
+func SetVersion(v string) {
+	if v = strings.TrimSpace(v); v != "" {
+		appVersion = v
+	}
+}
 
 // App 应用装配：持有全部服务，负责启动/退出生命周期。
 type App struct {
