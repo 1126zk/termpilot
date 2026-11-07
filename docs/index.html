@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TermPilot</title>
+  <meta name="description" content="TermPilot 下载与更新记录">
+  <link rel="icon" href="icon.png">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d0f1c;
+      --card: #161a2c;
+      --card-hover: #1c2036;
+      --line: rgba(141, 145, 165, 0.14);
+      --line-strong: rgba(141, 145, 165, 0.26);
+      --text: #e8eaf2;
+      --muted: #8d91a5;
+      --dim: #5f6378;
+      --green: #21b568;
+      --green-hover: #27c473;
+      --red: #f2777a;
+      --mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+      --sans: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse 900px 420px at 50% -120px, rgba(33, 181, 104, 0.13), transparent 70%),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    .wrap { width: 760px; margin: 0 auto; }
+
+    .nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; }
+    .brand img { width: 24px; height: 24px; border-radius: 6px; }
+    .nav a.gh { padding: 6px 12px; border-radius: 8px; color: var(--muted); font-size: 14px; transition: color .15s, background .15s; }
+    .nav a.gh:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+
+    /* 顶部：左边版本和下载按钮，右边三个平台 */
+    .top { display: grid; grid-template-columns: 1fr 340px; align-items: center; gap: 40px; padding: 56px 0 0; }
+    .hero { display: flex; align-items: center; gap: 20px; }
+    .hero img { width: 72px; height: 72px; border-radius: 17px; box-shadow: 0 16px 44px -16px rgba(33, 181, 104, 0.55); }
+    .hero h1 { margin: 0; font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+    .hero .ver { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+    .tag { padding: 1px 8px; border-radius: 6px; background: rgba(33, 181, 104, 0.14); color: var(--green); }
+
+    .download { display: flex; align-items: center; gap: 14px; margin-top: 28px; }
+    .big {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      height: 52px;
+      padding: 0 26px;
+      border-radius: 12px;
+      background: var(--green);
+      color: #0b1a12;
+      font-size: 17px;
+      font-weight: 650;
+      box-shadow: 0 10px 36px -12px rgba(33, 181, 104, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      transition: background .15s, transform .15s;
+    }
+    .big:hover { background: var(--green-hover); transform: translateY(-1px); }
+    .big svg { width: 19px; height: 19px; }
+    .big-meta { color: var(--dim); font-family: var(--mono); font-size: 13px; }
+
+    .files { border-radius: 12px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+    .file {
+      display: grid;
+      grid-template-columns: 30px 1fr auto 16px;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      transition: background .15s;
+    }
+    .file + .file { border-top: 1px solid var(--line); }
+    .file:hover { background: var(--card-hover); }
+    .file .logo { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); }
+    .file .logo svg { width: 16px; height: 16px; }
+    .file b { display: block; font-size: 14px; font-weight: 600; line-height: 1.35; }
+    .file small { display: block; color: var(--muted); font-family: var(--mono); font-size: 11px; line-height: 1.4; }
+    .file .size { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    .file .arrow { width: 16px; height: 16px; }
+    .file .arrow { color: var(--dim); transition: color .15s; }
+    .file:hover .arrow { color: var(--green); }
+    .file.mine b::after { content: "本机"; margin-left: 8px; padding: 0 6px; border-radius: 5px; background: rgba(33, 181, 104, 0.14); color: var(--green); font-size: 11px; font-weight: 600; vertical-align: 2px; }
+
+    /* 更新记录：最新一版展开，其余折叠 */
+    .log { margin-top: 96px; }
+    .log-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+    .log h2 { margin: 0; font-size: 20px; font-weight: 650; }
+    .more { color: var(--muted); font-size: 14px; transition: color .15s; }
+    .more:hover { color: var(--green); }
+    .releases { display: flex; flex-direction: column; gap: 10px; }
+    .release {
+      border-radius: 12px;
+      background: var(--card);
+      box-shadow: inset 0 0 0 1px var(--line);
+      overflow: hidden;
+      transition: box-shadow .15s;
+    }
+    .release.latest {
+      background: linear-gradient(180deg, rgba(33, 181, 104, 0.07), rgba(33, 181, 104, 0) 120px), var(--card);
+      box-shadow: inset 0 0 0 1px rgba(33, 181, 104, 0.32);
+    }
+    .release summary, .release .summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      list-style: none;
+    }
+    .release summary { cursor: pointer; }
+    .release summary::-webkit-details-marker { display: none; }
+    .release:not(.latest):hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+    .release .ver-name { font-family: var(--mono); font-size: 16px; font-weight: 650; }
+    .release .badge { padding: 1px 7px; border-radius: 5px; background: var(--green); color: #0b1a12; font-size: 11px; font-weight: 700; }
+    .release time { color: var(--dim); font-family: var(--mono); font-size: 12.5px; }
+    .release .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .release .count b { color: var(--text); font-weight: 600; }
+    .release .chev { color: var(--dim); transition: transform .2s; }
+    .release[open] .chev { transform: rotate(180deg); }
+    .changes { margin: 0; padding: 2px 18px 16px; list-style: none; }
+    .changes li { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; color: #c9ccd8; font-size: 14.5px; line-height: 1.55; }
+    .kind { flex: none; padding: 0 6px; border-radius: 5px; font-size: 11.5px; font-weight: 600; line-height: 19px; }
+    .kind.feat { background: rgba(33, 181, 104, 0.14); color: var(--green); }
+    .kind.fix { background: rgba(141, 145, 165, 0.14); color: var(--muted); }
+    .changes .empty { color: var(--dim); }
+
+    /* 界面截图：比正文栏宽，居中伸出去 */
+    .shots { width: 1120px; margin: 64px 0 0 -180px; }
+    .shot-tabs { display: flex; justify-content: center; gap: 4px; margin-bottom: 20px; }
+    .shot-tabs button {
+      height: 34px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 9px;
+      background: none;
+      color: var(--muted);
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+      transition: color .15s, background .15s;
+    }
+    .shot-tabs button:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+    .shot-tabs button[aria-selected="true"] { color: var(--green); background: rgba(33, 181, 104, 0.12); }
+    .shot-frame {
+      position: relative;
+      aspect-ratio: 1280 / 760;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #141729;
+      box-shadow:
+        0 0 0 1px var(--line-strong),
+        0 40px 100px -30px rgba(0, 0, 0, 0.85),
+        0 0 120px -50px rgba(33, 181, 104, 0.4);
+    }
+    .shot-frame img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      transition: opacity .25s ease;
+    }
+    .shot-frame img.on { opacity: 1; }
+
+    /* 功能：左边分组列表，右边跟着换图 */
+    .features { display: grid; grid-template-columns: 260px 1fr; gap: 36px; width: 1120px; margin: 88px 0 0 -180px; align-items: center; }
+    .features + .features { margin-top: 72px; }
+    .features.flip { grid-template-columns: 1fr 260px; }
+    .features.flip .feat-list { order: 2; }
+    .feat-list { display: flex; flex-direction: column; gap: 2px; }
+    .feat-list h3 { margin: 0 0 10px 12px; color: var(--text); font-size: 18px; font-weight: 650; }
+    .feat-list button {
+      position: relative;
+      height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 8px;
+      background: none;
+      color: var(--muted);
+      font: inherit;
+      font-size: 14.5px;
+      text-align: left;
+      cursor: pointer;
+      transition: color .15s, background .15s;
+    }
+    .feat-list button:hover { color: var(--text); }
+    .feat-list button[aria-selected="true"] { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+    .feat-list button[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--green); }
+    .feat-list kbd { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+    .feat-frame { position: relative; aspect-ratio: 1280 / 760; }
+    .feat-frame > * { position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+    .feat-frame > .on { opacity: 1; }
+    .feat-frame img, .stack img {
+      width: 100%;
+      height: 100%;
+      border-radius: 12px;
+      background: #141729;
+      box-shadow: 0 0 0 1px var(--line-strong), 0 30px 80px -30px rgba(0, 0, 0, 0.85);
+    }
+    .stack img { position: absolute; width: 84%; height: 84%; }
+    .stack img:first-child { left: 0; top: 0; }
+    .stack img:last-child { right: 0; bottom: 0; }
+
+    /* MCP：一句话 + 能力卡片 */
+    .mcp { width: 1120px; margin: 88px 0 0 -180px; }
+    .mcp h3 { margin: 0; font-size: 18px; font-weight: 650; }
+    .mcp > p { margin: 8px 0 22px; color: var(--muted); font-size: 15px; }
+    .mcp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .mcp-card {
+      display: flex;
+      flex-direction: column;
+      padding: 18px 20px;
+      border-radius: 12px;
+      background: var(--card);
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+    .mcp-card b { display: block; font-size: 15px; font-weight: 600; }
+    .mcp-card p { margin: 6px 0 12px; color: var(--muted); font-size: 13.5px; line-height: 1.65; }
+    .mcp-card code { margin-top: auto; color: var(--green); font-family: var(--mono); font-size: 12px; opacity: .8; }
+    .mcp-how { display: grid; grid-template-columns: 330px 1fr; gap: 36px; align-items: center; margin-bottom: 28px; }
+    .steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+    .steps li {
+      position: relative;
+      padding: 14px 16px 14px 60px;
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      counter-increment: step;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .steps li:hover { background: rgba(255, 255, 255, 0.03); }
+    .steps li[aria-selected="true"] { background: rgba(255, 255, 255, 0.05); }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 16px;
+      top: 15px;
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: rgba(33, 181, 104, 0.14);
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      transition: background .15s, color .15s;
+    }
+    .steps li[aria-selected="true"]::before { background: var(--green); color: #0b1a12; }
+    .steps b { display: block; margin-bottom: 2px; color: var(--text); font-size: 15px; font-weight: 600; }
+    .steps .ui { padding: 1px 7px; border-radius: 5px; background: rgba(255, 255, 255, 0.07); color: var(--text); font-size: 13px; white-space: nowrap; }
+    .mcp-card.guard { background: linear-gradient(180deg, rgba(33, 181, 104, 0.07), rgba(33, 181, 104, 0) 90px), var(--card); box-shadow: inset 0 0 0 1px rgba(33, 181, 104, 0.32); }
+
+    .note { margin-top: 72px; padding: 28px 0 56px; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; line-height: 1.85; }
+    .note p { margin: 0; }
+    .note a { color: var(--text); border-bottom: 1px solid var(--line-strong); }
+    .note a:hover { color: var(--green); border-color: var(--green); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="brand" href="./"><img src="icon.png" alt="">TermPilot</a>
+      <a class="gh" href="https://github.com/1126zk/termpilot">GitHub</a>
+    </nav>
+
+    <div class="top">
+    <div>
+    <section class="hero">
+      <img src="icon.png" alt="">
+      <div>
+        <h1>TermPilot</h1>
+        <div class="ver"><span class="tag" id="tag">最新版</span><time id="date"></time></div>
+      </div>
+    </section>
+
+    <div class="download">
+      <a class="big" id="big" href="https://github.com/1126zk/termpilot/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+        <span id="big-label">下载 Windows 版</span>
+      </a>
+      <span class="big-meta" id="big-meta"></span>
+    </div>
+    </div>
+
+    <div class="files">
+      <a class="file" data-os="windows" href="https://github.com/1126zk/termpilot/releases/latest">
+        <span class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg></span>
+        <span><b>Windows</b><small>x64 · zip</small></span>
+        <span class="size"></span>
+        <svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v12"/><path d="m7 12 5 5 5-5"/></svg>
+      </a>
+      <a class="file" data-os="darwin" href="https://github.com/1126zk/termpilot/releases/latest">
+        <span class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.2-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.8-1.1-2.8-4.3zM13.9 5.3c.7-.9 1.2-2 1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.2.1 2.3-.6 3.1-1.5z"/></svg></span>
+        <span><b>macOS</b><small>Apple 芯片 · zip</small></span>
+        <span class="size"></span>
+        <svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v12"/><path d="m7 12 5 5 5-5"/></svg>
+      </a>
+      <a class="file" data-os="linux" href="https://github.com/1126zk/termpilot/releases/latest">
+        <span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3"/><path d="M12.5 15H17"/></svg></span>
+        <span><b>Linux</b><small>x64 · tar.gz</small></span>
+        <span class="size"></span>
+        <svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v12"/><path d="m7 12 5 5 5-5"/></svg>
+      </a>
+    </div>
+    </div>
+
+    <section class="shots">
+      <div class="shot-tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-shot="hosts">主机</button>
+        <button role="tab" aria-selected="false" data-shot="tools">工具</button>
+        <button role="tab" aria-selected="false" data-shot="ops">运维面板</button>
+        <button role="tab" aria-selected="false" data-shot="sidebar">侧边栏</button>
+      </div>
+      <div class="shot-frame">
+        <img class="on" data-shot="hosts" src="shots/hosts.webp" alt="主机">
+        <img data-shot="tools" src="shots/tools.webp" alt="工具" loading="lazy">
+        <img data-shot="ops" src="shots/ops.webp" alt="运维面板" loading="lazy">
+        <img data-shot="sidebar" src="shots/sidebar.webp" alt="侧边栏" loading="lazy">
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="feat-list" role="tablist">
+        <h3>运维面板</h3>
+        <button role="tab" aria-selected="true" data-feat="proc">查看资源和进程</button>
+        <button role="tab" aria-selected="false" data-feat="docker">查看和操作 Docker</button>
+        <button role="tab" aria-selected="false" data-feat="web">搭静态网站和反向代理</button>
+        <button role="tab" aria-selected="false" data-feat="script">常用脚本和定时任务</button>
+        <button role="tab" aria-selected="false" data-feat="manual">查看和维护手册</button>
+      </div>
+      <div class="feat-frame">
+        <img class="on" data-feat="proc" src="shots/ops.webp" alt="查看资源和进程" loading="lazy">
+        <img data-feat="docker" src="shots/f-docker.webp" alt="查看和操作 Docker" loading="lazy">
+        <img data-feat="web" src="shots/f-web.webp" alt="搭静态网站和反向代理" loading="lazy">
+        <img data-feat="script" src="shots/f-script.webp" alt="常用脚本和定时任务" loading="lazy">
+        <img data-feat="manual" src="shots/f-manual.webp" alt="查看和维护手册" loading="lazy">
+      </div>
+    </section>
+
+    <section class="features flip">
+      <div class="feat-list" role="tablist">
+        <h3>终端与侧边栏</h3>
+        <button role="tab" aria-selected="true" data-feat="window">多窗口</button>
+        <button role="tab" aria-selected="false" data-feat="split">标签分栏</button>
+        <button role="tab" aria-selected="false" data-feat="inner">标签内分栏</button>
+        <button role="tab" aria-selected="false" data-feat="tree">文件目录</button>
+        <button role="tab" aria-selected="false" data-feat="paste">粘贴图片<kbd>Alt+V</kbd></button>
+        <button role="tab" aria-selected="false" data-feat="cmd">常用命令和历史命令</button>
+        <button role="tab" aria-selected="false" data-feat="theme">切换主题</button>
+      </div>
+      <div class="feat-frame">
+        <div class="stack on" data-feat="window">
+          <img src="shots/hosts.webp" alt="" loading="lazy">
+          <img src="shots/ops.webp" alt="多窗口" loading="lazy">
+        </div>
+        <img data-feat="split" src="shots/f-split.webp" alt="标签分栏" loading="lazy">
+        <img data-feat="inner" src="shots/f-inner.webp" alt="标签内分栏" loading="lazy">
+        <img data-feat="tree" src="shots/f-tree.webp" alt="文件目录" loading="lazy">
+        <img data-feat="paste" src="shots/f-paste.webp" alt="粘贴图片" loading="lazy">
+        <img data-feat="cmd" src="shots/f-cmd.webp" alt="常用命令和历史命令" loading="lazy">
+        <img data-feat="theme" src="shots/f-theme.webp" alt="切换主题" loading="lazy">
+      </div>
+    </section>
+
+    <section class="mcp">
+      <h3>交给 AI 操作</h3>
+      <p>内置 MCP 服务。Codex、Kimi Code 这类 Agent 接上之后，可以直接用你保存的主机干活。</p>
+      <div class="mcp-how">
+        <ol class="steps" role="tablist">
+          <li role="tab" aria-selected="true" data-step="settings"><b>开启服务</b>点左上角 <span class="ui">☰</span> 进设置，在 <span class="ui">MCP 服务</span> 里打开启用并保存。</li>
+          <li role="tab" aria-selected="false" data-step="agent"><b>接通 Agent</b>右键终端标签，<span class="ui">复制 Agent 提示词</span> 发给 Agent，它会自己读取地址和令牌、写好配置。</li>
+          <li role="tab" aria-selected="false" data-step="term"><b>指定终端</b>右键要操作的标签，<span class="ui">复制终端信息</span> 连同你的要求一起发给 Agent。</li>
+        </ol>
+        <div class="feat-frame">
+          <img class="on" data-step="settings" src="shots/mcp-settings.webp" alt="设置里的 MCP 服务" loading="lazy">
+          <img data-step="agent" src="shots/mcp-agent.webp" alt="复制 Agent 提示词" loading="lazy">
+          <img data-step="term" src="shots/mcp-term.webp" alt="复制终端信息" loading="lazy">
+        </div>
+      </div>
+      <div class="mcp-grid">
+        <div class="mcp-card"><b>管理连接</b><p>列出、打开、新建、修改已保存的主机，也能开本机终端。</p><code>connection_*</code></div>
+        <div class="mcp-card"><b>执行命令</b><p>后台执行拿到输出和退出码，也可以打进你正在看的终端。</p><code>term_exec · term_pty</code></div>
+        <div class="mcp-card"><b>操作交互程序</b><p>发按键、读屏幕，安装向导和 TUI 也能一步步走完。</p><code>term_write · term_read</code></div>
+        <div class="mcp-card"><b>终端截图</b><p>截当前一屏，或把整段滚动记录拼成长图。</p><code>term_screenshot</code></div>
+        <div class="mcp-card"><b>传文件</b><p>浏览远端目录，上传、下载、改名、删除。</p><code>sftp_*</code></div>
+        <div class="mcp-card guard"><b>你来把关</b><p>只监听本机并校验令牌；危险命令先弹窗等你确认，每次调用都留记录。</p><code>127.0.0.1 · Bearer</code></div>
+      </div>
+    </section>
+
+    <section class="log">
+      <div class="log-head">
+        <h2>更新记录</h2>
+        <a class="more" href="https://github.com/1126zk/termpilot/releases">全部版本 →</a>
+      </div>
+      <div class="releases" id="releases"></div>
+    </section>
+
+    <footer class="note">
+      <p>TermPilot 平时主要在 Windows 上使用，也主要在 Windows 上测试，macOS 和 Linux 上难免有照顾不到的地方。遇到问题，或者想让它更贴合自己的习惯，欢迎 <a href="https://github.com/1126zk/termpilot/fork">fork</a> 一份，按自己的想法改。</p>
+    </footer>
+  </div>
+
+  <script>
+    const tabs = [...document.querySelectorAll(".shot-tabs button")]
+    const show = (name) => {
+      for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.shot === name))
+      for (const img of document.querySelectorAll(".shot-frame img")) img.classList.toggle("on", img.dataset.shot === name)
+    }
+    for (const t of tabs) t.addEventListener("click", () => show(t.dataset.shot))
+
+    for (const how of document.querySelectorAll(".mcp-how")) {
+      const items = [...how.querySelectorAll(".steps li")]
+      const pick = (name) => {
+        for (const li of items) li.setAttribute("aria-selected", String(li.dataset.step === name))
+        for (const img of how.querySelectorAll(".feat-frame img")) img.classList.toggle("on", img.dataset.step === name)
+      }
+      for (const li of items) {
+        li.addEventListener("click", () => pick(li.dataset.step))
+        li.addEventListener("mouseenter", () => pick(li.dataset.step))
+      }
+    }
+
+    for (const section of document.querySelectorAll(".features")) {
+      const buttons = [...section.querySelectorAll(".feat-list button")]
+      const pick = (name) => {
+        for (const b of buttons) b.setAttribute("aria-selected", String(b.dataset.feat === name))
+        for (const el of section.querySelectorAll(".feat-frame > [data-feat]")) el.classList.toggle("on", el.dataset.feat === name)
+      }
+      for (const b of buttons) {
+        b.addEventListener("click", () => pick(b.dataset.feat))
+        b.addEventListener("mouseenter", () => pick(b.dataset.feat))
+      }
+    }
+
+    const REPO = "1126zk/termpilot"
+    const API = `https://api.github.com/repos/${REPO}`
+
+    const ua = navigator.userAgent
+    const os = /Mac/i.test(ua) && !/iPhone|iPad/i.test(ua) ? "darwin" : /Linux/i.test(ua) && !/Android/i.test(ua) ? "linux" : "windows"
+    const names = { windows: "Windows", darwin: "macOS", linux: "Linux" }
+    const suffix = { windows: "-windows.zip", darwin: "-darwin.zip", linux: "-linux.tar.gz" }
+    document.getElementById("big-label").textContent = `下载 ${names[os]} 版`
+    document.querySelector(`.file[data-os="${os}"]`).classList.add("mine")
+
+    const size = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB")
+    const day = (iso) => (iso || "").slice(0, 10)
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+    const get = (path) => fetch(API + path).then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+
+    function showLatest(rel) {
+      const assets = rel.assets || []
+      const pick = (key) => assets.find((a) => a.name.endsWith(suffix[key]))
+      document.getElementById("tag").textContent = rel.tag_name
+      document.getElementById("date").textContent = day(rel.published_at)
+      const mine = pick(os)
+      if (mine) {
+        document.getElementById("big").href = mine.browser_download_url
+        document.getElementById("big-meta").textContent = size(mine.size)
+      }
+      for (const el of document.querySelectorAll(".file")) {
+        const asset = pick(el.dataset.os)
+        if (!asset) continue
+        el.href = asset.browser_download_url
+        el.querySelector(".size").textContent = size(asset.size)
+      }
+    }
+
+    // 两个版本之间的提交，按 feat / fix 分组；chore 之类不展示
+    function groups(commits) {
+      const feat = []
+      const fix = []
+      for (const c of commits) {
+        const title = c.commit.message.split("\n")[0]
+        const m = /^(feat|fix)(\([^)]*\))?!?:\s*(.+)$/.exec(title)
+        if (m) (m[1] === "feat" ? feat : fix).push(m[3])
+      }
+      return { feat: feat.reverse(), fix: fix.reverse() }
+    }
+
+    function renderRelease(rel, changes, latest) {
+      const chev = `<svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`
+      const head = `<span class="ver-name">${esc(rel.tag_name)}</span>${latest ? `<span class="badge">最新</span>` : ""}<time>${day(rel.published_at)}</time>`
+      if (!changes) return `<div class="release${latest ? " latest" : ""}"><div class="summary">${head}</div></div>`
+      const parts = []
+      if (changes.feat.length) parts.push(`<b>${changes.feat.length}</b> 项新功能`)
+      if (changes.fix.length) parts.push(`<b>${changes.fix.length}</b> 项修复`)
+      const items = [
+        ...changes.feat.map((t) => `<li><span class="kind feat">新</span>${esc(t)}</li>`),
+        ...changes.fix.map((t) => `<li><span class="kind fix">修</span>${esc(t)}</li>`)
+      ]
+      const body = items.length ? items.join("") : `<li class="empty">只有内部调整</li>`
+      return `<details class="release${latest ? " latest" : ""}"${latest ? " open" : ""}>
+        <summary>${head}<span class="count">${parts.join(" · ")}</span>${chev}</summary>
+        <ul class="changes">${body}</ul>
+      </details>`
+    }
+
+    get("/releases?per_page=6")
+      .then(async (all) => {
+        const releases = all.filter((r) => !r.draft && !r.prerelease)
+        if (!releases.length) return
+        showLatest(releases[0])
+        const shown = releases.slice(0, 5)
+        const changes = await Promise.all(
+          shown.map((rel, i) => {
+            const prev = releases[i + 1]
+            if (!prev) return null
+            return get(`/compare/${prev.tag_name}...${rel.tag_name}`)
+              .then((cmp) => groups(cmp.commits || []))
+              .catch(() => null)
+          })
+        )
+        document.getElementById("releases").innerHTML = shown.map((rel, i) => renderRelease(rel, changes[i], i === 0)).join("")
+      })
+      .catch(() => {})
+  </script>
+</body>
+</html>
