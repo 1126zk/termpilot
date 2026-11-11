@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, Download, Eye, EyeOff, FilePenLine, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -7,7 +7,6 @@ import {
   ContextMenuItem,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '../stores/useAppStore'
 import { FileIcon } from './FileIcon'
 import { isImage } from './RemoteEditor'
@@ -37,6 +36,7 @@ type FsBackend = {
  * 切标签只是显隐，状态（当前目录、展开、选中）互不干扰。
  * SSH 窗口显示服务器文件，本地终端显示本机文件。
  * 当前看得到的树每 3 秒静默重读已展开的目录；自己在树上操作时会让开。
+ * 条目特别多的目录不参与这轮重读。列表只挂视口里的行。
  */
 export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   const tab = props.tab
@@ -98,9 +98,6 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       return !v
     })
 
-  const visible = (items: RemoteFile[]) =>
-    showHidden ? items : items.filter((i) => !i.name.startsWith('.'))
-
   // 统一文件后端：本地终端走 localfs，SSH 窗口走绑了 sessionId 的 sftp
   const fs = useMemo<FsBackend | null>(() => {
     if (local) return window.api.localfs
@@ -137,7 +134,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       const res = await fs.list(resolved)
       if (listingGen.current !== token) return
       setRoot(res.path)
-      setEntries(sortEntries(res.entries))
+      setEntries(orderEntries(res.entries))
       setCache({})
       setOpen({ [res.path]: true })
       setSelected(res.path)
@@ -183,7 +180,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       try {
         const res = await fs.list(path)
         if (listingGen.current !== token) return
-        const sorted = sortEntries(res.entries)
+        const sorted = orderEntries(res.entries)
         if (path === root) {
           setRoot(res.path)
           setEntries(sorted)
@@ -227,20 +224,29 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       if (stopped || inflight || document.hidden) return
       const cur = pollState.current
       if (!cur.fs || cur.busy || cur.making || cur.renaming || cur.removing || cur.error === NO_SFTP) return
-      const token = listingGen.current
+      const listRoot = cur.entries.length <= LARGE_DIR
       const rootAtStart = cur.root
+      const paths = Object.keys(cur.open).filter((p) => {
+        if (!cur.open[p] || p === rootAtStart) return false
+        return (cur.cache[p]?.entries.length ?? 0) <= LARGE_DIR
+      })
+      if (!listRoot && paths.length === 0) return
+      const token = listingGen.current
       inflight = true
       try {
-        const res = await cur.fs.list(rootAtStart)
-        if (stopped || listingGen.current !== token || pollState.current.root !== rootAtStart) return
-        const rootEntries = sortEntries(res.entries)
-        const paths = Object.keys(cur.open).filter((p) => cur.open[p] && p !== rootAtStart && p !== res.path)
+        let listedRoot: { path: string; entries: RemoteFile[] } | null = null
+        if (listRoot) {
+          const res = await cur.fs.list(rootAtStart)
+          if (stopped || listingGen.current !== token || pollState.current.root !== rootAtStart) return
+          listedRoot = { path: res.path, entries: orderEntries(res.entries) }
+        }
+        const childPaths = listedRoot ? paths.filter((p) => p !== listedRoot.path) : paths
         const nextCache: Record<string, DirListing> = {}
         await Promise.all(
-          paths.map(async (p) => {
+          childPaths.map(async (p) => {
             try {
               const child = await cur.fs!.list(p)
-              nextCache[p] = { entries: sortEntries(child.entries) }
+              nextCache[p] = { entries: orderEntries(child.entries) }
             } catch (e) {
               nextCache[p] = { entries: [], error: sftpMessage(e) }
             }
@@ -248,12 +254,14 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
         )
         if (stopped || listingGen.current !== token || pollState.current.root !== rootAtStart) return
         const latest = pollState.current
-        if (res.path !== latest.root) setRoot(res.path)
-        if (!sameFiles(latest.entries, rootEntries)) setEntries(rootEntries)
-        if (!sameCache(latest.cache, nextCache, paths)) {
+        if (listedRoot) {
+          if (listedRoot.path !== latest.root) setRoot(listedRoot.path)
+          if (!sameFiles(latest.entries, listedRoot.entries)) setEntries(listedRoot.entries)
+        }
+        if (childPaths.length > 0 && !sameCache(latest.cache, nextCache, childPaths)) {
           setCache((prev) => {
             const merged = { ...prev }
-            for (const p of paths) merged[p] = nextCache[p]
+            for (const p of childPaths) merged[p] = nextCache[p]
             return merged
           })
         }
@@ -277,6 +285,23 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [props.active, backendKey])
+
+  const rootOpen = !!open[root]
+  const rows = useMemo(
+    () =>
+      buildTreeRows({
+        entries,
+        rootOpen,
+        open,
+        cache,
+        loading,
+        showHidden,
+        busy,
+        error,
+        root
+      }),
+    [entries, rootOpen, open, cache, loading, showHidden, busy, error, root]
+  )
 
   if (!fs) {
     return <Hint text="打开一个终端窗口，这里显示那台机器的文件。" />
@@ -500,14 +525,14 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       const res = await fs.list(root)
       if (listingGen.current !== token) return
       setRoot(res.path)
-      setEntries(sortEntries(res.entries))
+      setEntries(orderEntries(res.entries))
       const paths = Object.keys(open).filter((p) => open[p] && p !== root && p !== res.path)
       const next: Record<string, DirListing> = {}
       await Promise.all(
         paths.map(async (p) => {
           try {
             const child = await fs.list(p)
-            next[p] = { entries: sortEntries(child.entries) }
+            next[p] = { entries: orderEntries(child.entries) }
           } catch (e) {
             next[p] = { entries: [], error: sftpMessage(e) }
           }
@@ -546,155 +571,189 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     })()
   }
 
-  const renderNodes = (items: RemoteFile[], depth: number) =>
-    visible(items).map((item) => {
-      const isDir = item.kind === 'dir'
-      const expanded = isDir && !!open[item.path]
-      const listing = cache[item.path]
-      return (
-        <Fragment key={item.path}>
-          <ContextMenu>
-              <ContextMenuTrigger asChild>
-                <div
-                  role="treeitem"
-                  aria-expanded={isDir ? expanded : undefined}
-                  aria-selected={selected === item.path}
-                  title={
-                    item.kind === 'dir'
-                      ? item.path
-                      : `${item.name}  ${formatSize(item.size)}`
-                  }
-                  className={`flex h-7 w-full cursor-pointer items-center pr-2 text-left text-sm select-none hover:bg-foreground/5 ${
-                    dropDir === item.path ? DROP_HIGHLIGHT : selected === item.path ? 'bg-foreground/10' : ''
-                  }`}
-                  style={{ paddingLeft: depth * TREE_INDENT }}
-                  data-drop-dir={isDir ? item.path : parentDir(item.path) ?? root}
-                  draggable
-                  onDragStart={(e) => {
-                    if (local) {
-                      e.preventDefault()
-                      dragLocalOut(item.path)
-                      return
-                    }
-                    e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local: false }))
-                    e.dataTransfer.effectAllowed = 'copyMove'
-                  }}
-                  onContextMenu={() => setSelected(item.path)}
-                  onClick={() => {
-                    setSelected(item.path)
-                    if (isDir) {
-                      void toggle(item.path)
-                    } else {
-                      openFile(item, false)
-                    }
-                  }}
-                  onDoubleClick={() => {
-                    if (!isDir) {
-                      openFile(item, true)
-                    }
-                  }}
-                >
-                  <FileIcon name={item.name} kind={item.kind} open={expanded} />
-                  <span className="min-w-0 flex-1 truncate pl-1">{item.name}</span>
-                </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent
-                onCloseAutoFocus={panelMenu.keepFocusOnClose}
-              >
-                {item.kind === 'dir' && (
-                  <ContextMenuItem onClick={() => void loadRoot(item.path)}>
-                    <FolderInput /> 打开此目录
-                  </ContextMenuItem>
-                )}
-                {item.kind === 'dir' && (
-                  <ContextMenuItem
-                    onClick={() => {
-                      panelMenu.openFromMenu(() => {
-                        setFolderError('')
-                        setMkdirTarget(item.path)
-                        setMaking(true)
-                      })
-                    }}
-                  >
-                    <FolderPlus /> 新建文件夹
-                  </ContextMenuItem>
-                )}
-                {item.kind === 'dir' && (
-                  <ContextMenuItem onClick={() => void uploadFilesInto(item.path)}>
-                    <Upload /> 上传文件
-                  </ContextMenuItem>
-                )}
-                {item.kind === 'dir' && (
-                  <ContextMenuItem onClick={() => void uploadDirInto(item.path)}>
-                    <FolderUp /> 上传文件夹
-                  </ContextMenuItem>
-                )}
-                {item.kind !== 'dir' && (
-                  <ContextMenuItem
-                    onClick={() => openFile(item, true, true)}
-                  >
-                    <Eye /> 查看
-                  </ContextMenuItem>
-                )}
-                {item.kind !== 'dir' && !isImage(item.name) && (
-                  <ContextMenuItem
-                    onClick={() => openFile(item, true, false)}
-                  >
-                    <FilePenLine /> 编辑
-                  </ContextMenuItem>
-                )}
-                <ContextMenuItem
-                  onClick={() => {
-                    panelMenu.openFromMenu(() => {
-                      setRenameError('')
-                      setRenaming(item)
-                    })
-                  }}
-                >
-                  <Pencil /> 重命名
-                </ContextMenuItem>
-                {item.kind !== 'dir' && (
-                  <ContextMenuItem onClick={() => download(item)}>
-                    <Download /> 下载
-                  </ContextMenuItem>
-                )}
-                {item.kind === 'dir' && (
-                  <ContextMenuItem onClick={() => downloadDir(item)}>
-                    <Download /> 下载
-                  </ContextMenuItem>
-                )}
-                <ContextMenuItem onClick={() => panelMenu.openFromMenu(() => setRemoving(item))}>
-                  <Trash2 /> 删除
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
-          {expanded && (
-            <div>
-              {loading[item.path] && !listing && (
-                <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
-                  正在加载
-                </p>
-              )}
-              {listing?.error && (
-                <p className="text-[11px] text-destructive" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
-                  {listing.error}
-                </p>
-              )}
-              {listing && visible(listing.entries).length === 0 && !listing.error && (
-                <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: (depth + 1) * TREE_INDENT }}>
-                  空目录
-                </p>
-              )}
-              {listing && renderNodes(listing.entries, depth + 1)}
-            </div>
-          )}
-        </Fragment>
-      )
-    })
-
-  const rootOpen = !!open[root]
   const displayRoot = tab?.shell === 'wsl' ? wslDisplayPath(root) : root
   const rootName = baseName(displayRoot)
+
+  const renderTreeRow = (row: TreeRow) => {
+    if (row.type === 'note') {
+      return (
+        <p
+          className={`flex h-7 items-center truncate pr-2 ${row.error ? 'text-[11px] text-destructive' : 'text-xs text-muted-foreground'}`}
+          style={{ paddingLeft: row.depth * TREE_INDENT }}
+          title={row.error ? row.text : undefined}
+        >
+          {row.text}
+        </p>
+      )
+    }
+    if (row.type === 'root') {
+      return (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              role="treeitem"
+              aria-expanded={rootOpen}
+              aria-selected={selected === root}
+              title={root}
+              className={`flex h-7 w-full cursor-pointer items-center pr-2 text-sm select-none hover:bg-foreground/5 ${
+                dropDir === root ? DROP_HIGHLIGHT : selected === root ? 'bg-foreground/10' : ''
+              }`}
+              draggable
+              onDragStart={(e) => {
+                if (local) {
+                  e.preventDefault()
+                  dragLocalOut(root)
+                  return
+                }
+                e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local: false }))
+                e.dataTransfer.effectAllowed = 'copyMove'
+              }}
+              onContextMenu={() => setSelected(root)}
+              onClick={() => {
+                setSelected(root)
+                void toggle(root)
+              }}
+            >
+              <FileIcon name={rootName} kind="dir" open={rootOpen} />
+              <span className="min-w-0 flex-1 truncate pl-1">{rootName}</span>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent onCloseAutoFocus={panelMenu.keepFocusOnClose}>
+            {parentDir(root) && (
+              <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
+                打开上级目录
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem
+              onClick={() => {
+                panelMenu.openFromMenu(() => {
+                  setFolderError('')
+                  setMkdirTarget(root)
+                  setMaking(true)
+                })
+              }}
+            >
+              <FolderPlus /> 新建文件夹
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void uploadFilesInto(root)}>
+              <Upload /> 上传文件
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void uploadDirInto(root)}>
+              <FolderUp /> 上传文件夹
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => downloadDir({ name: rootName, path: root, kind: 'dir', size: 0, mtime: 0 })}>
+              <Download /> 下载
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      )
+    }
+    const item = row.item
+    const isDir = item.kind === 'dir'
+    const expanded = isDir && !!open[item.path]
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            role="treeitem"
+            aria-expanded={isDir ? expanded : undefined}
+            aria-selected={selected === item.path}
+            title={item.kind === 'dir' ? item.path : `${item.name}  ${formatSize(item.size)}`}
+            className={`flex h-7 w-full cursor-pointer items-center pr-2 text-left text-sm select-none hover:bg-foreground/5 ${
+              dropDir === item.path ? DROP_HIGHLIGHT : selected === item.path ? 'bg-foreground/10' : ''
+            }`}
+            style={{ paddingLeft: row.depth * TREE_INDENT }}
+            data-drop-dir={isDir ? item.path : parentDir(item.path) ?? root}
+            draggable
+            onDragStart={(e) => {
+              if (local) {
+                e.preventDefault()
+                dragLocalOut(item.path)
+                return
+              }
+              e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local: false }))
+              e.dataTransfer.effectAllowed = 'copyMove'
+            }}
+            onContextMenu={() => setSelected(item.path)}
+            onClick={() => {
+              setSelected(item.path)
+              if (isDir) void toggle(item.path)
+              else openFile(item, false)
+            }}
+            onDoubleClick={() => {
+              if (!isDir) openFile(item, true)
+            }}
+          >
+            <FileIcon name={item.name} kind={item.kind} open={expanded} />
+            <span className="min-w-0 flex-1 truncate pl-1">{item.name}</span>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent onCloseAutoFocus={panelMenu.keepFocusOnClose}>
+          {item.kind === 'dir' && (
+            <ContextMenuItem onClick={() => void loadRoot(item.path)}>
+              <FolderInput /> 打开此目录
+            </ContextMenuItem>
+          )}
+          {item.kind === 'dir' && (
+            <ContextMenuItem
+              onClick={() => {
+                panelMenu.openFromMenu(() => {
+                  setFolderError('')
+                  setMkdirTarget(item.path)
+                  setMaking(true)
+                })
+              }}
+            >
+              <FolderPlus /> 新建文件夹
+            </ContextMenuItem>
+          )}
+          {item.kind === 'dir' && (
+            <ContextMenuItem onClick={() => void uploadFilesInto(item.path)}>
+              <Upload /> 上传文件
+            </ContextMenuItem>
+          )}
+          {item.kind === 'dir' && (
+            <ContextMenuItem onClick={() => void uploadDirInto(item.path)}>
+              <FolderUp /> 上传文件夹
+            </ContextMenuItem>
+          )}
+          {item.kind !== 'dir' && (
+            <ContextMenuItem onClick={() => openFile(item, true, true)}>
+              <Eye /> 查看
+            </ContextMenuItem>
+          )}
+          {item.kind !== 'dir' && !isImage(item.name) && (
+            <ContextMenuItem onClick={() => openFile(item, true, false)}>
+              <FilePenLine /> 编辑
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem
+            onClick={() => {
+              panelMenu.openFromMenu(() => {
+                setRenameError('')
+                setRenaming(item)
+              })
+            }}
+          >
+            <Pencil /> 重命名
+          </ContextMenuItem>
+          {item.kind !== 'dir' && (
+            <ContextMenuItem onClick={() => download(item)}>
+              <Download /> 下载
+            </ContextMenuItem>
+          )}
+          {item.kind === 'dir' && (
+            <ContextMenuItem onClick={() => downloadDir(item)}>
+              <Download /> 下载
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem onClick={() => panelMenu.openFromMenu(() => setRemoving(item))}>
+            <Trash2 /> 删除
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    )
+  }
 
   return (
     <div
@@ -813,88 +872,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
           )}
           {error && <p className="px-3 pb-1 text-[11px] text-destructive">{error}</p>}
           {!(busy && entries.length === 0 && root === '.') && !(error && entries.length === 0 && root === '.') && (
-          <ScrollArea className="min-h-0 flex-1">
-            <div
-              role="tree"
-              className="pb-2"
-            >
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <div
-                    role="treeitem"
-                    aria-expanded={rootOpen}
-                    aria-selected={selected === root}
-                    title={root}
-                    className={`flex h-7 w-full cursor-pointer items-center pr-2 text-sm select-none hover:bg-foreground/5 ${
-                      dropDir === root ? DROP_HIGHLIGHT : selected === root ? 'bg-foreground/10' : ''
-                    }`}
-                    style={{ paddingLeft: 0 }}
-                    draggable
-                    onDragStart={(e) => {
-                      if (local) {
-                        e.preventDefault()
-                        dragLocalOut(root)
-                        return
-                      }
-                      e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local: false }))
-                      e.dataTransfer.effectAllowed = 'copyMove'
-                    }}
-                    onContextMenu={() => setSelected(root)}
-                    onClick={() => {
-                      setSelected(root)
-                      void toggle(root)
-                    }}
-                  >
-                    <FileIcon name={rootName} kind="dir" open={rootOpen} />
-                    <span className="min-w-0 flex-1 truncate pl-1">{rootName}</span>
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent
-                  onCloseAutoFocus={panelMenu.keepFocusOnClose}
-                >
-                  {parentDir(root) && (
-                    <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
-                      打开上级目录
-                    </ContextMenuItem>
-                  )}
-                  <ContextMenuItem
-                    onClick={() => {
-                      panelMenu.openFromMenu(() => {
-                        setFolderError('')
-                        setMkdirTarget(root)
-                        setMaking(true)
-                      })
-                    }}
-                  >
-                    <FolderPlus /> 新建文件夹
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => void uploadFilesInto(root)}>
-                    <Upload /> 上传文件
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => void uploadDirInto(root)}>
-                    <FolderUp /> 上传文件夹
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onClick={() =>
-                      downloadDir({ name: rootName, path: root, kind: 'dir', size: 0, mtime: 0 })
-                    }
-                  >
-                    <Download /> 下载
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-              {rootOpen && (
-                <>
-                  {visible(entries).length === 0 && !busy && !error && (
-                    <p className="flex h-7 items-center text-xs text-muted-foreground" style={{ paddingLeft: TREE_INDENT }}>
-                      空目录
-                    </p>
-                  )}
-                  {renderNodes(entries, 1)}
-                </>
-              )}
-            </div>
-          </ScrollArea>
+            <VirtualTree rows={rows} resetKey={root} renderRow={renderTreeRow} />
           )}
         </>
       )}
@@ -1002,6 +980,148 @@ const LISTING_POLL_MS = 3000
 
 /** 每级缩进 12px，图标自成一列。 */
 const TREE_INDENT = 12
+/** 和行上的 h-7 对齐。视口按这个高度切出要画的行。 */
+const ROW_HEIGHT = 28
+/** 视口上下多留的行，快滚时不会露白。 */
+const ROW_OVERSCAN = 10
+/** 超过这个数就不再在界面上重排，也不再每 3 秒重读。列目录时后端已经排过序。 */
+const LARGE_DIR = 400
+
+type TreeRow =
+  | { type: 'root' }
+  | { type: 'entry'; item: RemoteFile; depth: number }
+  | { type: 'note'; id: string; text: string; depth: number; error?: boolean }
+
+function orderEntries(items: RemoteFile[]): RemoteFile[] {
+  if (items.length > LARGE_DIR) return items
+  return sortEntries(items)
+}
+
+function treeRowKey(row: TreeRow): string {
+  if (row.type === 'root') return 'root'
+  if (row.type === 'note') return row.id
+  return row.item.path
+}
+
+function buildTreeRows(input: {
+  entries: RemoteFile[]
+  rootOpen: boolean
+  open: Record<string, boolean>
+  cache: Record<string, DirListing>
+  loading: Record<string, boolean>
+  showHidden: boolean
+  busy: boolean
+  error: string
+  root: string
+}): TreeRow[] {
+  const rows: TreeRow[] = [{ type: 'root' }]
+  if (input.rootOpen) appendTreeRows(rows, input.entries, 1, input.root, input)
+  return rows
+}
+
+function appendTreeRows(
+  rows: TreeRow[],
+  items: RemoteFile[],
+  depth: number,
+  parent: string,
+  input: {
+    open: Record<string, boolean>
+    cache: Record<string, DirListing>
+    loading: Record<string, boolean>
+    showHidden: boolean
+    busy: boolean
+    error: string
+    root: string
+  }
+) {
+  const shown = input.showHidden ? items : items.filter((item) => !item.name.startsWith('.'))
+  if (shown.length === 0) {
+    if (parent === input.root && (input.busy || input.error)) return
+    rows.push({ type: 'note', id: `empty:${parent}`, text: '空目录', depth })
+    return
+  }
+  for (const item of shown) {
+    rows.push({ type: 'entry', item, depth })
+    if (item.kind !== 'dir' || !input.open[item.path]) continue
+    const listing = input.cache[item.path]
+    if (input.loading[item.path] && !listing) {
+      rows.push({ type: 'note', id: `loading:${item.path}`, text: '正在加载', depth: depth + 1 })
+    }
+    if (listing?.error) {
+      rows.push({ type: 'note', id: `error:${item.path}`, text: listing.error, depth: depth + 1, error: true })
+    }
+    if (listing && !listing.error) appendTreeRows(rows, listing.entries, depth + 1, item.path, input)
+  }
+}
+
+/** 文件树的滚动视口：内容按行数撑高，屏幕上只挂看得到的那一段。 */
+function VirtualTree(props: { rows: TreeRow[]; resetKey: string; renderRow: (row: TreeRow) => ReactNode }) {
+  const scroller = useRef<HTMLDivElement>(null)
+  const rowsRef = useRef(props.rows)
+  rowsRef.current = props.rows
+  const frame = useRef(0)
+  const [range, setRange] = useState({ start: 0, end: 40 })
+
+  const measure = useCallback(() => {
+    const el = scroller.current
+    if (!el) return
+    const count = rowsRef.current.length
+    const startIndex = Math.floor(el.scrollTop / ROW_HEIGHT)
+    const start = Math.max(0, startIndex - ROW_OVERSCAN)
+    const visible = Math.max(1, Math.ceil(el.clientHeight / ROW_HEIGHT))
+    const end = Math.min(count, startIndex + visible + ROW_OVERSCAN)
+    setRange((prev) => (prev.start === start && prev.end === end ? prev : { start, end }))
+  }, [])
+
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    el.scrollTop = 0
+    measure()
+  }, [props.resetKey, measure])
+
+  useLayoutEffect(() => {
+    measure()
+  }, [props.rows.length, measure])
+
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const observer = new ResizeObserver(() => measure())
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame.current)
+    }
+  }, [measure])
+
+  const onScroll = () => {
+    if (frame.current) return
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0
+      measure()
+    })
+  }
+
+  const top = range.start
+  return (
+    <div
+      ref={scroller}
+      role="tree"
+      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [overflow-anchor:none]"
+      onScroll={onScroll}
+    >
+      <div className="relative" style={{ height: props.rows.length * ROW_HEIGHT + 8 }}>
+        {props.rows.slice(top, range.end).map((row, i) => (
+          <div key={treeRowKey(row)} className="absolute right-0 left-0" style={{ top: (top + i) * ROW_HEIGHT, height: ROW_HEIGHT }}>
+            {props.renderRow(row)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** 拖文件经过时，会上传进去的那个目录行 */
 const DROP_HIGHLIGHT = 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/50'
 
