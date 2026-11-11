@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Play, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useAppStore } from '../stores/useAppStore'
+import { termIdFromView, useAppStore } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import type { Snippet } from '../../../shared/types'
 
+/** 会话内部分栏时用鼠标点过的那一侧。那一侧正在看文件，就用另一侧的终端。 */
+function focusedTermId(): string | null {
+  const { activeTabId, sessionSplit } = useAppStore.getState()
+  if (!activeTabId) return null
+  const pane = sessionSplit[activeTabId]
+  if (!pane) return activeTabId
+  const focused = pane.focus === 'secondary' ? pane.secondaryView : pane.primaryView
+  const other = pane.focus === 'secondary' ? pane.primaryView : pane.secondaryView
+  return termIdFromView(focused) ?? termIdFromView(other) ?? activeTabId
+}
+
 /** 发到当前活跃终端并把焦点还给终端。execute 为 true 时补回车直接执行，false 只填入等用户自己回车。没有活跃终端时静默不做事。 */
 export function sendToActiveTerminal(command: string, execute = true): void {
-  const activeTabId = useAppStore.getState().activeTabId
-  if (!activeTabId) return
-  window.api.term.input(activeTabId, execute ? `${command}\r` : command)
-  terminalPool.focus(activeTabId)
+  const termId = focusedTermId()
+  if (!termId) return
+  window.api.term.input(termId, execute ? `${command}\r` : command)
+  terminalPool.focus(termId)
 }
 
 /** 指令片段：顶部输入框直接写命令，保存即入列；每条可填入、直接执行、删除。不带滚动，和历史指令共用「命令」栏的滚动条。 */
