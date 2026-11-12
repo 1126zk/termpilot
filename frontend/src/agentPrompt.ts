@@ -46,6 +46,26 @@ export function agentOnboardPrompt(): string {
 - 密码和验证码由用户在窗口里输入，不要索取。`
 }
 
+/**
+ * 端口映射开着时贴给服务器上的 Agent。两份文件用全文带上，
+ * 并说明 127.0.0.1 是映回本机的临时接入。
+ */
+export function agentTunnelPrompt(mcpJson: string, skill: string): string {
+  return `这是端口映射开着时的临时接入。服务器上的 127.0.0.1 和下面 mcp.json 里的端口，映回正在运行 TermPilot 的那台电脑。映射停止后这份接入失效。
+
+不要到本机磁盘上找 mcp.json 或 SKILL.md，下面就是这两份文件的全文。mcp.json 里的 cli、app 是那台电脑上的路径，在这台服务器上不用，也不要改走 termpilot 命令。
+
+按 mcp.json 把名为 termpilot 的 MCP 注册到你自己的用户级配置：Streamable HTTP，url 用文件里的 url，Authorization 用 Bearer 加 token。只加这一条。写完重新打开你自己的程序。不要在回复、日志或仓库里打印令牌。
+
+用法以下面的 SKILL.md 为准。其中「接入」一节改按上面这段，不要去读磁盘上的端点文件。
+
+mcp.json
+${mcpJson.trim()}
+
+SKILL.md
+${skill.trim()}`
+}
+
 /** 复制文本并给一句提示。label 是复制的内容类型，默认「Agent 提示词」。 */
 export async function copyAgentPrompt(text: string, setNotice: (notice: string | null) => void, label = 'Agent 提示词'): Promise<void> {
   try {

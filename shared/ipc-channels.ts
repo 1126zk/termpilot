@@ -61,6 +61,7 @@ export const IPC = {
   mcpAuditExport: 'mcp:audit-export',
   connLog: 'conn:log',
   mcpGet: 'mcp:get',
+  mcpFiles: 'mcp:files',
   mcpSave: 'mcp:save',
 
   appearanceGet: 'appearance:get',

@@ -357,6 +357,12 @@ export interface McpSettings {
   confirmDangerous: boolean
 }
 
+/** 本机 mcp.json 与 SKILL.md 的全文，给端口映射后的临时提示词用。 */
+export interface McpFiles {
+  mcpJson: string
+  skill: string
+}
+
 /** 监听进程的当前状态，不写入数据库 */
 export interface McpRuntime {
   running: boolean

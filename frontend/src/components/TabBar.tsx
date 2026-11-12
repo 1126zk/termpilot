@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Rows2, Server, Square, SquareTerminal, Terminal, Wrench, X } from 'lucide-react'
+import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, Wrench, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,14 +17,14 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
-import { agentOnboardPrompt, copyAgentPrompt, termAgentPrompt } from '../agentPrompt'
+import { agentOnboardPrompt, agentTunnelPrompt, copyAgentPrompt, termAgentPrompt } from '../agentPrompt'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { applyOrder, readMenuOrder, writeMenuOrder } from '../menuOrder'
 import { useMenuAction } from './PanelDialog'
 import { termViewId, useAppStore, SPLIT_MARK } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import { OsIcon, osIconProps } from './OsIcon'
-import type { ForwardRule, LocalShell } from '../../../shared/types'
+import type { ForwardRule, LocalShell, McpSettings } from '../../../shared/types'
 
 const forwardKey = (rule: ForwardRule) => `${rule.type}:${rule.listenPort}`
 
@@ -182,13 +182,20 @@ export function TabBar() {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const renameTab = useAppStore((s) => s.renameTab)
   const setNotice = useAppStore((s) => s.setNotice)
+  const mcp = useAppStore((s) => s.mcp)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  // 这项自己开过的 MCP 映射。设置里改了端口后，再映射会先停掉上一个端口。
+  const mcpForwardRef = useRef(new Map<string, ForwardRule>())
   // 右键菜单打开时问一次后端：每台服务器的共享连接上哪些端口映射正在监听
-  const [liveForwards, setLiveForwards] = useState<Record<string, string[]>>({})
+  const [liveForwards, setLiveForwards] = useState<Record<string, ForwardRule[]>>({})
   const refreshForwards = async (sessionId: string) => {
     const rules = await window.api.forwards.list(sessionId).catch(() => [] as ForwardRule[])
-    setLiveForwards((all) => ({ ...all, [sessionId]: (rules ?? []).map(forwardKey) }))
+    setLiveForwards((all) => ({ ...all, [sessionId]: rules ?? [] }))
   }
+  const forwardRunning = (sessionId: string, rule: ForwardRule) =>
+    (liveForwards[sessionId] ?? []).some(
+      (item) => item.type === rule.type && item.listenPort === rule.listenPort && item.targetPort === rule.targetPort
+    )
   const toggleForward = async (sessionId: string, rule: ForwardRule, running: boolean) => {
     try {
       if (running) await window.api.forwards.stop(sessionId, rule)
@@ -198,6 +205,58 @@ export function TabBar() {
       setNotice(error instanceof Error ? error.message : String(error))
     }
     await refreshForwards(sessionId)
+  }
+  // 端口取设置里当前的 MCP 端口，不写死。同一监听端口已被别的映射占用时不覆盖。
+  const toggleMcpForward = async (sessionId: string) => {
+    let settings: McpSettings
+    try {
+      settings = await window.api.mcp.get()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+      return
+    }
+    if (!settings?.enabled) {
+      setNotice('先在设置里启用 MCP')
+      return
+    }
+    const rule: ForwardRule = { type: 'remote', listenPort: settings.port, targetPort: settings.port }
+    try {
+      const rules = (await window.api.forwards.list(sessionId)) ?? []
+      const sameListen = rules.find((item) => item.type === 'remote' && item.listenPort === settings.port)
+      if (sameListen && sameListen.targetPort !== settings.port) {
+        setNotice(`远程端口 ${settings.port} 已映射到本地 ${sameListen.targetPort}`)
+        return
+      }
+      const previous = mcpForwardRef.current.get(sessionId)
+      if (sameListen) {
+        await window.api.forwards.stop(sessionId, rule)
+        mcpForwardRef.current.delete(sessionId)
+        setNotice('已停止 MCP 端口映射')
+      } else {
+        if (previous && previous.listenPort !== rule.listenPort) {
+          await window.api.forwards.stop(sessionId, previous)
+        }
+        await window.api.forwards.start(sessionId, rule)
+        mcpForwardRef.current.set(sessionId, rule)
+        setNotice(`已映射 MCP 端口 ${settings.port}`)
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    }
+    await refreshForwards(sessionId)
+  }
+  const copyTunnelPrompt = async () => {
+    try {
+      const settings = await window.api.mcp.get()
+      if (!settings?.enabled) {
+        setNotice('先在设置里启用 MCP')
+        return
+      }
+      const files = await window.api.mcp.files()
+      await copyAgentPrompt(agentTunnelPrompt(files.mcpJson, files.skill), setNotice, '临时 Agent 提示词')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error))
+    }
   }
   // 右键选重命名后，菜单关闭时阻止 Radix 把焦点还给标签按钮，否则原地输入框会被顶得失焦
   const renameMenu = useMenuAction()
@@ -512,13 +571,16 @@ export function TabBar() {
           const shown =
             !active && !hostsOpen && !toolsOpen && !settingsOpen && !!split && (t.id === split.primaryTab || t.id === split.secondaryTab)
           const session = sessions.find((item) => item.id === t.sessionId) ?? null
-          const forwardRules = termState[t.id]?.status === 'connected' ? (session?.forwards ?? []) : []
+          const connected = termState[t.id]?.status === 'connected'
+          const forwardRules = connected ? (session?.forwards ?? []) : []
+          const mcpMapped =
+            !!session && !!mcp && connected && forwardRunning(session.id, { type: 'remote', listenPort: mcp.port, targetPort: mcp.port })
           return (
             <Fragment key={t.id}>
             {index === primaryCount && splitLine}
             <ContextMenu
               onOpenChange={(open) => {
-                if (open && session && forwardRules.length > 0) void refreshForwards(session.id)
+                if (open && session && connected) void refreshForwards(session.id)
               }}
             >
               <ContextMenuTrigger asChild>
@@ -637,11 +699,7 @@ export function TabBar() {
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => splitTab(t.id, 'right')}>
                       <Columns2 />
-                      分到右栏
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={() => splitTab(t.id, 'down')}>
-                      <Rows2 />
-                      分到下栏
+                      分右栏
                     </ContextMenuItem>
                   </>
                 ) : null}
@@ -658,11 +716,7 @@ export function TabBar() {
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => splitSessionView(t.id, termViewId(t.id), 'right')}>
                       <Columns2 />
-                      标签内分到右栏
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={() => splitSessionView(t.id, termViewId(t.id), 'down')}>
-                      <Rows2 />
-                      标签内分到下栏
+                      标签内分右栏
                     </ContextMenuItem>
                   </>
                 ))}
@@ -670,7 +724,7 @@ export function TabBar() {
                   <>
                     <ContextMenuSeparator />
                     {forwardRules.map((rule) => {
-                      const running = liveForwards[session.id]?.includes(forwardKey(rule)) ?? false
+                      const running = forwardRunning(session.id, rule)
                       return (
                         <ContextMenuItem
                           key={forwardKey(rule)}
@@ -681,6 +735,19 @@ export function TabBar() {
                         </ContextMenuItem>
                       )
                     })}
+                  </>
+                ) : null}
+                {session && connected ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => void toggleMcpForward(session.id)}>
+                      {mcpMapped ? <Square /> : <Play />}
+                      {mcpMapped ? '停止 ' : ''}{mcp ? forwardLabel({ type: 'remote', listenPort: mcp.port, targetPort: mcp.port }) : ''}
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => void copyTunnelPrompt()}>
+                      <Bot />
+                      复制临时 Agent 提示词
+                    </ContextMenuItem>
                   </>
                 ) : null}
                 <ContextMenuSeparator />

@@ -11,8 +11,10 @@ import type {
   ConnLogEntry,
   McpAuditEntry,
   McpConfirmRequest,
+  McpFiles,
   McpOpenTab,
   McpRuntime,
+  McpSettings,
   McpSettingsInput,
   OsInfo,
   RemoteFile,
@@ -226,7 +228,8 @@ const api = {
     onChanged: (cb: (termId: string) => void) => on(IPC.historyChanged, cb)
   },
   mcp: {
-    get: () => invoke(IPC.mcpGet, []),
+    get: () => invoke<McpSettings>(IPC.mcpGet, []),
+    files: () => invoke<McpFiles>(IPC.mcpFiles, []),
     audit: () => invoke<McpAuditEntry[]>(IPC.mcpAudit, []),
     exportAudit: () => invoke<boolean>(IPC.mcpAuditExport, []),
     save: (input: McpSettingsInput) => invoke(IPC.mcpSave, [input]),

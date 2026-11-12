@@ -122,6 +122,7 @@ func (b *Bridge) routes() map[string]handler {
 		"appearance:get":    func(_ []interface{}) (interface{}, error) { return a.store.GetAppearance() },
 		"appearance:save":   a.hAppearanceSave,
 		"mcp:get":           func(_ []interface{}) (interface{}, error) { return a.store.GetMcpSettings() },
+		"mcp:files":         a.hMcpFiles,
 		"mcp:audit":         a.hMcpAudit,
 		"mcp:audit-export":  a.hMcpAuditExport,
 		"conn:log":          a.hConnLog,

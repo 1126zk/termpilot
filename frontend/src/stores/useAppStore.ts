@@ -154,9 +154,9 @@ interface AppState {
   /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面）。
       分屏时数组里带 SPLIT_MARK，它后面的标签归辅栏 */
   reorderTabs: (ids: string[]) => void
-  /** 右键标签「分到右栏 / 分到下栏」：这个标签单独进辅栏。已有会话分栏时不做 */
+  /** 右键标签「分右栏」：这个标签单独进辅栏。已有会话分栏时不做 */
   splitTab: (tabId: string, dir: SplitDir) => void
-  /** 右键文件条「分到右栏 / 分到下栏」：当前会话内左主右辅。已有窗口分栏时不做 */
+  /** 右键文件条「分右栏」：当前会话内左主右辅。已有窗口分栏时不做 */
   splitSessionView: (parentId: string, viewId: string, dir: SplitDir) => void
   /** 文件条拖动排序。ids 里带 SPLIT_MARK，主终端不在其中。辅栏空了就收起分栏 */
   reorderSessionStrip: (parentId: string, ids: string[]) => void

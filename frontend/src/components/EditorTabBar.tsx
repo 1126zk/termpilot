@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
-import { ArrowRightToLine, ChevronLeft, ChevronRight, Columns2, Eye, FilePenLine, RefreshCw, Rows2, Save, SquareTerminal, WrapText, X } from 'lucide-react'
+import { ArrowRightToLine, ChevronLeft, ChevronRight, Columns2, Eye, FilePenLine, RefreshCw, Save, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
@@ -327,11 +327,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
             <>
               <ContextMenuItem onClick={() => splitSessionView(props.termId, viewId, 'right')}>
                 <Columns2 />
-                分到右栏
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => splitSessionView(props.termId, viewId, 'down')}>
-                <Rows2 />
-                分到下栏
+                分右栏
               </ContextMenuItem>
             </>
           )}

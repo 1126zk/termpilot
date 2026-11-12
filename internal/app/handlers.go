@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -992,6 +993,22 @@ func formatMcpAudit(entries []storage.McpAuditEntry) string {
 		out.WriteByte('\n')
 	}
 	return out.String()
+}
+
+// hMcpFiles 返回本机 mcp.json 和 SKILL.md 的全文。先读一次设置，保证 mcp.json 已按当前端口写出。
+func (a *App) hMcpFiles(_ []interface{}) (interface{}, error) {
+	if _, err := a.store.GetMcpSettings(); err != nil {
+		return nil, err
+	}
+	mcpJSON, err := os.ReadFile(filepath.Join(a.userData, "mcp.json"))
+	if err != nil {
+		return nil, fmt.Errorf("读取 mcp.json 失败: %w", err)
+	}
+	skill, err := os.ReadFile(filepath.Join(a.userData, "SKILL.md"))
+	if err != nil {
+		return nil, fmt.Errorf("读取 SKILL.md 失败: %w", err)
+	}
+	return map[string]string{"mcpJson": string(mcpJSON), "skill": string(skill)}, nil
 }
 
 func (a *App) hMcpSave(args []interface{}) (interface{}, error) {
