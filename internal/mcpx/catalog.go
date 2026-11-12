@@ -1,5 +1,5 @@
 // Package mcpx 是 TermPilot 本机 MCP 服务：
-//   - 24 个工具（connection_* / term_* / sftp_*）的定义、描述与入参校验；
+//   - 23 个工具（connection_* / term_* / sftp_*）的定义、描述与入参校验；
 //   - StreamableHTTP 挂 127.0.0.1:<port>/mcp（go-sdk），/cli 端点提供
 //     op=tools/schema/call 的命令行协议；
 //   - Host 白名单 + 回环地址 + Bearer 令牌（crypto/subtle 常量时间比较）；
@@ -25,7 +25,7 @@ type FieldSpec struct {
 	Type        string // "string" | "integer" | "boolean" | "array"
 	Required    bool
 	Description string
-	Enum        []string    // Type=string 时的枚举（sftp_remove.kind）
+	Enum        []string    // Type=string 时的枚举
 	ItemEnum    []string    // Type=array 时的元素枚举（term_write.keys）
 	Min         *int        // integer 下界
 	Max         *int        // integer 上界
@@ -201,6 +201,16 @@ var TOOLS = []ToolDef{
 		Description: "打开一扇本机终端，返回 termId。没有连接。之后用 term_pty 执行命令，并用 term_update 写上备注。",
 	},
 	{
+		Name:        "term_split",
+		Description: "把这扇终端分到窗口右栏。至少要有两扇标签。窗口已经分栏，或任一标签内已分栏时会失败。",
+		Input:       []FieldSpec{termIDField},
+	},
+	{
+		Name:        "term_split_inside",
+		Description: "在这扇终端的标签内再分到右栏，并新开一扇终端，返回新终端的编号。窗口已经分栏，或这扇标签已经内部分栏时会失败。",
+		Input:       []FieldSpec{termIDField},
+	},
+	{
 		Name:        "term_lines",
 		Description: "读出终端缓冲里的文字，每行带行号。仅作用于 PTY 终端。不填范围就是当前画面。0 是最旧的一行。先用它确定行号，再交给 term_screenshot。",
 		ReadOnly:    true,
@@ -230,14 +240,6 @@ var TOOLS = []ToolDef{
 		},
 	},
 	{
-		Name:        "sftp_mkdir",
-		Description: "在正向 SSH 上新建远端目录。path 是完整远端路径。",
-		Input: []FieldSpec{
-			connIDField,
-			{Name: "path", Type: "string", Required: true, Description: "完整远端路径"},
-		},
-	},
-	{
 		Name:        "sftp_upload",
 		Description: "把本机绝对路径的文件上传到远端路径。",
 		Input: []FieldSpec{
@@ -253,24 +255,6 @@ var TOOLS = []ToolDef{
 			connIDField,
 			{Name: "remotePath", Type: "string", Required: true, Description: "远端路径"},
 			{Name: "localPath", Type: "string", Required: true, Description: "本机绝对路径"},
-		},
-	},
-	{
-		Name:        "sftp_rename",
-		Description: "重命名或移动远端文件。from 和 to 都是远端路径。",
-		Input: []FieldSpec{
-			connIDField,
-			{Name: "from", Type: "string", Required: true, Description: "原远端路径"},
-			{Name: "to", Type: "string", Required: true, Description: "新远端路径"},
-		},
-	},
-	{
-		Name:        "sftp_remove",
-		Description: "删除远端文件或目录。目录会连同里面的内容一起删除。",
-		Input: []FieldSpec{
-			connIDField,
-			{Name: "path", Type: "string", Required: true, Description: "远端路径"},
-			{Name: "kind", Type: "string", Required: true, Enum: []string{"file", "dir", "link"}, Description: "file、dir 或 link"},
 		},
 	},
 }

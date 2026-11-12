@@ -43,11 +43,8 @@ type Terminal interface {
 // Sftp 对应 TS SftpService 中 MCP 用到的部分。
 type Sftp interface {
 	List(sessionID, dir string) (string, []sftpx.RemoteFile, error)
-	MkdirPath(sessionID, path string) error
 	Put(sessionID, localPath, remotePath string) error
 	Get(sessionID, remotePath, localPath string) error
-	Rename(sessionID, from, to string) error
-	Remove(sessionID, path string, kind sftpx.FileKind) error
 	Close(sessionID string)
 }
 
@@ -85,6 +82,7 @@ type Deps struct {
 	Capture func(ctx context.Context, req CaptureRequest) (CaptureReply, error)
 	Lines   func(ctx context.Context, req TermLinesRequest) (TermLinesReply, error)
 	Mode    func(ctx context.Context, req TermModeRequest) (TermModeReply, error)
+	Split   func(ctx context.Context, req SplitRequest) (SplitReply, error)
 
 	OnOpenTab        func(tab TabOpen)
 	OnCloseTab       func(termID string)

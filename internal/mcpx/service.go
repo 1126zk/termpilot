@@ -26,6 +26,7 @@ var (
 	confirmTimeout = 60 * time.Second       // 危险操作确认（TS 60_000）
 	captureTimeout = 60 * time.Second       // 截图（TS 60_000）
 	linesTimeout   = 10 * time.Second       // 读取终端行（TS 10_000）
+	splitTimeout   = 8 * time.Second        // 前端分栏
 	modeTimeout    = 3 * time.Second        // 光标模式查询（TS 3_000）
 	writeSettle    = 200 * time.Millisecond // term_write 发出后等回显（TS wait(200)）
 	bindTimeout    = 8 * time.Second        // 前端打开标签（TS expectBind 8000）
@@ -350,6 +351,33 @@ func (s *Service) filterScreenshotPaths(paths []string) []string {
 		}
 	}
 	return allowed
+}
+
+// split 让前端把终端分到右栏，并等它做完。
+func (s *Service) split(ctx context.Context, termID, kind string) (string, error) {
+	if s.deps.Split == nil {
+		return "", errors.New("窗口不可用，无法分栏")
+	}
+	req := SplitRequest{ID: uuid.NewString(), TermID: termID, Kind: kind}
+	reply, err := waitReply(ctx, s.currentDone(), splitTimeout, SplitReply{}, func(ctx context.Context) (SplitReply, error) {
+		return s.deps.Split(ctx, req)
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", errors.New("分栏超时")
+		}
+		return "", err
+	}
+	if reply.Error != "" {
+		return "", errors.New(reply.Error)
+	}
+	if kind == "inside" && reply.TermID != "" {
+		return fmt.Sprintf("已在标签内分到右栏。\n新终端：%s", reply.TermID), nil
+	}
+	if kind == "inside" {
+		return "已在标签内分到右栏。", nil
+	}
+	return fmt.Sprintf("已把 %s 分到右栏。", termID), nil
 }
 
 // lines 对应 TS lines：让前端读终端缓冲并等 term.lines 回复。

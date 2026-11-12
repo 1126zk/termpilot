@@ -15,6 +15,8 @@ import type {
   McpOpenTab,
   McpRuntime,
   McpSettings,
+  McpSplitReply,
+  McpSplitRun,
   McpSettingsInput,
   OsInfo,
   RemoteFile,
@@ -239,6 +241,8 @@ const api = {
     onState: (cb: (state: McpRuntime) => void) => on(IPC.mcpStateEvent, cb),
     onOpenTab: (cb: (tab: McpOpenTab) => void) => on(IPC.mcpOpenTab, cb),
     onCloseTab: (cb: (termId: string) => void) => on(IPC.mcpCloseTab, cb),
+    onSplit: (cb: (job: McpSplitRun) => void) => on(IPC.mcpSplit, cb),
+    splitReply: (result: McpSplitReply) => send(IPC.mcpSplitReply, result),
     onConfirm: (cb: (request: McpConfirmRequest) => void) => on(IPC.mcpConfirm, cb)
   },
   capture: {

@@ -29,7 +29,8 @@ TermPilot 是本机 SSH 终端。用户和 Agent 共用同一套连接和终端�
 - **TUI、菜单、安装向导**用 `term_write`：`keys` 取 `up`、`down`、`left`、`right`、`ctrl-c` 等，文字放 `text`，回车用 `submit: true`。前台命令停不下来也用 `term_write` 发 `ctrl-c`，不要新开终端去结束它。
 - **优先读文本**：`term_lines`（带行号读缓冲）和 `term_read` 比截图快。要截指定行时先 `term_lines` 看行号，再把 `startLine`/`endLine` 传给 `term_screenshot`，两端都包含；整段历史用 `term_screenshot_scrollback`。
 - **断线恢复**:`status` 不是 `connected` 时用 `term_reconnect` 恢复同一扇（编号、备注保留），不要 `connection_open` 重开。
-- **文件传输**:`sftp_list / mkdir / upload / download / rename / remove`。
+- **分栏**:`term_split` 把这扇终端分到窗口右栏，至少要有两扇标签。`term_split_inside` 在这扇终端的标签内再分到右栏，并新开一扇终端。
+- **文件传输**:`sftp_list / upload / download`。建目录、改名、删除用 `term_exec`。
 - **多跳板连接**：目标主机信息仍放 `host` / `username` / `secret`，中间跳板放 `jumps`，顺序是本机到目标主机，最多 9 跳。每跳填 `host` / `port` / `username`，需要时填 `secret`。`connection_create` 可直接创建；`connection_update` 不传 `jumps` 保留原链，传 `[]` 清除，传非空数组整体替换，修改其中一跳也要提交完整数组。未提供 `secret` 的相同跳板会沿用已存密码。`connection_list` 只返回跳板信息和 `hasSecret`，不返回密码。配置后 `connection_open`、`term_exec` 和 SFTP 工具都会自动走跳板链。
 - 确认某条连接或终端的用途后写入备注：连接用 `connection_update` 的 `remark`，终端用 `term_update`。
 
@@ -37,6 +38,6 @@ TermPilot 是本机 SSH 终端。用户和 Agent 共用同一套连接和终端�
 
 连接：`connection_list / open / close / create / update / delete`
 命令：`term_exec / term_pty`
-终端：`term_list / write / read / lines / reconnect / close / update / open_local`
+终端：`term_list / write / read / lines / reconnect / close / update / open_local / split / split_inside`
 画面：`term_screenshot / term_screenshot_scrollback`
-文件：`sftp_list / mkdir / upload / download / rename / remove`
+文件：`sftp_list / upload / download`

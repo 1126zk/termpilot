@@ -731,7 +731,7 @@ export function TabBar() {
                           onClick={() => void toggleForward(session.id, rule, running)}
                         >
                           {running ? <Square /> : <Play />}
-                          {running ? '停止' : '启动'} {forwardLabel(rule)}
+                          {forwardLabel(rule)}
                         </ContextMenuItem>
                       )
                     })}
@@ -742,7 +742,7 @@ export function TabBar() {
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => void toggleMcpForward(session.id)}>
                       {mcpMapped ? <Square /> : <Play />}
-                      {mcpMapped ? '停止 ' : ''}{mcp ? forwardLabel({ type: 'remote', listenPort: mcp.port, targetPort: mcp.port }) : ''}
+                      {mcp ? forwardLabel({ type: 'remote', listenPort: mcp.port, targetPort: mcp.port }) : ''}
                     </ContextMenuItem>
                     <ContextMenuItem onClick={() => void copyTunnelPrompt()}>
                       <Bot />

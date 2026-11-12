@@ -143,6 +143,7 @@ func NewApp() *App {
 		Capture: a.mcpCapture,
 		Lines:   a.mcpLines,
 		Mode:    a.mcpMode,
+		Split:   a.mcpSplit,
 
 		OnOpenTab:        func(tab mcpx.TabOpen) { a.emit("mcp:open-tab", tab) },
 		OnCloseTab:       func(termID string) { a.emit("mcp:close-tab", termID) },

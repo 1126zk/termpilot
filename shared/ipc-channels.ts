@@ -73,6 +73,8 @@ export const IPC = {
   mcpCloseTab: 'mcp:close-tab',
   mcpConfirm: 'mcp:confirm',
   mcpConfirmReply: 'mcp:confirm-reply',
+  mcpSplit: 'mcp:split',
+  mcpSplitReply: 'mcp:split-reply',
 
   /** 截取页面上真实的终端视图 */
   capturePage: 'capture:page',

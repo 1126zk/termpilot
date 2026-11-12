@@ -149,55 +149,48 @@ func TestGuardConfirmPaths(t *testing.T) {
 	_ = st2
 }
 
-// TestGuardSensitivePath 敏感路径触发确认（sftp_mkdir）。
+// TestGuardSensitivePath 敏感路径触发确认（sftp_upload）。
 func TestGuardSensitivePath(t *testing.T) {
 	ctx := context.Background()
-	svc, _, _, sftp, _ := newTestService()
+	svc, _, _, _, _ := newTestService()
 	var gotPath string
 	svc.deps.Confirm = func(_ context.Context, p string) (bool, error) {
 		gotPath = p
 		return true, nil
 	}
-	out, err := svc.invoke(ctx, "sftp_mkdir", map[string]any{
-		"connection": "conn-1234abcd", "path": "/etc/termpilot",
+	out, err := svc.invoke(ctx, "sftp_upload", map[string]any{
+		"connection": "conn-1234abcd", "localPath": "/tmp/a", "remotePath": "/etc/termpilot",
 	})
-	if err != nil || out != "已创建 /etc/termpilot" {
+	if err != nil || out != "已上传到 /etc/termpilot" {
 		t.Errorf("敏感路径放行: out=%q err=%v", out, err)
 	}
 	if gotPath != "/etc/termpilot" {
 		t.Errorf("确认内容应是路径: %q", gotPath)
 	}
-	if len(sftp.made) != 1 {
-		t.Errorf("mkdir 未执行: %v", sftp.made)
-	}
 
 	// 非敏感路径不问
-	svc2, _, _, sftp2, _ := newTestService()
+	svc2, _, _, _, _ := newTestService()
 	svc2.deps.Confirm = func(context.Context, string) (bool, error) {
 		t.Error("非敏感路径不应询问")
 		return false, nil
 	}
-	if _, err := svc2.invoke(ctx, "sftp_mkdir", map[string]any{
-		"connection": "conn-1234abcd", "path": "/home/u/dir",
+	if _, err := svc2.invoke(ctx, "sftp_upload", map[string]any{
+		"connection": "conn-1234abcd", "localPath": "/tmp/a", "remotePath": "/home/u/dir",
 	}); err != nil {
 		t.Errorf("非敏感路径: err=%v", err)
 	}
-	if len(sftp2.made) != 1 {
-		t.Errorf("mkdir 未执行: %v", sftp2.made)
-	}
 
-	// 敏感路径 + 拒绝
-	svc3, _, _, sftp3, _ := newTestService()
+	// 危险命令 + 拒绝
+	svc3, _, _, _, exec3 := newTestService()
 	svc3.deps.Confirm = func(context.Context, string) (bool, error) { return false, nil }
-	_, err = svc3.invoke(ctx, "sftp_remove", map[string]any{
-		"connection": "conn-1234abcd", "path": "/etc/passwd", "kind": "file",
+	_, err = svc3.invoke(ctx, "term_exec", map[string]any{
+		"connection": "conn-1234abcd", "command": "rm /etc/passwd",
 	})
-	// sftp_remove 走的是 guard('rm ' + path)：命中 rm 正则
 	if err == nil || !strings.Contains(err.Error(), "已取消：危险操作未确认") {
-		t.Errorf("sftp_remove 拒绝: err=%v", err)
+		t.Errorf("term_exec 拒绝: err=%v", err)
 	}
-	if len(sftp3.removed) != 0 {
-		t.Errorf("不应执行 remove: %v", sftp3.removed)
+	if exec3.lastSessionID != "" {
+		t.Errorf("不应执行命令: %s", exec3.lastSessionID)
 	}
 }
 

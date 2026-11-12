@@ -69,6 +69,20 @@ type TermModeRequest struct {
 	TermID string `json:"termId"`
 }
 
+// SplitRequest 让前端把一扇终端分到右栏。Kind 是 window 或 inside。
+type SplitRequest struct {
+	ID     string `json:"id"`
+	TermID string `json:"termId"`
+	Kind   string `json:"kind"`
+}
+
+// SplitReply 前端分栏结果。TermID 是标签内分栏新开的终端。
+type SplitReply struct {
+	ID     string `json:"id"`
+	Error  string `json:"error,omitempty"`
+	TermID string `json:"termId,omitempty"`
+}
+
 // TermModeReply 对应 TS TermModeReply（IPC.termModeReply）。
 type TermModeReply struct {
 	ID                string `json:"id"`

@@ -152,10 +152,8 @@ func (f *fakeTerminal) ExecCommand(termID, command string, timeout time.Duration
 }
 
 type fakeSftp struct {
-	listed  []string
-	made    []string
-	removed []string
-	closed  []string
+	listed []string
+	closed []string
 }
 
 func (f *fakeSftp) List(sessionID, dir string) (string, []sftpx.RemoteFile, error) {
@@ -163,21 +161,9 @@ func (f *fakeSftp) List(sessionID, dir string) (string, []sftpx.RemoteFile, erro
 	return "/home/u", []sftpx.RemoteFile{{Name: "a.txt", Path: "/home/u/a.txt", Kind: sftpx.KindFile, Size: 3, Mtime: 1}}, nil
 }
 
-func (f *fakeSftp) MkdirPath(sessionID, path string) error {
-	f.made = append(f.made, path)
-	return nil
-}
-
 func (f *fakeSftp) Put(sessionID, localPath, remotePath string) error { return nil }
 
 func (f *fakeSftp) Get(sessionID, remotePath, localPath string) error { return nil }
-
-func (f *fakeSftp) Rename(sessionID, from, to string) error { return nil }
-
-func (f *fakeSftp) Remove(sessionID, path string, kind sftpx.FileKind) error {
-	f.removed = append(f.removed, path)
-	return nil
-}
 
 func (f *fakeSftp) Close(sessionID string) {
 	f.closed = append(f.closed, sessionID)

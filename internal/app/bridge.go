@@ -130,6 +130,7 @@ func (b *Bridge) routes() map[string]handler {
 		"mcp:state":         func(_ []interface{}) (interface{}, error) { return a.mcp.State(), nil },
 		"mcp:bound":         a.hMcpBound,
 		"mcp:confirm-reply": a.hMcpConfirmReply,
+		"mcp:split-reply":   a.hMcpSplitReply,
 
 		// 截图
 		"capture:save":   a.hCaptureSave,

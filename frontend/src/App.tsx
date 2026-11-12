@@ -92,6 +92,15 @@ export default function App() {
 
   useEffect(
     () =>
+      window.api.mcp.onSplit((job) => {
+        const result = useAppStore.getState().applyMcpSplit(job.kind, job.termId)
+        window.api.mcp.splitReply({ id: job.id, error: result.error, termId: result.termId })
+      }),
+    []
+  )
+
+  useEffect(
+    () =>
       window.api.term.onLines((job) => {
         const listed = terminalPool.bufferLines(job.termId, job.startLine, job.endLine)
         window.api.term.linesReply(

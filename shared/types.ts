@@ -371,6 +371,20 @@ export interface McpRuntime {
   error?: string
 }
 
+/** 前端执行分栏。kind 为 window（分到右栏）或 inside（标签内分到右栏）。 */
+export interface McpSplitRun {
+  id: string
+  termId: string
+  kind: 'window' | 'inside'
+}
+
+export interface McpSplitReply {
+  id: string
+  error?: string
+  /** 标签内分栏新开的终端 */
+  termId?: string
+}
+
 /** Agent 打开终端标签。本地终端没有 sessionId */
 export interface McpOpenTab {
   termId: string

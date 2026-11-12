@@ -68,6 +68,8 @@ var toolExpectations = []toolExpect{
 		required: []string{"termId", "remark"},
 	},
 	{name: "term_open_local", props: map[string]string{}, required: nil},
+	{name: "term_split", props: map[string]string{"termId": "s"}, required: []string{"termId"}},
+	{name: "term_split_inside", props: map[string]string{"termId": "s"}, required: []string{"termId"}},
 	{
 		name:     "term_lines",
 		readOnly: true,
@@ -95,11 +97,6 @@ var toolExpectations = []toolExpect{
 		required: []string{"connection"},
 	},
 	{
-		name:     "sftp_mkdir",
-		props:    map[string]string{"connection": "s", "path": "s"},
-		required: []string{"connection", "path"},
-	},
-	{
 		name:     "sftp_upload",
 		props:    map[string]string{"connection": "s", "localPath": "s", "remotePath": "s"},
 		required: []string{"connection", "localPath", "remotePath"},
@@ -109,19 +106,9 @@ var toolExpectations = []toolExpect{
 		props:    map[string]string{"connection": "s", "remotePath": "s", "localPath": "s"},
 		required: []string{"connection", "remotePath", "localPath"},
 	},
-	{
-		name:     "sftp_rename",
-		props:    map[string]string{"connection": "s", "from": "s", "to": "s"},
-		required: []string{"connection", "from", "to"},
-	},
-	{
-		name:     "sftp_remove",
-		props:    map[string]string{"connection": "s", "path": "s", "kind": "s"},
-		required: []string{"connection", "path", "kind"},
-	},
 }
 
-// TestToolCatalogSnapshot 24 个工具的名称/顺序/只读标记/必填字段/字段类型与
+// TestToolCatalogSnapshot 工具的名称/顺序/只读标记/必填字段/字段类型与
 // TS tool-catalog.ts 逐一对齐。
 func TestToolCatalogSnapshot(t *testing.T) {
 	if len(TOOLS) != len(toolExpectations) {
@@ -195,11 +182,6 @@ func TestSchemaConstraints(t *testing.T) {
 	if maxChars := read.field("maxChars"); maxChars == nil || *maxChars.Min != 200 || *maxChars.Max != 50000 {
 		t.Errorf("term_read.maxChars: %+v", maxChars)
 	}
-	remove, _ := FindTool("sftp_remove")
-	kind := remove.field("kind")
-	if kind == nil || strings.Join(kind.Enum, ",") != "file,dir,link" {
-		t.Errorf("sftp_remove.kind: %+v", kind)
-	}
 	create, _ := FindTool("connection_create")
 	if port := create.field("port"); port == nil || *port.Min != 1 || *port.Max != 65535 {
 		t.Errorf("connection_create.port: %+v", port)
@@ -213,12 +195,12 @@ func TestSchemaConstraints(t *testing.T) {
 	}
 }
 
-// TestSchemaTextGolden 逐字节对齐 TS schemaText('sftp_remove') 的输出
+// TestSchemaTextGolden 逐字节对齐 schemaText('sftp_upload') 的输出
 // （JSON.stringify(…, null, 2)，字段序 = 声明序）。
 func TestSchemaTextGolden(t *testing.T) {
 	want := `{
-  "name": "sftp_remove",
-  "description": "删除远端文件或目录。目录会连同里面的内容一起删除。",
+  "name": "sftp_upload",
+  "description": "把本机绝对路径的文件上传到远端路径。",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -226,28 +208,23 @@ func TestSchemaTextGolden(t *testing.T) {
         "type": "string",
         "description": "连接编号，conn- 开头。不要填名称或备注，也不要填 term- 开头的终端编号"
       },
-      "path": {
+      "localPath": {
+        "type": "string",
+        "description": "本机绝对路径"
+      },
+      "remotePath": {
         "type": "string",
         "description": "远端路径"
-      },
-      "kind": {
-        "type": "string",
-        "description": "file、dir 或 link",
-        "enum": [
-          "file",
-          "dir",
-          "link"
-        ]
       }
     },
     "required": [
       "connection",
-      "path",
-      "kind"
+      "localPath",
+      "remotePath"
     ]
   }
 }`
-	got, err := SchemaText("sftp_remove")
+	got, err := SchemaText("sftp_upload")
 	if err != nil {
 		t.Fatal(err)
 	}

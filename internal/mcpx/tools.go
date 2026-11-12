@@ -16,7 +16,7 @@ import (
 	"termpilot/internal/terminal"
 )
 
-// invoke 对应 TS McpService.invoke：24 个工具的分发。
+// invoke 对应 TS McpService.invoke：23 个工具的分发。
 // 入参 raw 已经过了 schema 校验与 strip，但运行时校验（编号前缀、必填、
 // 终端/连接存在性）与 TS 一样在这里做。
 func (s *Service) invoke(ctx context.Context, tool string, raw map[string]any) (string, error) {
@@ -219,6 +219,20 @@ func (s *Service) invoke(ctx context.Context, tool string, raw map[string]any) (
 		return "已关闭", nil
 	case "term_open_local":
 		return s.openLocal(ctx)
+	case "term_split", "term_split_inside":
+		key, err := need(raw, "termId")
+		if err != nil {
+			return "", err
+		}
+		termID, err := s.requireTerm(key)
+		if err != nil {
+			return "", err
+		}
+		kind := "window"
+		if tool == "term_split_inside" {
+			kind = "inside"
+		}
+		return s.split(ctx, termID, kind)
 	case "term_lines":
 		key, err := need(raw, "termId")
 		if err != nil {
@@ -277,22 +291,6 @@ func (s *Service) invoke(ctx context.Context, tool string, raw map[string]any) (
 			entries = []sftpx.RemoteFile{}
 		}
 		return prettyJSON(sftpListResult{Path: path, Entries: entries})
-	case "sftp_mkdir":
-		path, err := need(raw, "path")
-		if err != nil {
-			return "", err
-		}
-		found, err := s.findSessionByKey(raw)
-		if err != nil {
-			return "", err
-		}
-		if err := s.guardPath(ctx, path); err != nil {
-			return "", err
-		}
-		if err := s.deps.Sftp.MkdirPath(found.ID, path); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("已创建 %s", path), nil
 	case "sftp_upload":
 		remotePath, err := need(raw, "remotePath")
 		if err != nil {
@@ -330,49 +328,6 @@ func (s *Service) invoke(ctx context.Context, tool string, raw map[string]any) (
 			return "", err
 		}
 		return fmt.Sprintf("已下载到 %s", localPath), nil
-	case "sftp_rename":
-		to, err := need(raw, "to")
-		if err != nil {
-			return "", err
-		}
-		found, err := s.findSessionByKey(raw)
-		if err != nil {
-			return "", err
-		}
-		if err := s.guardPath(ctx, to); err != nil {
-			return "", err
-		}
-		from, err := need(raw, "from")
-		if err != nil {
-			return "", err
-		}
-		if err := s.deps.Sftp.Rename(found.ID, from, to); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("已改名为 %s", to), nil
-	case "sftp_remove":
-		path, err := need(raw, "path")
-		if err != nil {
-			return "", err
-		}
-		kind, err := need(raw, "kind")
-		if err != nil {
-			return "", err
-		}
-		if kind != "file" && kind != "dir" && kind != "link" {
-			return "", errors.New("kind 只能是 file、dir 或 link")
-		}
-		found, err := s.findSessionByKey(raw)
-		if err != nil {
-			return "", err
-		}
-		if err := s.guard(ctx, "rm "+path); err != nil {
-			return "", err
-		}
-		if err := s.deps.Sftp.Remove(found.ID, path, sftpx.FileKind(kind)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("已删除 %s", path), nil
 	default:
 		return "", fmt.Errorf("未知命令: %s", tool)
 	}

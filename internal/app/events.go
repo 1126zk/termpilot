@@ -9,7 +9,7 @@ import (
 	"termpilot/internal/mcpx"
 )
 
-// MCP 的四个请求-应答链路（对应 Electron 版 wc.send(事件) + 等 IPC 回复）：
+// MCP 的请求-应答链路（对应 Electron 版 wc.send(事件) + 等 IPC 回复）：
 // Go 侧发事件给前端后阻塞等 reply 通道，ctx 取消/超时由 mcpx 控制。
 
 func newRequestID() string {
@@ -38,10 +38,16 @@ type modeRegistry struct {
 	pending map[string]chan mcpx.TermModeReply
 }
 
+type splitRegistry struct {
+	mu      sync.Mutex
+	pending map[string]chan mcpx.SplitReply
+}
+
 var confirms = &confirmRegistry{pending: map[string]chan bool{}}
 var captures = &captureRegistry{pending: map[string]chan mcpx.CaptureReply{}}
 var linesReqs = &linesRegistry{pending: map[string]chan mcpx.TermLinesReply{}}
 var modeReqs = &modeRegistry{pending: map[string]chan mcpx.TermModeReply{}}
+var splitReqs = &splitRegistry{pending: map[string]chan mcpx.SplitReply{}}
 
 // mcpConfirm 对应 Deps.Confirm：发 mcp:confirm 弹窗请求，等 mcp:confirm-reply。
 func (a *App) mcpConfirm(ctx context.Context, command string) (bool, error) {
@@ -144,6 +150,40 @@ func (a *App) hTermLinesReply(args []interface{}) (interface{}, error) {
 	linesReqs.mu.Lock()
 	ch := linesReqs.pending[reply.ID]
 	linesReqs.mu.Unlock()
+	if ch != nil {
+		ch <- reply
+	}
+	return nil, nil
+}
+
+// mcpSplit 对应 Deps.Split：发 mcp:split 让前端分栏，等 mcp:split-reply。
+func (a *App) mcpSplit(ctx context.Context, req mcpx.SplitRequest) (mcpx.SplitReply, error) {
+	ch := make(chan mcpx.SplitReply, 1)
+	splitReqs.mu.Lock()
+	splitReqs.pending[req.ID] = ch
+	splitReqs.mu.Unlock()
+	defer func() {
+		splitReqs.mu.Lock()
+		delete(splitReqs.pending, req.ID)
+		splitReqs.mu.Unlock()
+	}()
+	a.emit("mcp:split", req)
+	select {
+	case reply := <-ch:
+		return reply, nil
+	case <-ctx.Done():
+		return mcpx.SplitReply{}, ctx.Err()
+	}
+}
+
+func (a *App) hMcpSplitReply(args []interface{}) (interface{}, error) {
+	reply, err := arg[mcpx.SplitReply](args, 0)
+	if err != nil {
+		return nil, err
+	}
+	splitReqs.mu.Lock()
+	ch := splitReqs.pending[reply.ID]
+	splitReqs.mu.Unlock()
 	if ch != nil {
 		ch <- reply
 	}

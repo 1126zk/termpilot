@@ -249,7 +249,7 @@ func (bt bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return bt.base.RoundTrip(r2)
 }
 
-// TestMCPEndToEnd 用 go-sdk 官方 client 走 StreamableHTTP：ListTools 24 个、
+// TestMCPEndToEnd 用 go-sdk 官方 client 走 StreamableHTTP：ListTools 与目录一致、
 // CallTool connection_list 返回连接视图、缺参数被 inputSchema 拦下。
 func TestMCPEndToEnd(t *testing.T) {
 	svc, st, _, _, _ := newTestService()

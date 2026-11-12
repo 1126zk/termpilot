@@ -125,6 +125,8 @@ interface AppState {
   onMcpState: (state: McpRuntime) => void
   onMcpOpenTab: (tab: McpOpenTab) => void
   onMcpCloseTab: (termId: string) => void
+  /** 执行 MCP 发来的分栏。成功时 termId 是标签内新开的终端；失败时 error 说明原因。 */
+  applyMcpSplit: (kind: 'window' | 'inside', termId: string) => { error?: string; termId?: string }
   onSessionsChanged: (sessions: SessionConfig[]) => void
   /** 取服务器静态身份：有缓存且 10 分钟内就直接用，否则重新采一次 */
   loadServerInfo: (sessionId: string) => void
@@ -508,6 +510,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   onMcpCloseTab: (termId) => {
     if (get().tabs.some((tab) => tab.id === termId)) get().closeTab(termId)
     else terminalPool.dispose(termId)
+  },
+
+  applyMcpSplit: (kind, termId) => {
+    const state = get()
+    if (!state.tabs.some((tab) => tab.id === termId)) return { error: '没有这扇终端' }
+    if (kind === 'window') {
+      if (state.split) return { error: '窗口已经分栏' }
+      if (Object.keys(state.sessionSplit).length > 0) return { error: '已有标签内分栏' }
+      if (state.tabs.length < 2) return { error: '至少要两扇标签才能分到右栏' }
+      state.splitTab(termId, 'right')
+      if (!get().split) return { error: '没能分到右栏' }
+      return {}
+    }
+    if (state.split) return { error: '窗口已经分栏' }
+    if (state.sessionSplit[termId]) return { error: '这扇标签已经分栏' }
+    state.splitSessionView(termId, termViewId(termId), 'right')
+    const pane = get().sessionSplit[termId]
+    if (!pane) return { error: '没能在标签内分栏' }
+    return { termId: termIdFromView(pane.secondaryView) ?? undefined }
   },
 
   onSessionsChanged: (sessions) => {
