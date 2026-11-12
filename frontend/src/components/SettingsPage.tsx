@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, Download, Info, RefreshCw, ScrollText, Server } from 'lucide-react'
+import { Cable, Check, Copy, Download, Info, RefreshCw, ScrollText, Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import { MCP_DEFAULT_PORT, MCP_HOST, type McpAuditEntry, type McpSettingsInput } from '../../../shared/types'
+import { MCP_DEFAULT_PORT, MCP_HOST, type ConnLogEntry, type McpAuditEntry, type McpSettingsInput } from '../../../shared/types'
 import { useAppStore } from '../stores/useAppStore'
 
-type Pane = 'mcp' | 'audit' | 'about'
+type Pane = 'mcp' | 'audit' | 'log' | 'about'
 
 const panes: { id: Pane; label: string; icon: typeof Server }[] = [
   { id: 'mcp', label: 'MCP 服务', icon: Server },
   { id: 'audit', label: '调用记录', icon: ScrollText },
+  { id: 'log', label: '连接日志', icon: Cable },
   { id: 'about', label: '关于', icon: Info }
 ]
 
@@ -37,7 +38,12 @@ export function SettingsPage() {
   const [copied, setCopied] = useState<'endpoint' | 'token' | null>(null)
   const [showToken, setShowToken] = useState(false)
   const [audit, setAudit] = useState<McpAuditEntry[]>([])
+  const [connLog, setConnLog] = useState<ConnLogEntry[]>([])
   const [version, setVersion] = useState('')
+
+  const loadConnLog = () => {
+    void window.api.conn.log().then(setConnLog).catch(() => setConnLog([]))
+  }
 
   useEffect(() => {
     if (!open) return
@@ -126,6 +132,7 @@ export function SettingsPage() {
             onClick={() => {
               setPane(item.id)
               setError('')
+              if (item.id === 'log') loadConnLog()
             }}
           >
             <item.icon className="size-4 shrink-0" />
@@ -249,6 +256,22 @@ export function SettingsPage() {
                   {audit.map((row, index) => (
                     <p key={`${row.at}-${index}`} className={row.ok ? '' : 'text-destructive'}>
                       {new Date(row.at).toLocaleString()} {row.ok ? '成功' : '失败'} {row.tool}
+                      {row.detail ? ` ${row.detail}` : ''}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {pane === 'log' && (
+              <section className="grid gap-4">
+                <h2 className="text-base font-medium text-muted-foreground">连接日志</h2>
+                <div className="max-h-[28rem] overflow-auto rounded-xl border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed select-text">
+                  {connLog.length === 0 && <p className="text-muted-foreground">还没有记录</p>}
+                  {connLog.map((row, index) => (
+                    <p key={`${row.at}-${index}`}>
+                      {new Date(row.at).toLocaleString()}
+                      {row.name ? ` ${row.name}` : ''} {row.termId} {row.summary}
                       {row.detail ? ` ${row.detail}` : ''}
                     </p>
                   ))}

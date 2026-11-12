@@ -47,6 +47,8 @@ type Entry struct {
 	remark string
 	// 每次拨号加一。旧连接迟到的关闭事件不再拆掉新的。
 	liveGen int
+	// reportedGen 这一代已经把断线原因交给界面。shell 退出和连接监视器只会有一个成功。
+	reportedGen int
 }
 
 // statusWatcher 状态事件的内部订阅者（WaitStatus / Reconnect 用）。
@@ -77,6 +79,20 @@ type Service struct {
 	sizes map[string][2]int
 	// 正在退出。此时断开不要把窗口从库里删掉。
 	parking bool
+	// 连接日志，只留在内存里。新的在末尾，最多 connLogLimit 条。
+	connLog []ConnLogEntry
+}
+
+// connLogLimit 设置页里能翻到的连接日志条数。超出丢掉最旧的。
+const connLogLimit = 200
+
+// ConnLogEntry 一次连接事件。Summary 是给界面的短中文，Detail 是原始错误，可以空。
+type ConnLogEntry struct {
+	At      int64  `json:"at"`
+	Name    string `json:"name"`
+	TermID  string `json:"termId"`
+	Summary string `json:"summary"`
+	Detail  string `json:"detail"`
 }
 
 // NewService 装配终端服务。pool 为 SSH 共享连接池；emitter / sessions / history 由上层注入，
@@ -596,6 +612,85 @@ func (s *Service) arm(entry *Entry) int {
 	defer s.mu.Unlock()
 	entry.liveGen++
 	return entry.liveGen
+}
+
+// connectReady 拨号成功。终端状态和连接日志各记一笔。
+func (s *Service) connectReady(termID, sessionID string) {
+	s.sendStatus(termID, sessionID, StatusConnected, "")
+	s.note(sessionID, termID, "已连接", "")
+}
+
+// connectFailed 拨号或打开 shell 失败。summary 写进终端，detail 是原始错误。
+func (s *Service) connectFailed(termID, sessionID, summary, detail string) {
+	s.sendStatus(termID, sessionID, StatusError, summary)
+	s.note(sessionID, termID, summary, detail)
+}
+
+// finishDown 这一代只上报一次断线。summary 是短中文，raw 的原文进连接日志。
+func (s *Service) finishDown(entry *Entry, gen int, sessionID string, status Status, summary string, raw error) {
+	if !s.claimDown(entry, gen) {
+		return
+	}
+	detail := ""
+	if raw != nil {
+		detail = raw.Error()
+	}
+	s.releaseLive(entry)
+	s.sendStatus(entry.id, sessionID, status, summary)
+	s.note(sessionID, entry.id, summary, detail)
+}
+
+// claimDown 抢到这一代的断线报告权。终端已经关掉，或这一代已经报过，返回 false。
+func (s *Service) claimDown(entry *Entry, gen int) bool {
+	if entry == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.terms[entry.id] != entry || entry.liveGen != gen {
+		return false
+	}
+	if entry.reportedGen == gen {
+		return false
+	}
+	entry.reportedGen = gen
+	return true
+}
+
+// note 追加一条连接日志。连接名从会话里取，取不到就空着。不记密码。
+func (s *Service) note(sessionID, termID, summary, detail string) {
+	if detail == summary {
+		detail = ""
+	}
+	name := ""
+	if s.sessions != nil && sessionID != "" {
+		if sess := s.sessions.FindSession(sessionID); sess != nil {
+			name = sess.Name
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connLog = append(s.connLog, ConnLogEntry{
+		At:      time.Now().UnixMilli(),
+		Name:    name,
+		TermID:  termID,
+		Summary: summary,
+		Detail:  detail,
+	})
+	if extra := len(s.connLog) - connLogLimit; extra > 0 {
+		s.connLog = s.connLog[extra:]
+	}
+}
+
+// ConnLog 返回连接日志，新的在前。
+func (s *Service) ConnLog() []ConnLogEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]ConnLogEntry, len(s.connLog))
+	for i := range s.connLog {
+		out[len(s.connLog)-1-i] = s.connLog[i]
+	}
+	return out
 }
 
 // alive 旧连接迟到的关闭事件不再拆掉新的。

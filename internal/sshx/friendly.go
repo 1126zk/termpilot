@@ -61,7 +61,7 @@ func translateSSH(message string) string {
 		strings.Contains(lower, "invalid protocol version"):
 		return "对方不是 SSH 服务：检查端口"
 	case strings.Contains(message, "ssh: disconnect, reason"):
-		return "服务器主动断开了连接"
+		return disconnectPhrase(message)
 	case strings.Contains(message, "handshake failed") && strings.Contains(message, "EOF"):
 		return "握手中断：已经连上，但对方在登录完成前关闭了连接"
 	case strings.Contains(message, "Connection lost before handshake"):
@@ -79,9 +79,22 @@ func translateSSH(message string) string {
 	case sftpFailure(message):
 		return "远程操作失败"
 	case message == "EOF" || strings.HasSuffix(message, ": EOF") || strings.Contains(message, "unexpected EOF"):
-		return "连接中断"
+		return "对方关闭了连接"
 	}
 	return message
+}
+
+// disconnectPhrase 把服务器随断开带回来的那句收成短中文。认不出的不再展开原文。
+func disconnectPhrase(message string) string {
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "unexpected bytes"), strings.Contains(lower, "incomplete message"):
+		return "数据包无效，服务器已断开"
+	case strings.Contains(lower, "client not responding"):
+		return "服务器保活超时"
+	default:
+		return "服务器已断开"
+	}
 }
 
 // sftpFailure 只认 SFTP 的 Failure 状态，避免把别的 “failed” 误当成远程操作失败。

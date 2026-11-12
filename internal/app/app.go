@@ -311,6 +311,7 @@ func toSshSession(s *storage.SessionConfig) *sshx.SessionConfig {
 	}
 	out := &sshx.SessionConfig{
 		ID:       s.ID,
+		Name:     s.Name,
 		Host:     s.Host,
 		Port:     s.Port,
 		Username: s.Username,

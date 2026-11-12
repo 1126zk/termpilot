@@ -8,6 +8,7 @@ import type {
   ForwardRule,
   HistoryEntry,
   LocalShellInfo,
+  ConnLogEntry,
   McpAuditEntry,
   McpConfirmRequest,
   McpOpenTab,
@@ -244,6 +245,9 @@ const api = {
     read: (file: string) => invoke<string>(IPC.captureRead, [file]),
     reply: (result: CaptureReply) => send(IPC.captureReply, result),
     onRun: (cb: (job: CaptureRun) => void) => on(IPC.captureRun, cb)
+  },
+  conn: {
+    log: () => invoke<ConnLogEntry[]>(IPC.connLog, [])
   },
   app: {
     version: () => invoke<string>(IPC.appVersion, []),

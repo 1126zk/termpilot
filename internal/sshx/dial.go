@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -30,6 +31,13 @@ type Conn struct {
 	Client *ssh.Client
 	Shell  *JumpShell
 	jumps  []*ssh.Client
+	// keepaliveDead 本机保活判死并主动关掉连接。Wait 返回的错误看不出是谁关的，靠这个标记。
+	keepaliveDead *atomic.Bool
+}
+
+// KeepaliveDead 这次断开是本机保活失败后主动关的。
+func (c *Conn) KeepaliveDead() bool {
+	return c != nil && c.keepaliveDead != nil && c.keepaliveDead.Load()
 }
 
 // Close 关掉整条链路（目标客户端 + 每一跳跳板），对应 TS 的 endJump + client.end()。
@@ -78,11 +86,13 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 			_ = transport.Close()
 			return nil, authError(err, session.UseKey)
 		}
-		startKeepalive(client, options)
-		return &Conn{Client: client}, nil
+		dead := &atomic.Bool{}
+		startKeepalive(client, options, dead)
+		return &Conn{Client: client, keepaliveDead: dead}, nil
 	}
 
 	var jumps []*ssh.Client
+	var lastDead *atomic.Bool
 	closeJumps := func() {
 		for _, jump := range jumps {
 			_ = jump.Close()
@@ -115,7 +125,8 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 				return nil, fmt.Errorf("跳板连接失败: %w", err)
 			}
 		}
-		startKeepalive(client, options)
+		lastDead = &atomic.Bool{}
+		startKeepalive(client, options, lastDead)
 		jumps = append(jumps, client)
 
 		nextHost, nextPort := session.Host, or22(session.Port)
@@ -135,7 +146,7 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 				closeJumps()
 				return nil, fmt.Errorf("跳板无法转到目标机: %v（shell 回退也失败: %v）", err, shellErr)
 			}
-			return &Conn{Client: client, Shell: shell, jumps: jumps}, nil
+			return &Conn{Client: client, Shell: shell, jumps: jumps, keepaliveDead: lastDead}, nil
 		}
 		closeJumps()
 		return nil, fmt.Errorf("跳板无法转到目标机: %w", err)
@@ -155,7 +166,8 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 		closeJumps()
 		return nil, authError(err, session.UseKey)
 	}
-	startKeepalive(client, options)
+	dead := &atomic.Bool{}
+	startKeepalive(client, options, dead)
 	// 目标连接断开时顺带关掉整条跳板链（对应 TS 里 client.on('close') 回收 opened）。
 	go func() {
 		_ = client.Conn.Wait()
@@ -163,7 +175,7 @@ func Dial(ctx context.Context, session *SessionConfig, secret string, jumpSecret
 			_ = jump.Close()
 		}
 	}()
-	return &Conn{Client: client, jumps: jumps}, nil
+	return &Conn{Client: client, jumps: jumps, keepaliveDead: dead}, nil
 }
 
 // dialHop 一跳的拨号参数。Password 为空表示只靠 keyboard-interactive 应答（可能答空串）。
@@ -325,7 +337,7 @@ func handshake(conn net.Conn, cfg *ssh.ClientConfig) (*ssh.Client, error) {
 // startKeepalive 对应 ssh2 的 keepaliveInterval/keepaliveCountMax：
 // 每隔 interval 发一个协议层心跳，连续 countMax 次没回应就判死关连接。
 // options 里显式给了 0 表示关掉。默认 15s / 4 次。
-func startKeepalive(client *ssh.Client, options *ConnectOptions) {
+func startKeepalive(client *ssh.Client, options *ConnectOptions, dead *atomic.Bool) {
 	intervalMs, countMax := 15000, 4
 	if options != nil {
 		if options.KeepaliveIntervalMs != nil {
@@ -361,6 +373,9 @@ func startKeepalive(client *ssh.Client, options *ConnectOptions) {
 				missed++
 			}
 			if missed >= countMax {
+				if dead != nil {
+					dead.Store(true)
+				}
 				_ = client.Close()
 				return
 			}

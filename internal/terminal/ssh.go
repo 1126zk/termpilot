@@ -5,23 +5,28 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
 	"termpilot/internal/sshx"
 )
 
+// shellExitGrace 让连接监视器先上报断线原因。shell 自己退出时连接还在，等这一小段后仍无人上报，再显示「会话已结束」。
+const shellExitGrace = 30 * time.Millisecond
+
 // SSH shell 通道与跳板禁转发回退，对应 TS TerminalService 的
 // createSsh / bindShared / openJumpShell / sshChannel。
 
 func (s *Service) createSSH(opts CreateOptions, retried bool) {
 	if s.sessions == nil {
-		s.sendStatus(opts.TermID, opts.SessionID, StatusError, "会话存储未装配")
+		s.connectFailed(opts.TermID, opts.SessionID, "会话存储未装配", "")
 		return
 	}
 	session := s.sessions.FindSession(opts.SessionID)
 	if session == nil {
-		s.sendStatus(opts.TermID, opts.SessionID, StatusError, "会话不存在")
+		s.connectFailed(opts.TermID, opts.SessionID, "会话不存在", "")
 		return
 	}
 
@@ -52,7 +57,7 @@ func (s *Service) createSSH(opts CreateOptions, retried bool) {
 			s.openJumpShell(entry, opts, session, secret, jumpSecrets, gen)
 			return
 		}
-		s.sendStatus(opts.TermID, session.ID, StatusError, friendlyConnectError(err))
+		s.connectFailed(opts.TermID, session.ID, friendlyConnectError(err), err.Error())
 		return
 	}
 	if !s.alive(entry, gen) {
@@ -68,7 +73,7 @@ func (s *Service) bindShared(entry *Entry, hold *sshx.Hold, opts CreateOptions, 
 	s.mu.Lock()
 	entry.release = hold.Release
 	s.mu.Unlock()
-	s.watchClient(entry, gen, sessionID, hold.Conn.Client)
+	s.watchClient(entry, gen, sessionID, hold.Conn)
 	err := s.openShell(entry, hold.Conn.Client, opts, gen)
 	if err == nil {
 		return
@@ -84,7 +89,7 @@ func (s *Service) bindShared(entry *Entry, hold *sshx.Hold, opts CreateOptions, 
 		s.createSSH(opts, true)
 		return
 	}
-	s.sendStatus(entry.id, sessionID, StatusError, shellError(err))
+	s.connectFailed(entry.id, sessionID, shellError(err), err.Error())
 }
 
 // openJumpShell 跳板不许转发时，只给终端在跳板里再登录一次。
@@ -104,20 +109,20 @@ func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.
 	}
 	if err != nil {
 		s.releaseLive(entry)
-		s.sendStatus(entry.id, session.ID, StatusError, friendlyConnectError(err))
+		s.connectFailed(entry.id, session.ID, friendlyConnectError(err), err.Error())
 		return
 	}
 	s.mu.Lock()
 	entry.conn = conn
 	s.mu.Unlock()
-	s.watchClient(entry, gen, session.ID, conn.Client)
+	s.watchClient(entry, gen, session.ID, conn)
 
 	if conn.Shell != nil {
 		ch := &jumpShellChannel{shell: conn.Shell}
 		s.mu.Lock()
 		entry.ch = ch
 		s.mu.Unlock()
-		s.sendStatus(entry.id, session.ID, StatusConnected, "")
+		s.connectReady(entry.id, session.ID)
 		go func() {
 			buf := make([]byte, 32*1024)
 			for {
@@ -126,10 +131,9 @@ func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.
 					s.sendData(entry.id, buf[:n])
 				}
 				if rerr != nil {
-					if s.alive(entry, gen) {
-						s.releaseLive(entry)
-						s.sendStatus(entry.id, session.ID, StatusDisconnected, "")
-					}
+					// 连接监视器若已经拿到更具体的原因，这一小段之后 claim 会失败。
+					time.Sleep(shellExitGrace)
+					s.finishDown(entry, gen, session.ID, StatusDisconnected, disconnectText(rerr, conn.KeepaliveDead()), rerr)
 					return
 				}
 			}
@@ -141,7 +145,7 @@ func (s *Service) openJumpShell(entry *Entry, opts CreateOptions, session *sshx.
 		if !s.alive(entry, gen) {
 			return
 		}
-		s.sendStatus(entry.id, session.ID, StatusError, shellError(err))
+		s.connectFailed(entry.id, session.ID, shellError(err), err.Error())
 	}
 }
 
@@ -185,33 +189,28 @@ func (s *Service) openShell(entry *Entry, client *ssh.Client, opts CreateOptions
 	s.mu.Lock()
 	sessionID := entry.sessionID
 	s.mu.Unlock()
-	s.sendStatus(entry.id, sessionID, StatusConnected, "")
+	s.connectReady(entry.id, sessionID)
 	go pumpStream(stdout, func(b []byte) { s.sendData(entry.id, b) })
 	go pumpStream(stderr, func(b []byte) { s.sendData(entry.id, b) })
 	go func() {
-		_ = sess.Wait()
-		if !s.alive(entry, gen) {
+		err := sess.Wait()
+		if !shellExited(err) {
 			return
 		}
-		s.releaseLive(entry)
-		s.sendStatus(entry.id, sessionID, StatusDisconnected, "")
+		time.Sleep(shellExitGrace)
+		s.finishDown(entry, gen, sessionID, StatusDisconnected, "会话已结束", err)
 	}()
 	return nil
 }
 
 // watchClient 对应 TS 的 client.on('error'/'close')：底层连接断开时收掉这扇终端的通道。
-func (s *Service) watchClient(entry *Entry, gen int, sessionID string, client *ssh.Client) {
+func (s *Service) watchClient(entry *Entry, gen int, sessionID string, conn *sshx.Conn) {
+	if conn == nil {
+		return
+	}
 	go func() {
-		err := client.Conn.Wait()
-		if !s.alive(entry, gen) {
-			return
-		}
-		s.releaseLive(entry)
-		if err == nil || errors.Is(err, io.EOF) {
-			s.sendStatus(entry.id, sessionID, StatusDisconnected, "")
-		} else {
-			s.sendStatus(entry.id, sessionID, StatusError, friendlyConnectError(err))
-		}
+		err := conn.Wait()
+		s.finishDown(entry, gen, sessionID, StatusDisconnected, disconnectText(err, conn.KeepaliveDead()), err)
 	}()
 }
 
@@ -229,12 +228,16 @@ func pumpStream(r io.Reader, onData func([]byte)) {
 }
 
 // sshShellChannel SSH shell 通道。
+// Write 必须串行：golang.org/x/crypto/ssh 的通道写入不能并发，否则数据包长度和正文错位，OpenSSH 会掐断整条连接。
 type sshShellChannel struct {
+	mu    sync.Mutex
 	sess  *ssh.Session
 	stdin io.Writer
 }
 
 func (c *sshShellChannel) Write(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := c.stdin.Write(data)
 	return err
 }
@@ -250,11 +253,15 @@ func (c *sshShellChannel) Close() error {
 
 // jumpShellChannel 跳板 shell 回退通道：写进跳板的 stdin，读它的 stdout。
 // sshx.JumpShell 未暴露 WindowChange，resize 为空操作（TS 的 TerminalChannel.resize 也是可选的）。
+// Write 同样串行，避免并发写把字节交错送进远端 ssh。
 type jumpShellChannel struct {
+	mu    sync.Mutex
 	shell *sshx.JumpShell
 }
 
 func (c *jumpShellChannel) Write(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, err := c.shell.Stdin.Write(data)
 	return err
 }
@@ -289,4 +296,24 @@ func isForwardDenied(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "跳板无法转到目标机")
+}
+
+// shellExited 表示远端 shell 自己退出并带回了退出码或信号。连接被掐断时没有退出状态，交给 watchClient。
+func shellExited(err error) bool {
+	if err == nil {
+		return true
+	}
+	var exitErr *ssh.ExitError
+	return errors.As(err, &exitErr)
+}
+
+// disconnectText 断线时写进终端的短中文。原文留给连接日志。
+func disconnectText(err error, keepalive bool) string {
+	if keepalive {
+		return "保活无响应"
+	}
+	if err == nil || errors.Is(err, io.EOF) {
+		return "对方关闭了连接"
+	}
+	return friendlyConnectError(err)
 }

@@ -380,6 +380,15 @@ export interface McpAuditEntry {
   detail: string
 }
 
+/** 连接日志。summary 是短中文，detail 是原始错误，可以空。 */
+export interface ConnLogEntry {
+  at: number
+  name: string
+  termId: string
+  summary: string
+  detail: string
+}
+
 /** 危险命令确认 */
 export interface McpConfirmRequest {
   id: string

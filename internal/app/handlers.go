@@ -950,6 +950,13 @@ func (a *App) hMcpAudit(_ []interface{}) (interface{}, error) {
 	return a.store.ListAudit(0)
 }
 
+func (a *App) hConnLog(_ []interface{}) (interface{}, error) {
+	if a.terminal == nil {
+		return []terminal.ConnLogEntry{}, nil
+	}
+	return a.terminal.ConnLog(), nil
+}
+
 func (a *App) hMcpAuditExport(_ []interface{}) (interface{}, error) {
 	entries, err := a.store.ListAudit(0)
 	if err != nil {

@@ -56,6 +56,7 @@ type ConnectOptions struct {
 // SessionConfig 拨号需要的会话字段（secret 不在本结构里，由调用方传入）。
 type SessionConfig struct {
 	ID       string
+	Name     string
 	Host     string
 	Port     int
 	Username string
