@@ -24,6 +24,11 @@ var (
 
 // LastScreenLine 画面最后一个非空行，去掉 ANSI（CSI 和 OSC）。提示符就长这样。
 func LastScreenLine(raw string) string {
+	return strings.TrimSpace(screenLine(raw))
+}
+
+// screenLine 画面最后一个非空行，保留行尾空格。空格也占列，算折行时不能丢掉。
+func screenLine(raw string) string {
 	cleaned := csiSeqRe.ReplaceAllString(oscSeqRe.ReplaceAllString(raw, ""), "")
 	cleaned = strings.ReplaceAll(cleaned, "\r", "\n")
 	last := ""
@@ -32,7 +37,46 @@ func LastScreenLine(raw string) string {
 			last = line
 		}
 	}
-	return strings.TrimSpace(last)
+	return last
+}
+
+// displayWidth 终端列数。ASCII 占 1 列，中日韩等宽字符占 2 列。
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runeWidth(r)
+	}
+	return w
+}
+
+func runeWidth(r rune) int {
+	if r < 0x20 || r == 0x7f {
+		return 0
+	}
+	if isWideRune(r) {
+		return 2
+	}
+	return 1
+}
+
+func isWideRune(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115F,
+		r >= 0x2329 && r <= 0x232A,
+		r >= 0x2E80 && r <= 0xA4CF,
+		r >= 0xAC00 && r <= 0xD7A3,
+		r >= 0xF900 && r <= 0xFAFF,
+		r >= 0xFE10 && r <= 0xFE19,
+		r >= 0xFE30 && r <= 0xFE6F,
+		r >= 0xFF00 && r <= 0xFF60,
+		r >= 0xFFE0 && r <= 0xFFE6,
+		r >= 0x1F300 && r <= 0x1F64F,
+		r >= 0x1F900 && r <= 0x1F9FF,
+		r >= 0x20000 && r <= 0x3FFFD:
+		return true
+	default:
+		return false
+	}
 }
 
 // IsPromptAgain 最后一行是不是又回到了提示符。

@@ -440,15 +440,17 @@ func (s *Service) ExecCommand(termID, command string, timeout time.Duration) (Ex
 		return ExecResult{}, errors.New("终端已经断开。用 term_reconnect 恢复这扇终端，编号不变。")
 	}
 	origin := s.logicalEnd(termID)
-	promptBefore := LastScreenLine(s.readTailString(termID, 4000))
+	tail := s.readTailString(termID, 4000)
+	promptBefore := LastScreenLine(tail)
 	body := strings.TrimSuffix(command, "\n")
 	// SSH 和本机 POSIX shell 有退出码探针；本机 Windows 的 PowerShell 只靠提示符
 	posix := term.kind == KindSSH || runtime.GOOS != "windows"
 	marker := "__TP_DONE_" + randBase36(8) + "__"
 	probe := ""
 	if posix {
-		// 标记打印完立刻用光标回退抹掉，同一个数据块里写完就擦，屏幕上基本看不到
-		probe = fmt.Sprintf("\nprintf '%s%%s\\n\\033[2A\\033[2K\\033[1B\\033[2K\\033[1A' \"$?\"", marker)
+		cols, _ := s.sizeOf(termID, 80, 24)
+		// 回显会按终端宽度折行。清掉的行数按当前宽度算，再用删行把这段抽掉。
+		probe = "\n" + doneProbe(marker, screenLine(tail), cols)
 	}
 	s.Input(termID, body+probe+"\n")
 
@@ -490,6 +492,45 @@ func (s *Service) ExecCommand(termID, command string, timeout time.Duration) (Ex
 		}
 	}
 	return ExecResult{Output: strings.Join(kept, "\n"), ExitCode: exitCode, Finished: finished}, nil
+}
+
+// doneProbe 是跟在用户命令后面的退出码探针。
+// 先打出标记和三位退出码，再按这条回显实际占的行数整段删掉。
+// 行数写进命令本身，命令变长会多折一行，所以要算到行数不再变。
+func doneProbe(marker, prompt string, cols int) string {
+	if cols < 1 {
+		cols = 80
+	}
+	promptW := displayWidth(prompt)
+	n := 2
+	cmd := ""
+	for range 6 {
+		cmd = formatDoneProbe(marker, n)
+		next := cellsToRows(promptW+displayWidth(cmd), cols) + cellsToRows(len(marker)+3, cols)
+		if next < 2 {
+			next = 2
+		}
+		if next == n {
+			return cmd
+		}
+		n = next
+	}
+	return formatDoneProbe(marker, n)
+}
+
+func formatDoneProbe(marker string, n int) string {
+	// \033[nA 回到这段回显的第一行，\033[nM 删掉这 n 行，下面的行上移补上。
+	return fmt.Sprintf("command printf '%s%%03d\\n\\033[%dA\\033[%dM' \"$?\"", marker, n, n)
+}
+
+func cellsToRows(cells, cols int) int {
+	if cols < 1 {
+		cols = 80
+	}
+	if cells < 1 {
+		return 1
+	}
+	return (cells + cols - 1) / cols
 }
 
 // DisposeAll 退出时全部断开并清空，不持久化。

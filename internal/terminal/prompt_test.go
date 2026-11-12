@@ -5,6 +5,49 @@ import (
 	"testing"
 )
 
+func TestScreenLineKeepsTrailingSpace(t *testing.T) {
+	if got := screenLine("line1\r\nline2$ "); got != "line2$ " {
+		t.Errorf("screenLine = %q", got)
+	}
+	if got := displayWidth("a中"); got != 3 {
+		t.Errorf("displayWidth = %d", got)
+	}
+}
+
+func TestDoneProbeEraseCount(t *testing.T) {
+	prompt := "root@i-6af3e8ac12fd4087bc76ec3a:~# "
+	marker := "__TP_DONE_r024bmhd__"
+	for _, cols := range []int{20, 40, 60, 80, 120} {
+		cmd := doneProbe(marker, prompt, cols)
+		n := probeEraseRows(t, cmd)
+		need := cellsToRows(displayWidth(prompt)+displayWidth(cmd), cols) + cellsToRows(len(marker)+3, cols)
+		if n != need {
+			t.Errorf("cols %d: 删 %d 行，实际要 %d 行，命令 %q", cols, n, need, cmd)
+		}
+	}
+}
+
+func probeEraseRows(t *testing.T, cmd string) int {
+	t.Helper()
+	const key = "\\033["
+	i := strings.LastIndex(cmd, key)
+	if i < 0 {
+		t.Fatalf("探针没有删行序列: %q", cmd)
+	}
+	rest := cmd[i+len(key):]
+	n := 0
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	if n < 2 {
+		t.Fatalf("删行数异常: %q", cmd)
+	}
+	return n
+}
+
 func TestLastScreenLine(t *testing.T) {
 	cases := []struct{ raw, want string }{
 		{"line1\r\nline2$ ", "line2$"},
