@@ -15,7 +15,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { focusedTermId } from './SnippetsPanel'
 import { TerminalView } from './TerminalView'
+import { terminalPool } from '../terminal/TerminalPool'
 import { MANUAL_CATEGORIES, type ManualCategory } from './manualData'
 import { connErrorText, useAppStore } from '../stores/useAppStore'
 import { dockerInstallKey, useInstallStore, webInstallKey } from '../stores/useInstallStore'
@@ -74,7 +76,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   const metrics = confirmKill === null ? (shared?.metrics ?? null) : frozen.current
   // 内容区选项卡：进程 / Docker / 网站 / 脚本
   const [opsTab, setOpsTab] = useState<'proc' | 'docker' | 'web' | 'script' | 'manual'>('proc')
-  // 面板和脚本页都操作当前标签的主终端，开关面板不新建 Shell
+  // 面板挂在这个标签上，开关面板不新建 Shell。交互式脚本另按分栏里鼠标点过的那一侧发送。
   const panelTermId = props.termId
 
   const killProc = (pid: number) => {
@@ -2061,7 +2063,9 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
       void window.api.sftp
         .write(props.sessionId, script, wrapped)
         .then(() => {
-          window.api.term.input(props.panelTermId, `bash '${script}'; rm -f '${script}'\n`)
+          const termId = focusedTermId(props.panelTermId) ?? props.panelTermId
+          window.api.term.input(termId, `bash '${script}'; rm -f '${script}'\n`)
+          terminalPool.focus(termId)
           setNotice(`${s.name} 已在右侧终端运行`)
         })
         .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))

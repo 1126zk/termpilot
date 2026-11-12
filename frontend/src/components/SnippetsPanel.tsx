@@ -5,15 +5,16 @@ import { termIdFromView, useAppStore } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import type { Snippet } from '../../../shared/types'
 
-/** 会话内部分栏时用鼠标点过的那一侧。那一侧正在看文件，就用另一侧的终端。 */
-function focusedTermId(): string | null {
+/** 会话内部分栏时用鼠标点过的那一侧。那一侧正在看文件，就用另一侧的终端。parentId 指定标签时只看这一栏。 */
+export function focusedTermId(parentId?: string | null): string | null {
   const { activeTabId, sessionSplit } = useAppStore.getState()
-  if (!activeTabId) return null
-  const pane = sessionSplit[activeTabId]
-  if (!pane) return activeTabId
+  const tabId = parentId ?? activeTabId
+  if (!tabId) return null
+  const pane = sessionSplit[tabId]
+  if (!pane) return tabId
   const focused = pane.focus === 'secondary' ? pane.secondaryView : pane.primaryView
   const other = pane.focus === 'secondary' ? pane.primaryView : pane.secondaryView
-  return termIdFromView(focused) ?? termIdFromView(other) ?? activeTabId
+  return termIdFromView(focused) ?? termIdFromView(other) ?? tabId
 }
 
 /** 发到当前活跃终端并把焦点还给终端。execute 为 true 时补回车直接执行，false 只填入等用户自己回车。没有活跃终端时静默不做事。 */
