@@ -215,10 +215,6 @@ export function TabBar() {
       setNotice(error instanceof Error ? error.message : String(error))
       return
     }
-    if (!settings?.enabled) {
-      setNotice('先在设置里启用 MCP')
-      return
-    }
     const rule: ForwardRule = { type: 'remote', listenPort: settings.port, targetPort: settings.port }
     try {
       const rules = (await window.api.forwards.list(sessionId)) ?? []
@@ -232,6 +228,8 @@ export function TabBar() {
         await window.api.forwards.stop(sessionId, rule)
         mcpForwardRef.current.delete(sessionId)
         setNotice('已停止 MCP 端口映射')
+      } else if (!settings?.enabled) {
+        setNotice('先在设置里启用 MCP')
       } else {
         if (previous && previous.listenPort !== rule.listenPort) {
           await window.api.forwards.stop(sessionId, previous)
