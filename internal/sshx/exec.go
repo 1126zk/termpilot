@@ -27,6 +27,8 @@ type ExecOptions struct {
 	MaxBytes  int
 	// OnLine 非空时 stdout 逐行回调（装包/拉镜像的进度实时下发）；nil 时行为不变
 	OnLine func(line string)
+	// Cancel 被关闭时杀掉这次远端进程。nil 表示不能取消。
+	Cancel <-chan struct{}
 }
 
 // ExecResult 一次自动化执行的结果。截断保留开头和结尾。
@@ -37,6 +39,8 @@ type ExecResult struct {
 	// Duration 花了多少秒。
 	Duration float64
 	TimedOut bool
+	// Canceled 调用方关闭了 Cancel。
+	Canceled bool
 	// Truncated stdout 或 stderr 因 MaxBytes 被截断时为 true。
 	Truncated bool
 }
@@ -46,12 +50,13 @@ type ExecResult struct {
 type ExecService struct {
 	mu      sync.Mutex
 	holds   map[string]*Hold
+	pulls   map[string]*browserPull
 	acquire func(sessionID string) (*Hold, error)
 }
 
 // NewExecService acquire 返回某会话的共享连接引用。
 func NewExecService(acquire func(sessionID string) (*Hold, error)) *ExecService {
-	return &ExecService{holds: map[string]*Hold{}, acquire: acquire}
+	return &ExecService{holds: map[string]*Hold{}, pulls: map[string]*browserPull{}, acquire: acquire}
 }
 
 // hold 每条连接缓存一个引用，和终端、文件树共用同一条 SSH 会话。
@@ -112,6 +117,110 @@ func (s *ExecService) Exec(sessionID string, opts ExecOptions) (*ExecResult, err
 
 var sessionNameRe = regexp.MustCompile(`[^\w-]`)
 
+// ansiCSI 清掉终端控制序列，进度行里只留文字。
+var ansiCSI = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// ansiOSC 清掉操作系统命令序列（标题、超链接一类）。
+var ansiOSC = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+
+// readProgress 把输出切成行。以 \r 结尾的片段是同一行的刷新，回调参数以 \r 开头；
+// \r\n 和 \n 都是一行结束。调用方用前缀决定覆盖还是另起一行。
+func readProgress(r io.Reader, onLine func(string)) {
+	br := bufio.NewReaderSize(r, 64*1024)
+	buf := make([]byte, 0, 256)
+	flush := func(carriage bool) {
+		text := strings.TrimRight(ansiCSI.ReplaceAllString(string(buf), ""), " \t")
+		buf = buf[:0]
+		if text == "" {
+			return
+		}
+		if carriage {
+			onLine("\r" + text)
+			return
+		}
+		onLine(text)
+	}
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if len(buf) > 0 {
+				flush(false)
+			}
+			return
+		}
+		if b == '\n' {
+			flush(false)
+			continue
+		}
+		if b == '\r' {
+			next, err2 := br.ReadByte()
+			if err2 == nil && next == '\n' {
+				flush(false)
+				continue
+			}
+			if err2 == nil {
+				_ = br.UnreadByte()
+			}
+			flush(true)
+			if err2 != nil {
+				return
+			}
+			continue
+		}
+		buf = append(buf, b)
+		if len(buf) >= 8192 {
+			flush(false)
+		}
+	}
+}
+
+// briefCommandOutput 从伪终端的原始输出里抽出最后一句有用的话。
+// 回车符刷新和进度条行都丢掉，避免整段进度被当成错误提示。
+func briefCommandOutput(s string) string {
+	s = ansiOSC.ReplaceAllString(ansiCSI.ReplaceAllString(s, ""), "")
+	var last string
+	for _, line := range strings.Split(s, "\n") {
+		if i := strings.LastIndex(line, "\r"); i >= 0 {
+			line = line[i+1:]
+		}
+		line = strings.TrimSpace(strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f {
+				return -1
+			}
+			return r
+		}, line))
+		if line == "" || isPullProgress(line) {
+			continue
+		}
+		last = line
+	}
+	const maxRunes = 160
+	if n := len([]rune(last)); n > maxRunes {
+		last = string([]rune(last)[:maxRunes])
+	}
+	return last
+}
+
+func isPullProgress(s string) bool {
+	switch {
+	case strings.Contains(s, "Downloading"),
+		strings.Contains(s, "Extracting"),
+		strings.Contains(s, "Pulling fs layer"),
+		strings.Contains(s, "Waiting"),
+		strings.Contains(s, "Verifying Checksum"),
+		strings.Contains(s, "Pull complete"),
+		strings.Contains(s, "Download complete"),
+		strings.Contains(s, "Pulling from "),
+		strings.HasPrefix(s, "Using default tag"),
+		strings.Contains(s, "Retrying"),
+		strings.HasPrefix(s, "Digest:"),
+		strings.HasPrefix(s, "Status:"):
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error) {
 	client := hold.Conn.Client
 	if client == nil {
@@ -156,15 +265,11 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 	var copyWg sync.WaitGroup
 	copyWg.Add(2)
 	if opts.OnLine != nil {
-		// 流式输出：TeeReader 照常写满缓冲，Scanner 按行回调。
-		// docker/apt 这类工具的进度都写在 stderr，两路都要接
+		// 流式输出：TeeReader 照常写满缓冲。docker pull 的百分比用回车符刷在同一行，
+		// 这种行以 \r 开头交给调用方覆盖，换行才是新的一行。两路都要接。
 		scan := func(r io.Reader, w io.Writer) {
 			defer copyWg.Done()
-			scanner := bufio.NewScanner(io.TeeReader(r, w))
-			scanner.Buffer(make([]byte, 64*1024), 64*1024)
-			for scanner.Scan() {
-				opts.OnLine(scanner.Text())
-			}
+			readProgress(io.TeeReader(r, w), opts.OnLine)
 		}
 		go scan(stdout, outBuf)
 		go scan(stderr, errBuf)
@@ -177,24 +282,38 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 	go func() { waitDone <- session.Wait() }()
 
 	timedOut := false
+	canceled := false
 	var waitErr error
 	timeout := time.Duration(opts.TimeoutMs) * time.Millisecond
+	killRemote := func() {
+		// Close 只是发 SSH_MSG_CHANNEL_CLOSE，对端 sshd 在子进程活着时会推迟回 CLOSE，
+		// 本地管道读协程就收不到 EOF、一直阻塞。先 SIGKILL 杀远端子进程再 Close。
+		_ = session.Signal(ssh.SIGKILL)
+		_ = session.Close()
+	}
 	if timeout > 0 {
 		select {
 		case waitErr = <-waitDone:
+		case <-opts.Cancel:
+			canceled = true
+			killRemote()
 		case <-time.After(timeout):
 			timedOut = true
-			// Close 只是发 SSH_MSG_CHANNEL_CLOSE，对端 sshd 在子进程活着时会推迟回 CLOSE，
-			// 本地管道读协程就收不到 EOF、一直阻塞。先 SIGKILL 杀远端子进程再 Close。
-			_ = session.Signal(ssh.SIGKILL)
-			_ = session.Close()
+			killRemote()
+		}
+	} else if opts.Cancel != nil {
+		select {
+		case waitErr = <-waitDone:
+		case <-opts.Cancel:
+			canceled = true
+			killRemote()
 		}
 	} else {
 		waitErr = <-waitDone
 	}
-	// 超时场景下读协程可能仍阻塞（对端始终不回 CLOSE），最多再陪它们等 2 秒，
+	// 超时或取消时读协程可能仍阻塞（对端始终不回 CLOSE），最多再陪它们等 2 秒，
 	// 到点直接返回；残留的读协程会在连接断开时自己退出
-	if timedOut {
+	if timedOut || canceled {
 		drained := make(chan struct{})
 		go func() { copyWg.Wait(); close(drained) }()
 		select {
@@ -206,10 +325,10 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 	}
 
 	var exitCode *int
-	if !timedOut && waitErr == nil {
+	if !timedOut && !canceled && waitErr == nil {
 		code := 0
 		exitCode = &code
-	} else if !timedOut {
+	} else if !timedOut && !canceled {
 		var exitErr *ssh.ExitError
 		if errors.As(waitErr, &exitErr) {
 			code := exitErr.ExitStatus()
@@ -226,6 +345,7 @@ func (s *ExecService) runOnce(hold *Hold, opts ExecOptions) (*ExecResult, error)
 		ExitCode:  exitCode,
 		Duration:  float64(time.Since(started).Milliseconds()) / 1000,
 		TimedOut:  timedOut,
+		Canceled:  canceled,
 		Truncated: outTruncated || errTruncated,
 	}, nil
 }

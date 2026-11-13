@@ -38,7 +38,8 @@ import type {
   TermModeReply,
   TermModeRun,
   TermStatusEvent,
-  WebInfo
+  WebInfo,
+  BrowserInfo
 } from '../../shared/types'
 
 /**
@@ -118,6 +119,15 @@ const api = {
       invoke<void>(IPC.sessionWebSSL, [id, domain, op]),
     webService: (id: string, service: string, op: 'start' | 'stop' | 'restart' | 'rm') =>
       invoke<void>(IPC.sessionWebService, [id, service, op]),
+    browser: (id: string) => invoke<BrowserInfo>(IPC.sessionBrowser, [id]),
+    browserInstall: (id: string) => invoke<void>(IPC.sessionBrowserInstall, [id]),
+    browserPause: (id: string) => invoke<void>(IPC.sessionBrowserPause, [id]),
+    browserClearCache: (id: string) => invoke<void>(IPC.sessionBrowserClearCache, [id]),
+    onBrowserInstallProgress: (id: string, cb: (line: string) => void) =>
+      on<{ id: string; line: string }>(IPC.sessionBrowserInstallProgress, (p) => {
+        if (p.id === id) cb(p.line)
+      }),
+    browserService: (id: string, op: 'start' | 'stop') => invoke<void>(IPC.sessionBrowserService, [id, op]),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

@@ -202,6 +202,17 @@ export interface WebConfFile {
   content: string
 }
 
+/** 云浏览器容器的一次探测。docker 不可用时 state 为空，不能当成「云浏览器没装」。 */
+export interface BrowserInfo {
+  dockerAvailable: boolean
+  /** 引擎在跑。没装、没启动、权限不够都是 false */
+  dockerRunning: boolean
+  /** 当前用户连不上 docker.sock */
+  needSudo: boolean
+  /** running / exited 等。空串 = Docker 在跑但容器还没装 */
+  state: string
+}
+
 /** 一条 crontab 条目，与 Go 端 sshx.CronEntry 对应。ours=true 是面板建的（行尾有标记），
     可以删；其余是用户自己手写的，只展示。 */
 export interface CronEntry {

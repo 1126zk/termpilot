@@ -177,6 +177,18 @@ type WebConfFile struct {
 	Content string `json:"content"`
 }
 
+// BrowserInfo 云浏览器容器的一次探测。先看 Docker，再看容器：
+// Docker 不可用时 State 留空，不能把它读成「云浏览器没装」。
+type BrowserInfo struct {
+	DockerAvailable bool `json:"dockerAvailable"`
+	// DockerRunning 引擎在跑（docker info 成功）。没装、没启动、权限不够都是 false。
+	DockerRunning bool `json:"dockerRunning"`
+	// NeedSudo 当前用户连不上 docker.sock。
+	NeedSudo bool `json:"needSudo"`
+	// State 容器状态：running / exited 等。空串 = Docker 在跑但容器还没装。
+	State string `json:"state"`
+}
+
 // DiskUsage 一个挂载点的用量，字节数。
 type DiskUsage struct {
 	Mount      string  `json:"mount"`

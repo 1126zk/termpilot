@@ -330,6 +330,52 @@ func (a *App) hSessionWebService(args []interface{}) (interface{}, error) {
 	return nil, a.exec.WebService(id, service, op)
 }
 
+func (a *App) hSessionBrowser(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.CollectBrowser(id)
+}
+
+func (a *App) hSessionBrowserInstall(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.BrowserInstall(id, func(line string) {
+		a.emit("session:browser-install-progress", map[string]string{"id": id, "line": line})
+	})
+}
+
+func (a *App) hSessionBrowserPause(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.PauseBrowserInstall(id)
+}
+
+func (a *App) hSessionBrowserClearCache(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.ClearBrowserPullCache(id)
+}
+
+func (a *App) hSessionBrowserService(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	op, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.BrowserService(id, op)
+}
+
 func (a *App) hSessionWebSSL(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

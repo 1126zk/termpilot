@@ -20,7 +20,7 @@ import { TerminalView } from './TerminalView'
 import { terminalPool } from '../terminal/TerminalPool'
 import { MANUAL_CATEGORIES, type ManualCategory } from './manualData'
 import { connErrorText, useAppStore } from '../stores/useAppStore'
-import { dockerInstallKey, useInstallStore, webInstallKey } from '../stores/useInstallStore'
+import { applyProgressLine, dockerInstallKey, useInstallStore, webInstallKey } from '../stores/useInstallStore'
 
 /** 字节 → GiB/MiB 简短文本 */
 function formatBytes(n: number): string {
@@ -740,10 +740,10 @@ function DockerInstallSection(props: { sessionId: string }) {
       {log.length > 0 && (
         <div
           ref={logRef}
-          className="max-h-44 w-full max-w-md overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text"
+          className="max-h-44 w-full min-w-0 max-w-md overflow-auto rounded-md bg-muted p-2 font-mono text-sm select-text"
         >
           {log.map((line, i) => (
-            <div key={i} className="break-all whitespace-pre-wrap">
+            <div key={i} className="whitespace-nowrap">
               {line}
             </div>
           ))}
@@ -2003,10 +2003,16 @@ function ScriptSection(props: { sessionId: string; panelTermId: string }) {
   }
   useEffect(refreshCron, [props.sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const runLogOpen = useRef(false)
   useEffect(() => {
     if (running === null) return
+    runLogOpen.current = false
     return window.api.sessions.onScriptRunProgress(props.sessionId, (line) =>
-      setRunLog((cur) => [...cur.slice(-199), line])
+      setRunLog((cur) => {
+        const next = applyProgressLine(cur, runLogOpen.current, line)
+        runLogOpen.current = next.open
+        return next.log
+      })
     )
   }, [running, props.sessionId])
   useEffect(() => {
