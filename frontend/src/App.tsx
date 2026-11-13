@@ -175,8 +175,10 @@ export default function App() {
   // 文件标签跟着终端页走，切到主机页、工具页、设置页时收起
   const onTerminalPage = !!activeTab && !hostsOpen && !toolsOpen && !settingsOpen
   const editing = useAppStore((s) => s.editing)
-  const browserOpen = !!activeTab && browserPreviewTermIds.includes(activeTab.id)
-  const panelOpen = !browserOpen && Boolean(editing || (rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab))
+  const browserOpen = onTerminalPage && !!activeTab && browserPreviewTermIds.includes(activeTab.id)
+  const panelOpen = Boolean(
+    editing || (!browserOpen && rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab)
+  )
   const gridRef = useRef<HTMLDivElement>(null)
 
   // a 是主栏（左 / 上），b 是辅栏（右 / 下）；不分屏时只有 a。每一栏有自己的文件标签和正在看的文件
@@ -485,8 +487,8 @@ function BrowserSplitRow(props: { termId: string }) {
         setWidth(current)
       },
       onMove: (x) => {
-        // 浏览器栏最小 360，最大顶满整行（终端可以一直拖到 0）
-        const w = Math.round(Math.min(rect.width, Math.max(360, rect.right - x)))
+        // 浏览器栏最小 360，最大顶满整行（终端可以一直拖到 0），减去分隔条避免溢出
+        const w = Math.round(Math.max(360, Math.min(rect.width - 4, rect.right - x)))
         widthRef.current = w
         setWidth(w)
       },

@@ -13,7 +13,7 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
       className={
         props.width == null
           ? 'flex min-h-0 min-w-0 flex-1 flex-col border-l border-border'
-          : 'flex min-h-0 min-w-0 shrink-0 flex-col border-l border-border'
+          : 'flex min-h-0 min-w-0 flex-col border-l border-border'
       }
       style={props.width == null ? undefined : { width: props.width }}
     >

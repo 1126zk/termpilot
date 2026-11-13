@@ -1187,8 +1187,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const opening = !open.includes(termId)
     set({
       browserPreviewTermIds: opening ? [...open, termId] : open.filter((id) => id !== termId),
-      // 同上，展开云浏览器先收起运维面板
-      ...(opening ? { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== termId) } : {})
+      // 同上，展开云浏览器先收起运维面板和右侧面板
+      ...(opening
+        ? { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== termId), rightPanelOpen: false }
+        : {})
     })
   },
 
