@@ -106,7 +106,7 @@ function WindowControls(props: { terminalActive: boolean }) {
   const browserOpen = !!activeTab && browserPreviewTermIds.includes(activeTab.id)
   const browserOk =
     props.terminalActive && activeTab && (activeTab.kind === 'ssh' || (activeTab.kind === 'local' && activeTab.shell === 'wsl'))
-  const opsOk = !browserOpen && props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
+  const opsOk = props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
   const opsOpen = !!activeTab && opsPanelTermIds.includes(activeTab.id)
 
   return (
@@ -134,12 +134,16 @@ function WindowControls(props: { terminalActive: boolean }) {
           <Gauge className="size-4" strokeWidth={2} />
         </button>
       )}
-      {props.terminalActive && !browserOpen && (
+      {props.terminalActive && (
         <button
           type="button"
           className={topBtn}
           title={rightPanelOpen ? '收起右侧面板' : '展开右侧面板'}
-          onClick={toggleRightPanel}
+          onClick={() => {
+            // 展开右侧面板时若云浏览器开着，先收起它，两块区域不叠在一起
+            if (!rightPanelOpen && browserOpen && activeTab) toggleBrowserPreview(activeTab.id)
+            toggleRightPanel()
+          }}
         >
           {rightPanelOpen ? (
             <PanelRightClose className="size-4" strokeWidth={2} />

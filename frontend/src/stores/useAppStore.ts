@@ -1176,14 +1176,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     const splitOn = !!get().sessionSplit[termId]
     set({
       opsPanelTermIds: [...open, termId],
+      // 云浏览器和它占同一块地方，展开运维面板先收起云浏览器
+      browserPreviewTermIds: get().browserPreviewTermIds.filter((id) => id !== termId),
       ...(splitOn ? {} : { editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) })
     })
   },
 
   toggleBrowserPreview: (termId) => {
     const open = get().browserPreviewTermIds
+    const opening = !open.includes(termId)
     set({
-      browserPreviewTermIds: open.includes(termId) ? open.filter((id) => id !== termId) : [...open, termId]
+      browserPreviewTermIds: opening ? [...open, termId] : open.filter((id) => id !== termId),
+      // 同上，展开云浏览器先收起运维面板
+      ...(opening ? { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== termId) } : {})
     })
   },
 

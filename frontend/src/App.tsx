@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { RightPanel } from './components/RightPanel'
@@ -438,15 +438,74 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
             style={area ? { gridArea: area } : undefined}
             onPointerDownCapture={() => focusPane(tab.id)}
           >
-            <div className={cn('flex min-h-0 min-w-0 flex-1', browser ? 'flex-row' : 'flex-col')}>
+            {browser && area ? (
+              <BrowserSplitRow termId={tab.id} />
+            ) : (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <TerminalView termId={tab.id} active={!!area} />
               </div>
-              {browser && <CloudBrowserPreview termId={tab.id} />}
-            </div>
+            )}
           </div>
         )
       })}
     </>
+  )
+}
+
+const BROWSER_WIDTH_KEY = 'termpilot.cloudBrowser.width'
+
+function readBrowserWidth(): number | null {
+  const value = Number(localStorage.getItem(BROWSER_WIDTH_KEY))
+  return Number.isFinite(value) && value >= 360 ? Math.round(value) : null
+}
+
+/** 终端 + 云浏览器的分屏行：中间分隔条按住左右拖，浏览器栏宽度落到 localStorage。 */
+function BrowserSplitRow(props: { termId: string }) {
+  const rowRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const [width, setWidth] = useState<number | null>(readBrowserWidth)
+  const widthRef = useRef(width)
+  widthRef.current = width
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const row = rowRef.current
+    const panel = panelRef.current
+    if (!row || !panel) return
+    // 不让拖动时选中两边的文字
+    event.preventDefault()
+    const rect = row.getBoundingClientRect()
+    // 拖动前浏览器栏还是 flex:1，先固化当前实际宽度，第一下才不会跳
+    const current = panel.getBoundingClientRect().width
+    startPointerDrag({
+      event,
+      axis: 'x',
+      threshold: 0,
+      onActivate: () => {
+        widthRef.current = current
+        setWidth(current)
+      },
+      onMove: (x) => {
+        // 浏览器栏最小 360，最大顶满整行（终端可以一直拖到 0）
+        const w = Math.round(Math.min(rect.width, Math.max(360, rect.right - x)))
+        widthRef.current = w
+        setWidth(w)
+      },
+      onEnd: () => {
+        if (widthRef.current != null) localStorage.setItem(BROWSER_WIDTH_KEY, String(widthRef.current))
+      }
+    })
+  }
+
+  return (
+    <div ref={rowRef} className="flex min-h-0 min-w-0 flex-1 flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <TerminalView termId={props.termId} active />
+      </div>
+      <div
+        className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
+        onPointerDown={startDrag}
+      />
+      <CloudBrowserPreview ref={panelRef} termId={props.termId} width={width} />
+    </div>
   )
 }
