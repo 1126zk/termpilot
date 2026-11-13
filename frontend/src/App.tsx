@@ -9,6 +9,7 @@ import { McpConfirmDialog } from './components/McpConfirmDialog'
 import { NoticeToast } from './components/NoticeToast'
 import { SftpInstallDialog } from './components/SftpInstallDialog'
 import { TerminalView } from './components/TerminalView'
+import { CloudBrowserPreview } from './components/CloudBrowserPreview'
 import { OpsPanel } from './components/OpsPanel'
 import { RemoteEditor } from './components/RemoteEditor'
 import { HostsPage } from './components/HostsPage'
@@ -166,6 +167,7 @@ export default function App() {
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const split = useAppStore((s) => s.split)
   const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
+  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const toolsOpen = useAppStore((s) => s.toolsOpen)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
@@ -173,7 +175,8 @@ export default function App() {
   // 文件标签跟着终端页走，切到主机页、工具页、设置页时收起
   const onTerminalPage = !!activeTab && !hostsOpen && !toolsOpen && !settingsOpen
   const editing = useAppStore((s) => s.editing)
-  const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab))
+  const browserOpen = !!activeTab && browserPreviewTermIds.includes(activeTab.id)
+  const panelOpen = !browserOpen && Boolean(editing || (rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab))
   const gridRef = useRef<HTMLDivElement>(null)
 
   // a 是主栏（左 / 上），b 是辅栏（右 / 下）；不分屏时只有 a。每一栏有自己的文件标签和正在看的文件
@@ -184,9 +187,10 @@ export default function App() {
     ] as const
   ).flatMap(([area, termId]) => {
     if (!onTerminalPage || !termId) return []
-    const files = editorTabs.filter((t) => t.termId === termId)
-    const inner = sessionSplit[termId] ?? null
-    const file = inner ? null : (files.find((t) => t.key === editorKeyByTerm[termId]) ?? null)
+    const browser = browserPreviewTermIds.includes(termId)
+    const files = browser ? [] : editorTabs.filter((t) => t.termId === termId)
+    const inner = browser ? null : (sessionSplit[termId] ?? null)
+    const file = browser || inner ? null : (files.find((t) => t.key === editorKeyByTerm[termId]) ?? null)
     return [{ area, termId, files, file, inner }]
   })
   const bars = panes.filter((pane) => pane.files.length > 0 || pane.inner).map((pane) => pane.area)
@@ -196,8 +200,9 @@ export default function App() {
   const termAreas: Record<string, PaneArea> = {}
   for (const pane of panes) {
     if (pane.inner || pane.file) continue
-    if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId)) opsAreas[pane.termId] = pane.area
-    else termAreas[pane.termId] = pane.area
+    if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId) && !browserPreviewTermIds.includes(pane.termId)) {
+      opsAreas[pane.termId] = pane.area
+    } else termAreas[pane.termId] = pane.area
   }
 
   return (
@@ -219,7 +224,10 @@ export default function App() {
               ) : null
             )}
             <OpsPanels areas={opsAreas} />
-            <TerminalViews areas={termAreas} parked={Object.keys(sessionSplit)} />
+            <TerminalViews
+              areas={termAreas}
+              parked={Object.keys(sessionSplit).filter((termId) => !browserPreviewTermIds.includes(termId))}
+            />
             {split && onTerminalPage && <SplitDivider dir={split.dir} gridRef={gridRef} />}
             {settingsOpen ? (
               <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
@@ -407,6 +415,7 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
 /** 终端视图。看过的标签保持挂载，切回来不重挂；areas 决定谁显示在哪一栏。 */
 function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string[] }) {
   const tabs = useAppStore((s) => s.tabs)
+  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
   const focusPane = useAppStore((s) => s.focusPane)
   const [visited, setVisited] = useState<string[]>([])
   const shownKey = Object.keys(props.areas).join()
@@ -421,6 +430,7 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
     <>
       {visible.map((tab) => {
         const area = props.areas[tab.id]
+        const browser = !!area && browserPreviewTermIds.includes(tab.id)
         return (
           <div
             key={tab.id}
@@ -428,7 +438,12 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
             style={area ? { gridArea: area } : undefined}
             onPointerDownCapture={() => focusPane(tab.id)}
           >
-            <TerminalView termId={tab.id} active={!!area} />
+            <div className={cn('flex min-h-0 min-w-0 flex-1', browser ? 'flex-row' : 'flex-col')}>
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <TerminalView termId={tab.id} active={!!area} />
+              </div>
+              {browser && <CloudBrowserPreview termId={tab.id} />}
+            </div>
           </div>
         )
       })}

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, Wrench, X } from 'lucide-react'
+import { AppWindow, Bot, ChevronLeft, ChevronRight, Columns2, Gauge, GitBranch, Globe, Info, Menu, Minus, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, RefreshCw, Server, Square, SquareTerminal, Terminal, Wrench, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -83,7 +83,7 @@ function MenuLabel(props: { text: string }) {
   )
 }
 
-/** 自绘窗口控制按钮：运维面板 / 最小化 / 最大化(还原) / 关闭。hover 是低调的灰底。面板按钮只在终端页出现。 */
+/** 自绘窗口控制按钮：云浏览器、运维面板和右侧栏按钮只在支持的终端页出现。 */
 function WindowControls(props: { terminalActive: boolean }) {
   const [maximized, setMaximized] = useState(false)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
@@ -93,6 +93,8 @@ function WindowControls(props: { terminalActive: boolean }) {
   const split = useAppStore((s) => s.split)
   const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
   const toggleOpsPanel = useAppStore((s) => s.toggleOpsPanel)
+  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
+  const toggleBrowserPreview = useAppStore((s) => s.toggleBrowserPreview)
 
   useEffect(() => {
     void window.api.win.isMaximized().then(setMaximized)
@@ -101,7 +103,10 @@ function WindowControls(props: { terminalActive: boolean }) {
 
   // 运维面板只给 Linux 服务器的 SSH 连接，本地终端和探测不出系统的都没有。分屏时只管主栏
   const activeTab = tabs.find((t) => t.id === (split ? split.primaryTab : activeTabId))
-  const opsOk = props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
+  const browserOpen = !!activeTab && browserPreviewTermIds.includes(activeTab.id)
+  const browserOk =
+    props.terminalActive && activeTab && (activeTab.kind === 'ssh' || (activeTab.kind === 'local' && activeTab.shell === 'wsl'))
+  const opsOk = !browserOpen && props.terminalActive && activeTab?.kind === 'ssh' && activeTab.os === 'linux'
   const opsOpen = !!activeTab && opsPanelTermIds.includes(activeTab.id)
 
   return (
@@ -109,6 +114,16 @@ function WindowControls(props: { terminalActive: boolean }) {
       <button type="button" className={topBtn} title="新窗口" onClick={() => void window.api.win.newWindow()}>
         <AppWindow className="size-4" strokeWidth={2} />
       </button>
+      {browserOk && activeTab && (
+        <button
+          type="button"
+          className={cn(topBtn, browserOpen && 'bg-accent text-foreground')}
+          title={browserOpen ? '关闭云浏览器' : '云浏览器'}
+          onClick={() => toggleBrowserPreview(activeTab.id)}
+        >
+          <Globe className="size-4" strokeWidth={2} />
+        </button>
+      )}
       {opsOk && activeTab && (
         <button
           type="button"
@@ -119,7 +134,7 @@ function WindowControls(props: { terminalActive: boolean }) {
           <Gauge className="size-4" strokeWidth={2} />
         </button>
       )}
-      {props.terminalActive && (
+      {props.terminalActive && !browserOpen && (
         <button
           type="button"
           className={topBtn}
