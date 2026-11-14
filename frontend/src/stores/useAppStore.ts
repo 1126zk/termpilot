@@ -1176,8 +1176,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const splitOn = !!get().sessionSplit[termId]
     set({
       opsPanelTermIds: [...open, termId],
-      // 云浏览器和它占同一块地方，展开运维面板先收起云浏览器
-      browserPreviewTermIds: get().browserPreviewTermIds.filter((id) => id !== termId),
       ...(splitOn ? {} : { editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) })
     })
   },
@@ -1187,10 +1185,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const opening = !open.includes(termId)
     set({
       browserPreviewTermIds: opening ? [...open, termId] : open.filter((id) => id !== termId),
-      // 同上，展开云浏览器先收起运维面板和右侧面板
-      ...(opening
-        ? { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== termId), rightPanelOpen: false }
-        : {})
+      ...(opening ? { rightPanelOpen: false } : {})
     })
   },
 

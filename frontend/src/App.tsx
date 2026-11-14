@@ -345,9 +345,12 @@ function SplitDivider(props: { dir: SplitDir; gridRef: RefObject<HTMLDivElement 
 function OpsPanels(props: { areas: Record<string, PaneArea> }) {
   const tabs = useAppStore((s) => s.tabs)
   const openIds = useAppStore((s) => s.opsPanelTermIds)
+  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
   const sessionSplit = useAppStore((s) => s.sessionSplit)
   const focusPane = useAppStore((s) => s.focusPane)
-  const openTabs = tabs.filter((tab) => openIds.includes(tab.id) && !sessionSplit[tab.id])
+  const openTabs = tabs.filter(
+    (tab) => openIds.includes(tab.id) && !sessionSplit[tab.id] && !browserPreviewTermIds.includes(tab.id)
+  )
   return (
     <>
       {openTabs.map((tab) => {
@@ -456,18 +459,21 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
 
 const BROWSER_WIDTH_KEY = 'termpilot.cloudBrowser.width'
 const TERMINAL_MIN = 320
+const OPS_MIN = 640
 
 function readBrowserWidth(): number | null {
   const value = Number(localStorage.getItem(BROWSER_WIDTH_KEY))
   return Number.isFinite(value) && value >= 360 ? Math.round(value) : null
 }
 
-function maxBrowserWidth(rowWidth: number): number {
-  return Math.max(360, Math.round(rowWidth - 4 - TERMINAL_MIN))
+function maxBrowserWidth(rowWidth: number, sideMin: number): number {
+  return Math.max(360, Math.round(rowWidth - 4 - sideMin))
 }
 
 /** 终端 + 云浏览器的分屏行：中间分隔条按住左右拖，浏览器栏宽度落到 localStorage。 */
 function BrowserSplitRow(props: { termId: string }) {
+  const opsOpen = useAppStore((s) => s.opsPanelTermIds.includes(props.termId))
+  const sideMin = opsOpen ? OPS_MIN : TERMINAL_MIN
   const rowRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLElement>(null)
   const [width, setWidth] = useState<number | null>(readBrowserWidth)
@@ -478,7 +484,7 @@ function BrowserSplitRow(props: { termId: string }) {
     const row = rowRef.current
     if (!row) return
     const clamp = () => {
-      const max = maxBrowserWidth(row.clientWidth)
+      const max = maxBrowserWidth(row.clientWidth, sideMin)
       setWidth((current) => {
         if (current == null || current <= max) return current
         widthRef.current = max
@@ -490,7 +496,7 @@ function BrowserSplitRow(props: { termId: string }) {
     const observer = new ResizeObserver(clamp)
     observer.observe(row)
     return () => observer.disconnect()
-  }, [])
+  }, [sideMin])
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const row = rowRef.current
@@ -510,7 +516,7 @@ function BrowserSplitRow(props: { termId: string }) {
         setWidth(current)
       },
       onMove: (x) => {
-        const w = Math.round(Math.max(360, Math.min(maxBrowserWidth(rect.width), rect.right - x)))
+        const w = Math.round(Math.max(360, Math.min(maxBrowserWidth(rect.width, sideMin), rect.right - x)))
         widthRef.current = w
         setWidth(w)
       },
@@ -522,8 +528,8 @@ function BrowserSplitRow(props: { termId: string }) {
 
   return (
     <div ref={rowRef} className="flex min-h-0 min-w-0 flex-1 flex-row">
-      <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: '1 0 320px', minWidth: TERMINAL_MIN }}>
-        <TerminalView termId={props.termId} active />
+      <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: `1 0 ${sideMin}px`, minWidth: sideMin }}>
+        {opsOpen ? <OpsPanel termId={props.termId} active /> : <TerminalView termId={props.termId} active />}
       </div>
       <div
         className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
