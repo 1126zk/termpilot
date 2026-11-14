@@ -58,44 +58,24 @@ export function decodeB64(data: string): Uint8Array {
   return bytes
 }
 
-function drawBitmap(canvas: HTMLCanvasElement, stage: HTMLElement, bitmap: ImageBitmap, meta: ScreencastMeta): FrameFit | null {
+function drawBitmap(canvas: HTMLCanvasElement, stage: HTMLElement, bitmap: ImageBitmap, _meta: ScreencastMeta): FrameFit | null {
   const paneW = stage.clientWidth
   const paneH = stage.clientHeight
-  const dpr = pixelRatio()
-  if (paneW <= 0 || paneH <= 0) return null
-  const destW = Math.max(1, Math.round(paneW * dpr))
-  const destH = Math.max(1, Math.round(paneH * dpr))
-  if (canvas.width !== destW || canvas.height !== destH) {
-    canvas.width = destW
-    canvas.height = destH
+  if (paneW <= 0 || paneH <= 0 || bitmap.width <= 0 || bitmap.height <= 0) return null
+  const view = cssSize(stage)
+  const fit = fitFrame(paneW, paneH, view.width, view.height)
+  if (!fit) return null
+  if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
   }
   canvas.style.width = `${paneW}px`
   canvas.style.height = `${paneH}px`
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) return null
-  const viewW = meta.deviceWidth || bitmap.width
-  const viewH = meta.deviceHeight || bitmap.height
-  const fit = fitFrame(paneW, paneH, viewW, viewH)
-  if (!fit) return null
-  let dx = Math.round(fit.x * dpr)
-  let dy = Math.round(fit.y * dpr)
-  let dw = Math.round(fit.w * dpr)
-  let dh = Math.round(fit.h * dpr)
-  const crisp = Math.abs(dw - bitmap.width) <= 2 && Math.abs(dh - bitmap.height) <= 2
-  if (crisp) {
-    dw = bitmap.width
-    dh = bitmap.height
-    dx = Math.max(0, Math.round((destW - dw) / 2))
-    dy = Math.max(0, Math.round((destH - dh) / 2))
-  }
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.imageSmoothingEnabled = !crisp
-  if (!crisp) ctx.imageSmoothingQuality = 'high'
-  if (dx > 0 || dy > 0 || dw < destW || dh < destH) {
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, destW, destH)
-  }
-  ctx.drawImage(bitmap, dx, dy, dw, dh)
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(bitmap, 0, 0)
   return fit
 }
 
@@ -135,9 +115,19 @@ function pixelRatio() {
   return Math.min(window.devicePixelRatio || 1, 2)
 }
 
-function captureSize(stage: HTMLElement | null) {
-  const width = Math.max(1, Math.round(stage?.clientWidth || 1280))
-  const height = Math.max(1, Math.round(stage?.clientHeight || 720))
+function captureScale() {
+  return pixelRatio() > 1 ? 2 : 1
+}
+
+function cssSize(stage: HTMLElement | null) {
+  return {
+    width: Math.max(1, Math.round(stage?.clientWidth || 1280)),
+    height: Math.max(1, Math.round(stage?.clientHeight || 720))
+  }
+}
+
+function frameSize(stage: HTMLElement | null) {
+  const { width, height } = cssSize(stage)
   const dpr = pixelRatio()
   let viewW = Math.max(1, Math.round(width * dpr))
   let viewH = Math.max(1, Math.round(height * dpr))
@@ -151,26 +141,22 @@ function captureSize(stage: HTMLElement | null) {
 }
 
 export function viewportParams(stage: HTMLElement | null): Record<string, unknown> {
-  const { width, height } = captureSize(stage)
+  const { width, height } = cssSize(stage)
   return {
     width,
     height,
-    deviceScaleFactor: 1,
+    deviceScaleFactor: captureScale(),
     mobile: false
   }
 }
 
 export function screencastParams(stage: HTMLElement | null): Record<string, unknown> {
-  const { width, height } = captureSize(stage)
+  const { width, height } = frameSize(stage)
   return {
     format: 'jpeg',
-    quality: 85,
+    quality: 80,
     maxWidth: width,
     maxHeight: height,
     everyNthFrame: 1
   }
-}
-
-export function stillParams(): Record<string, unknown> {
-  return { format: 'png', fromSurface: true, captureBeyondViewport: false }
 }

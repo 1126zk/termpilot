@@ -81,6 +81,9 @@ func TestBrowserInstallScriptLeavesDebugPortToImage(t *testing.T) {
 	if strings.Contains(browserInstallScript, "--remote-debugging-port=") || strings.Contains(browserInstallScript, "--remote-debugging-address=") {
 		t.Fatal("chrome debug flags steal 9222 from the image socat")
 	}
+	if !strings.Contains(browserInstallScript, "--force-device-scale-factor=2") {
+		t.Fatal("screencast stays layout-sized without a forced device scale")
+	}
 	if strings.Contains(browserStartScript, "docker rm") {
 		t.Fatal("start should not remove the container")
 	}

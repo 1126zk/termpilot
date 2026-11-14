@@ -98,6 +98,7 @@ exit 1
 // browserInstallScript 没装就拉镜像并创建容器；容器已在则改为启动。
 // 字体目录不存在时不挂，避免 Docker 在宿主机上建出空目录。
 // 调试端口交给镜像：它用 socat 把 9222 转到 Chrome 的 9223。
+// --force-device-scale-factor=2 让直播帧带上两倍像素。只在页面里改缩放时，这版无头 Chrome 的直播仍是布局大小。
 const browserInstallScript = `
 set -e
 if ! command -v docker >/dev/null 2>&1; then
@@ -129,7 +130,8 @@ else
       --no-sandbox \
       --disable-gpu \
       --use-gl=angle \
-      --use-angle=swiftshader
+      --use-angle=swiftshader \
+      --force-device-scale-factor=2
   }
   if [ -d /usr/share/fonts ]; then
     run_browser -v /usr/share/fonts:/usr/share/fonts:ro

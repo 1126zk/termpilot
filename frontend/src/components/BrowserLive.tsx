@@ -11,7 +11,6 @@ import {
   paintBlob,
   pointerToViewport,
   screencastParams,
-  stillParams,
   viewportParams,
   type FrameFit,
   type ScreencastMeta
@@ -46,13 +45,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const inputRaf = useRef(0)
   const wheelRef = useRef<{ x: number; y: number; dx: number; dy: number; modifiers: number } | null>(null)
   const fitGen = useRef(0)
-  const stillGen = useRef(0)
-  const stillTimer = useRef(0)
-  const holdStill = useRef(false)
-  const sharpening = useRef(false)
-  const sharpFrame = useRef<{ blob: Blob; meta: ScreencastMeta } | null>(null)
   const scheduleFlushRef = useRef<() => void>(() => {})
-  const scheduleStillRef = useRef<() => void>(() => {})
   const [pages, setPages] = useState<BrowserPageInfo[]>([])
   const [pageId, setPageId] = useState('')
   const [draft, setDraft] = useState('')
@@ -94,7 +87,6 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     void window.api.sessions.browserInput(props.sessionId, previewId, batch)
   }
   const scheduleFlush = () => {
-    scheduleStillRef.current()
     if (inputRaf.current) return
     inputRaf.current = window.requestAnimationFrame(flushInput)
   }
@@ -117,60 +109,10 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     return command('Emulation.setDeviceMetricsOverride', viewportParams(stage)).then(() => {
       if (gen !== fitGen.current) return
       return command('Page.startScreencast', screencastParams(stage))
-    }).then(() => {
-      if (gen === fitGen.current) scheduleStillRef.current()
     })
   }
   const fitPreviewRef = useRef(fitPreview)
   fitPreviewRef.current = fitPreview
-
-  const takeStill = async (gen: number) => {
-    const previewId = previewRef.current
-    const canvas = canvasRef.current
-    const stage = stageRef.current
-    if (gen !== stillGen.current || !previewId || !canvas || !stage) return
-    if (!lastFrame.current) {
-      stillTimer.current = window.setTimeout(() => {
-        void takeStill(gen)
-      }, 400)
-      return
-    }
-    sharpening.current = true
-    try {
-      const result = await commandRef.current('Page.captureScreenshot', stillParams())
-      if (gen !== stillGen.current || previewRef.current !== previewId) return
-      const data = result && typeof result === 'object' && 'data' in result ? String((result as { data?: unknown }).data ?? '') : ''
-      if (!data) return
-      const bin = atob(data)
-      const bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      const buffer = new ArrayBuffer(bytes.byteLength)
-      new Uint8Array(buffer).set(bytes)
-      const blob = new Blob([buffer], { type: 'image/png' })
-      const fit = await paintBlob(canvas, stage, blob, {})
-      if (gen !== stillGen.current || previewRef.current !== previewId) return
-      const frame = { blob, meta: {} }
-      sharpFrame.current = frame
-      lastFrame.current = frame
-      holdStill.current = true
-      if (fit) fitRef.current = fit
-    } catch {
-      // 清晰图没拍到就继续用直播帧
-    } finally {
-      if (gen === stillGen.current) sharpening.current = false
-    }
-  }
-
-  const scheduleStill = () => {
-    holdStill.current = false
-    sharpening.current = false
-    const gen = ++stillGen.current
-    window.clearTimeout(stillTimer.current)
-    stillTimer.current = window.setTimeout(() => {
-      void takeStill(gen)
-    }, 450)
-  }
-  scheduleStillRef.current = scheduleStill
 
   const repaint = () => {
     const frame = lastFrame.current
@@ -234,20 +176,11 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     }
 
     const paintFrame = async (previewId: number, blob: Blob, meta: ScreencastMeta) => {
-      if (holdStill.current || sharpening.current) return
       const canvas = canvasRef.current
       const stage = stageRef.current
       if (!canvas || !stage || blob.size === 0) return
       const fit = await paintBlob(canvas, stage, blob, meta)
       if (dead || previewRef.current !== previewId) return
-      if (holdStill.current || sharpening.current) {
-        const sharp = sharpFrame.current
-        if (sharp) {
-          const again = await paintBlob(canvas, stage, sharp.blob, sharp.meta)
-          if (again) fitRef.current = again
-        }
-        return
-      }
       lastFrame.current = { blob, meta }
       if (fit) fitRef.current = fit
       setStatus((prev) => (prev === '' ? prev : ''))
@@ -364,7 +297,6 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       const frame = event.params?.frame as { url?: string; parentId?: string } | undefined
       if (frame?.url && !frame.parentId) {
         showUrl(frame.url)
-        scheduleStillRef.current()
       }
     })
 
@@ -436,7 +368,6 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       dead = true
       resolveWait()
       pullAbort?.abort()
-      window.clearTimeout(stillTimer.current)
       window.clearInterval(poll)
       off()
       const old = current

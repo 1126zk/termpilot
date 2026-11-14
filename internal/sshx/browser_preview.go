@@ -81,6 +81,7 @@ type browserPreview struct {
 	targetID string
 	closer   io.Closer
 	session  *cdpSession
+	input    *cdpSession
 	onEvent  browserEvent
 	mu       sync.Mutex
 
@@ -93,13 +94,18 @@ type browserPreview struct {
 func (b *browserPreview) Close() error {
 	b.mu.Lock()
 	c := b.closer
+	input := b.input
 	b.closer = nil
 	b.session = nil
+	b.input = nil
 	stop := b.inputStop
 	b.inputStop = nil
 	b.mu.Unlock()
 	if stop != nil {
 		close(stop)
+	}
+	if input != nil {
+		_ = input.Close()
 	}
 	if c != nil {
 		return c.Close()
@@ -123,15 +129,20 @@ func (b *browserPreview) emit(method string, params json.RawMessage) {
 	}
 }
 
-func (b *browserPreview) swapSession(next *cdpSession, targetID string) {
+func (b *browserPreview) swapSession(next *cdpSession, input *cdpSession, targetID string) {
 	b.mu.Lock()
 	old := b.session
+	oldInput := b.input
 	b.session = next
+	b.input = input
 	b.closer = next
 	b.targetID = targetID
 	b.mu.Unlock()
 	if old != nil && old != next {
 		_ = old.Close()
+	}
+	if oldInput != nil && oldInput != input {
+		_ = oldInput.Close()
 	}
 }
 
@@ -175,14 +186,15 @@ func (p *Pool) OpenBrowserPreview(sessionID string, onEvent browserEvent) (Brows
 	id := p.tunnelSeq
 	p.mu.Unlock()
 
-	session, err := dialBrowserPage(client, target)
+	session, input, err := dialBrowserPagePair(client, target)
 	if err != nil {
 		return BrowserPreview{}, errors.New("连不上浏览器")
 	}
-	view := &browserPreview{id: id, refs: 1, targetID: target.ID, onEvent: onEvent, session: session, closer: session}
+	view := &browserPreview{id: id, refs: 1, targetID: target.ID, onEvent: onEvent, session: session, input: input, closer: session}
 	session.owner = view
 	go session.readLoop()
 	if err := session.arm(); err != nil {
+		_ = input.Close()
 		_ = session.Close()
 		return BrowserPreview{}, err
 	}
@@ -190,12 +202,14 @@ func (p *Pool) OpenBrowserPreview(sessionID string, onEvent browserEvent) (Brows
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.liveSlot(sessionID) != slot {
+		_ = input.Close()
 		_ = session.Close()
 		return BrowserPreview{}, errBrowserNotConnected
 	}
 	if slot.browser != nil && slot.browser.alive() {
 		slot.browser.refs++
 		slot.browser.onEvent = onEvent
+		_ = input.Close()
 		_ = session.Close()
 		return BrowserPreview{ID: slot.browser.id, PageID: slot.browser.targetID, Pages: publicPages(pages)}, nil
 	}
@@ -238,19 +252,20 @@ func (p *Pool) SwitchBrowserPreview(sessionID string, id int, pageID string) err
 	if err != nil {
 		return err
 	}
-	session, err := dialBrowserPage(client, target)
+	session, input, err := dialBrowserPagePair(client, target)
 	if err != nil {
 		return errors.New("连不上浏览器")
 	}
 	session.owner = view
 	go session.readLoop()
 	if err := session.arm(); err != nil {
+		_ = input.Close()
 		_ = session.Close()
 		return err
 	}
 	_, _ = session.call("Page.bringToFront", json.RawMessage(`{}`))
 	session.accepted.Store(true)
-	view.swapSession(session, target.ID)
+	view.swapSession(session, input, target.ID)
 	return nil
 }
 
@@ -381,7 +396,10 @@ func (b *browserPreview) inputLoop() {
 			delete(b.inputPending, b.inputNext)
 			b.inputNext++
 		}
-		session := b.session
+		input := b.input
+		if input == nil {
+			input = b.session
+		}
 		pending := len(b.inputPending) > 0
 		b.mu.Unlock()
 		if stop == nil {
@@ -397,8 +415,8 @@ func (b *browserPreview) inputLoop() {
 				}
 				gapOn = false
 			}
-			if session != nil && !session.closed.Load() {
-				_ = session.write(session.allocID(), event.Method, event.Params)
+			if input != nil && !input.closed.Load() {
+				_ = input.write(input.allocID(), event.Method, event.Params)
 			}
 			continue
 		}
@@ -659,6 +677,30 @@ func dialBrowserPage(client *ssh.Client, page cdpPage) (*cdpSession, error) {
 	return session, nil
 }
 
+// dialBrowserPagePair 画面和键鼠各一条连接。键鼠若跟在直播帧后面写，点击会一直排着。
+func dialBrowserPagePair(client *ssh.Client, page cdpPage) (main *cdpSession, input *cdpSession, err error) {
+	main, err = dialBrowserPage(client, page)
+	if err != nil {
+		return nil, nil, err
+	}
+	input, err = dialBrowserPage(client, page)
+	if err != nil {
+		_ = main.Close()
+		return nil, nil, err
+	}
+	go input.drain()
+	return main, input, nil
+}
+
+func (s *cdpSession) drain() {
+	defer s.closed.Store(true)
+	for {
+		if _, _, err := s.ws.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
 func (s *cdpSession) Close() error {
 	s.closed.Store(true)
 	if s.done != nil {
@@ -769,8 +811,8 @@ func (s *cdpSession) storeScreencast(params json.RawMessage) {
 	if json.Unmarshal(params, &frame) != nil {
 		return
 	}
-	// 马上确认。拖到前端取走再确认时，Chrome 会停住绘制，预览就卡在空白帧上。
-	s.ackFrameID(frame.SessionID)
+	// 马上确认，但不要堵在读循环里。确认写不出去时，读循环还要继续把帧读走。
+	go s.ackFrameID(frame.SessionID)
 	if frame.Data == "" {
 		return
 	}
