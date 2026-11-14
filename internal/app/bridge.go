@@ -67,6 +67,8 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"session:browser-disconnect":   a.hSessionBrowserDisconnect,
 		"session:browser-switch":       a.hSessionBrowserSwitch,
 		"session:browser-pages":        a.hSessionBrowserPages,
+		"session:browser-new-page":     a.hSessionBrowserNewPage,
+		"session:browser-close-page":   a.hSessionBrowserClosePage,
 		"session:browser-command":      a.hSessionBrowserCommand,
 		"session:browser-input":        a.hSessionBrowserInput,
 		"session:browser-frame-socket": a.hSessionBrowserFrameSocket,

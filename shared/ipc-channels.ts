@@ -136,6 +136,8 @@ export const IPC = {
   sessionBrowserDisconnect: 'session:browser-disconnect',
   sessionBrowserSwitch: 'session:browser-switch',
   sessionBrowserPages: 'session:browser-pages',
+  sessionBrowserNewPage: 'session:browser-new-page',
+  sessionBrowserClosePage: 'session:browser-close-page',
   sessionBrowserCommand: 'session:browser-command',
   sessionBrowserInput: 'session:browser-input',
   sessionBrowserFrameSocket: 'session:browser-frame-socket',

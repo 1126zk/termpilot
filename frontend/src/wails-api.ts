@@ -136,6 +136,8 @@ const api = {
     browserSwitch: (id: string, previewId: number, pageId: string) =>
       invoke<void>(IPC.sessionBrowserSwitch, [id, previewId, pageId]),
     browserPages: (id: string) => invoke<BrowserPageInfo[]>(IPC.sessionBrowserPages, [id]),
+    browserNewPage: (id: string) => invoke<BrowserPageInfo>(IPC.sessionBrowserNewPage, [id]),
+    browserClosePage: (id: string, pageId: string) => invoke<void>(IPC.sessionBrowserClosePage, [id, pageId]),
     browserCommand: (id: string, previewId: number, method: string, params: Record<string, unknown>) =>
       invoke<unknown>(IPC.sessionBrowserCommand, [id, previewId, method, params]),
     browserInput: (id: string, previewId: number, events: { seq: number; method: string; params: Record<string, unknown> }[]) =>

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,9 @@ import (
 )
 
 const browserCDPAddr = "127.0.0.1:9222"
+
+// 新标签和第一次没有页面时打开的地址。无头 Chrome 没有自己的新标签页。
+const browserNewTabURL = "https://www.google.com"
 
 // BrowserPage 一个浏览器标签。
 type BrowserPage struct {
@@ -457,7 +461,7 @@ func listBrowserPages(client *ssh.Client) ([]cdpPage, error) {
 	})
 }
 
-// browserPages 读取已有标签。一个都没有时让 Chrome 打开 about:blank，再把这个标签交回去。
+// browserPages 读取已有标签。一个都没有时打开默认页，再把这个标签交回去。
 func browserPages(dial func() (net.Conn, error)) ([]cdpPage, error) {
 	body, err := fetchCDP(dial, http.MethodGet, "/json/list")
 	if err != nil {
@@ -470,15 +474,64 @@ func browserPages(dial func() (net.Conn, error)) ([]cdpPage, error) {
 	if err.Error() != "浏览器还没有页面" {
 		return nil, err
 	}
-	created, err := fetchCDP(dial, http.MethodPut, "/json/new?about:blank")
+	page, err := openDefaultPage(dial)
 	if err != nil {
 		return nil, errors.New("浏览器还没有页面")
 	}
+	return []cdpPage{page}, nil
+}
+
+// NewBrowserPage 再开一个空白标签。调用方再切过去。
+func (p *Pool) NewBrowserPage(sessionID string) (BrowserPage, error) {
+	p.mu.Lock()
+	slot := p.liveSlot(sessionID)
+	if slot == nil {
+		p.mu.Unlock()
+		return BrowserPage{}, errBrowserNotConnected
+	}
+	client := slot.conn.Client
+	p.mu.Unlock()
+	page, err := openDefaultPage(func() (net.Conn, error) {
+		return client.Dial("tcp", browserCDPAddr)
+	})
+	if err != nil {
+		return BrowserPage{}, errors.New("打不开新标签")
+	}
+	return page.BrowserPage, nil
+}
+
+// CloseBrowserPage 关掉一个标签。调用方先切走正在看的那个。
+func (p *Pool) CloseBrowserPage(sessionID, pageID string) error {
+	if pageID == "" {
+		return errors.New("这个标签已经关了")
+	}
+	p.mu.Lock()
+	slot := p.liveSlot(sessionID)
+	if slot == nil {
+		p.mu.Unlock()
+		return errBrowserNotConnected
+	}
+	client := slot.conn.Client
+	p.mu.Unlock()
+	_, err := fetchCDP(func() (net.Conn, error) {
+		return client.Dial("tcp", browserCDPAddr)
+	}, http.MethodGet, "/json/close/"+url.PathEscape(pageID))
+	if err != nil {
+		return errors.New("这个标签已经关了")
+	}
+	return nil
+}
+
+func openDefaultPage(dial func() (net.Conn, error)) (cdpPage, error) {
+	created, err := fetchCDP(dial, http.MethodPut, "/json/new?"+browserNewTabURL)
+	if err != nil {
+		return cdpPage{}, err
+	}
 	var page cdpPage
 	if json.Unmarshal(created, &page) != nil || page.Type != "page" || page.ID == "" || page.WS == "" {
-		return nil, errors.New("浏览器还没有页面")
+		return cdpPage{}, errors.New("打不开新标签")
 	}
-	return []cdpPage{page}, nil
+	return page, nil
 }
 
 func pickBrowserPage(pages []cdpPage, want string) (cdpPage, error) {

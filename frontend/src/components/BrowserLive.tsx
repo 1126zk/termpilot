@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { Globe, Plus, Power, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 import type { BrowserPageInfo } from '../../../shared/types'
 import {
   buttonName,
@@ -32,6 +34,8 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fitRef = useRef<FrameFit | null>(null)
   const previewRef = useRef(0)
+  const addressRef = useRef<HTMLInputElement>(null)
+  const stripRef = useRef<HTMLDivElement>(null)
   const wantedRef = useRef('')
   const editingRef = useRef(false)
   const composeRef = useRef(false)
@@ -53,6 +57,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const [pageId, setPageId] = useState('')
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState('正在连接')
+  const [adding, setAdding] = useState(false)
 
   const command = (method: string, params?: Record<string, unknown>) => {
     const previewId = previewRef.current
@@ -225,7 +230,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
     const showUrl = (url: string) => {
       if (editingRef.current) return
-      setDraft(url)
+      setDraft(displayUrl(url))
     }
 
     const paintFrame = async (previewId: number, blob: Blob, meta: ScreencastMeta) => {
@@ -408,9 +413,13 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         .browserPages(sessionId)
         .then((found) => {
           if (dead || current !== previewId) return
-          setPages(found)
+          let ordered = found
+          setPages((prev) => {
+            ordered = mergePages(prev, found)
+            return ordered
+          })
           if (wantedRef.current && !found.some((item) => item.id === wantedRef.current)) {
-            const next = found[found.length - 1]
+            const next = ordered[ordered.length - 1]
             if (!next) return
             wantedRef.current = next.id
             setPageId(next.id)
@@ -460,6 +469,60 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     })
   }
 
+  const openPage = (page: BrowserPageInfo) => {
+    if (!page.id || page.id === wantedRef.current) return
+    wantedRef.current = page.id
+    setPageId(page.id)
+    if (!editingRef.current) setDraft(displayUrl(page.url))
+    const previewId = previewRef.current
+    if (!previewId) return
+    void window.api.sessions
+      .browserSwitch(props.sessionId, previewId, page.id)
+      .then(() => fitPreviewRef.current())
+      .catch((err: unknown) => {
+        setStatus(err instanceof Error ? err.message : '连不上浏览器')
+      })
+  }
+
+  const addTab = async () => {
+    if (adding) return
+    setAdding(true)
+    try {
+      const page = await window.api.sessions.browserNewPage(props.sessionId)
+      setPages((prev) => (prev.some((item) => item.id === page.id) ? prev : [...prev, page]))
+      openPage(page)
+      const strip = stripRef.current
+      if (strip) strip.scrollLeft = strip.scrollWidth
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打不开新标签')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const closeTab = async (page: BrowserPageInfo) => {
+    if (!page.id) return
+    const previewId = previewRef.current
+    const rest = pages.filter((item) => item.id !== page.id)
+    const active = page.id === wantedRef.current
+    try {
+      if (active && previewId) {
+        const next = rest[rest.length - 1] ?? (await window.api.sessions.browserNewPage(props.sessionId))
+        setPages(rest.length > 0 ? rest : [next])
+        wantedRef.current = next.id
+        setPageId(next.id)
+        if (!editingRef.current) setDraft(displayUrl(next.url))
+        await window.api.sessions.browserSwitch(props.sessionId, previewId, next.id)
+        void fitPreviewRef.current()
+      } else {
+        setPages(rest)
+      }
+      await window.api.sessions.browserClosePage(props.sessionId, page.id)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '这个标签已经关了')
+    }
+  }
+
   const go = () => {
     const url = normalizeUrl(draft)
     if (!url) return
@@ -473,13 +536,58 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       .catch((err: unknown) => setStatus(err instanceof Error ? err.message : '打不开这个地址'))
   }
 
+  const tabs = pages.length > 0 ? pages : [{ id: '', title: '', url: draft }]
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <div className="flex shrink-0 items-end gap-1 bg-background px-1.5 pt-1">
+        <div ref={stripRef} className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {tabs.map((page) => {
+            const active = tabs.length === 1 || page.id === pageId
+            return (
+              <div
+                key={page.id || 'blank'}
+                className={cn(
+                  'group/tab relative flex h-8 w-44 max-w-52 shrink-0 items-center gap-1.5 rounded-t-lg px-2.5 text-[13px]',
+                  active
+                    ? 'z-10 bg-muted text-foreground before:pointer-events-none before:absolute before:-left-2 before:bottom-0 before:size-2 before:bg-[radial-gradient(circle_at_0_0,transparent_8px,var(--muted)_9px)] after:pointer-events-none after:absolute after:-right-2 after:bottom-0 after:size-2 after:bg-[radial-gradient(circle_at_100%_0,transparent_8px,var(--muted)_9px)]'
+                    : 'text-muted-foreground hover:bg-muted/60'
+                )}
+                onClick={() => openPage(page)}
+              >
+                <TabIcon url={page.url} />
+                <span className="min-w-0 flex-1 truncate text-left">{tabLabel(page)}</span>
+                {page.id && (
+                  <button
+                    type="button"
+                    className={cn(
+                      'flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-foreground/10',
+                      active ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover/tab:opacity-70'
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void closeTab(page)
+                    }}
+                  >
+                    <X className="size-3" strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+          <Button size="icon-sm" variant="ghost" className="mb-0.5 shrink-0" disabled={props.stopping || adding} onClick={() => void addTab()}>
+            <Plus />
+          </Button>
+        </div>
+        <Button size="icon-sm" variant="ghost" className="mb-0.5 shrink-0" disabled={props.stopping} onClick={props.onStop}>
+          <Power />
+        </Button>
+      </div>
+      <div className="flex h-9 shrink-0 items-center border-b border-border bg-muted px-2">
         <Input
+          ref={addressRef}
           value={draft}
           placeholder="地址"
-          className="h-7"
+          className="h-7 rounded-full border-transparent bg-background/80 px-3 shadow-none focus-visible:border-ring focus-visible:bg-background"
           onFocus={() => {
             editingRef.current = true
           }}
@@ -493,38 +601,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
             go()
           }}
         />
-        <Button size="sm" variant="outline" disabled={props.stopping} onClick={props.onStop}>
-          {props.stopping ? '关闭中…' : '关闭浏览器'}
-        </Button>
       </div>
-      {pages.length > 1 && (
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-1">
-          {pages.map((page) => (
-            <Button
-              key={page.id}
-              size="xs"
-              variant={page.id === pageId ? 'default' : 'outline'}
-              className="max-w-40 truncate"
-              onClick={() => {
-                if (page.id === wantedRef.current) return
-                wantedRef.current = page.id
-                setPageId(page.id)
-                if (!editingRef.current) setDraft(page.url)
-                const previewId = previewRef.current
-                if (!previewId) return
-                void window.api.sessions
-                  .browserSwitch(props.sessionId, previewId, page.id)
-                  .then(() => fitPreviewRef.current())
-                  .catch((err: unknown) => {
-                    setStatus(err instanceof Error ? err.message : '连不上浏览器')
-                  })
-              }}
-            >
-              {page.title || page.url}
-            </Button>
-          ))}
-        </div>
-      )}
       <div
         ref={stageRef}
         tabIndex={0}
@@ -598,4 +675,52 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       </div>
     </div>
   )
+}
+
+function siteIcon(raw: string): string | null {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return `${url.origin}/favicon.ico`
+  } catch {
+    return null
+  }
+}
+
+function TabIcon(props: { url: string }) {
+  const src = siteIcon(props.url)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    setFailed(false)
+  }, [src])
+  if (!src || failed) return <Globe className="size-3.5 shrink-0 opacity-60" strokeWidth={2} />
+  return <img src={src} alt="" draggable={false} className="size-3.5 shrink-0 rounded-sm" onError={() => setFailed(true)} />
+}
+
+function displayUrl(url: string) {
+  if (!url || url === 'about:blank') return ''
+  return url
+}
+
+function mergePages(prev: BrowserPageInfo[], found: BrowserPageInfo[]) {
+  const byId = new Map(found.map((page) => [page.id, page]))
+  const kept = prev.filter((page) => byId.has(page.id)).map((page) => byId.get(page.id)!)
+  const seen = new Set(kept.map((page) => page.id))
+  for (const page of found) {
+    if (!seen.has(page.id)) kept.push(page)
+  }
+  return kept
+}
+
+function tabLabel(page: { title: string; url: string }) {
+  const title = page.title.trim()
+  if (!page.url || page.url === 'about:blank') return '新标签页'
+  if (title && title !== 'about:blank') return title
+  try {
+    const host = new URL(page.url).hostname
+    if (host) return host
+  } catch {
+    // 地址还不是完整链接时，直接显示原文
+  }
+  return page.url || '新标签页'
 }

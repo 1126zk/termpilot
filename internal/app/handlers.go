@@ -429,6 +429,26 @@ func (a *App) hSessionBrowserPages(args []interface{}) (interface{}, error) {
 	return a.pool.ListBrowserPages(id)
 }
 
+func (a *App) hSessionBrowserNewPage(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.pool.NewBrowserPage(id)
+}
+
+func (a *App) hSessionBrowserClosePage(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	pageID, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.pool.CloseBrowserPage(id, pageID)
+}
+
 func (a *App) hSessionBrowserCommand(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {
