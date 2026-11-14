@@ -39,7 +39,10 @@ import type {
   TermModeRun,
   TermStatusEvent,
   WebInfo,
-  BrowserInfo
+  BrowserInfo,
+  BrowserPreview,
+  BrowserPageInfo,
+  BrowserCdpEvent
 } from '../../shared/types'
 
 /**
@@ -128,6 +131,20 @@ const api = {
         if (p.id === id) cb(p.line)
       }),
     browserService: (id: string, op: 'start' | 'stop') => invoke<void>(IPC.sessionBrowserService, [id, op]),
+    browserConnect: (id: string) => invoke<BrowserPreview>(IPC.sessionBrowserConnect, [id]),
+    browserDisconnect: (id: string, previewId: number) => invoke<void>(IPC.sessionBrowserDisconnect, [id, previewId]),
+    browserSwitch: (id: string, previewId: number, pageId: string) =>
+      invoke<void>(IPC.sessionBrowserSwitch, [id, previewId, pageId]),
+    browserPages: (id: string) => invoke<BrowserPageInfo[]>(IPC.sessionBrowserPages, [id]),
+    browserCommand: (id: string, previewId: number, method: string, params: Record<string, unknown>) =>
+      invoke<unknown>(IPC.sessionBrowserCommand, [id, previewId, method, params]),
+    browserInput: (id: string, previewId: number, events: { seq: number; method: string; params: Record<string, unknown> }[]) =>
+      invoke<void>(IPC.sessionBrowserInput, [id, previewId, events]),
+    browserFrameSocket: (previewId: number) => invoke<{ url: string }>(IPC.sessionBrowserFrameSocket, [previewId]),
+    onBrowserFrame: (id: string, cb: (event: BrowserCdpEvent) => void) =>
+      on<BrowserCdpEvent>(IPC.sessionBrowserFrame, (event) => {
+        if (event.sessionId === id) cb(event)
+      }),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

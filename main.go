@@ -42,7 +42,8 @@ func main() {
 		CSSDragProperty: "--wails-draggable",
 		CSSDragValue:    "drag",
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:     assets,
+			Middleware: a.BrowserFrameMiddleware,
 		},
 		// 拖文件进文件树上传要拿本地绝对路径。不开 DisableWebViewDrop：Windows 上它会让
 		// WebView2 拒收一切外部拖入，前端连 drop 事件都收不到。默认的"拖进来就打开文件"

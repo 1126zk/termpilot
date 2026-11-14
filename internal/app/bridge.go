@@ -9,11 +9,14 @@ import (
 // Bridge 是前端唯一可见的 Wails 绑定（window.go.app.Bridge）。
 // channel 字符串与 shared/ipc-channels.ts 一一对应。
 type Bridge struct {
-	app *App
+	app    *App
+	routes map[string]handler
 }
 
 func newBridge(a *App) *Bridge {
-	return &Bridge{app: a}
+	b := &Bridge{app: a}
+	b.routes = b.buildRoutes()
+	return b
 }
 
 type handler func(args []interface{}) (interface{}, error)
@@ -21,57 +24,64 @@ type handler func(args []interface{}) (interface{}, error)
 // Invoke 统一调用入口。args 是原 preload 方法的参数数组。
 // 原 ipcRenderer.send 的通道也走这里，调用方忽略返回值。
 func (b *Bridge) Invoke(channel string, args []interface{}) (interface{}, error) {
-	h, ok := b.routes()[channel]
+	h, ok := b.routes[channel]
 	if !ok {
 		return nil, fmt.Errorf("未知通道: %s", channel)
 	}
 	return h(args)
 }
 
-func (b *Bridge) routes() map[string]handler {
+func (b *Bridge) buildRoutes() map[string]handler {
 	a := b.app
 	return map[string]handler{
 		// 会话 CRUD
-		"session:list":                func(_ []interface{}) (interface{}, error) { return a.store.List() },
-		"session:create":              a.hSessionCreate,
-		"session:update":              a.hSessionUpdate,
-		"session:delete":              a.hSessionDelete,
-		"session:duplicate":           a.hSessionDuplicate,
-		"session:detect-os":           a.hSessionDetectOs,
-		"session:metrics":             a.hSessionMetrics,
-		"session:server-info":         a.hSessionServerInfo,
-		"session:kill-proc":           a.hSessionKillProc,
-		"session:docker":              a.hSessionDocker,
-		"session:docker-action":       a.hSessionDockerAction,
-		"session:docker-install":      a.hSessionDockerInstall,
-		"session:docker-service":      a.hSessionDockerService,
-		"session:docker-mirrors-set":  a.hSessionDockerMirrorsSet,
-		"session:script-run":          a.hSessionScriptRun,
-		"session:cron-list":           a.hSessionCronList,
-		"session:cron-add":            a.hSessionCronAdd,
-		"session:cron-del":            a.hSessionCronDel,
-		"session:web":                 a.hSessionWeb,
-		"session:web-install":         a.hSessionWebInstall,
-		"session:website":             a.hSessionWebSite,
-		"session:web-ssl":             a.hSessionWebSSL,
-		"session:web-service":         a.hSessionWebService,
-		"session:browser":             a.hSessionBrowser,
-		"session:browser-install":     a.hSessionBrowserInstall,
-		"session:browser-pause":       a.hSessionBrowserPause,
-		"session:browser-clear-cache": a.hSessionBrowserClearCache,
-		"session:browser-service":     a.hSessionBrowserService,
-		"session:set-os":              a.hSessionSetOs,
-		"session:reveal-secret":       a.hSessionRevealSecret,
-		"forward:list":                a.hForwardList,
-		"forward:start":               a.hForwardStart,
-		"forward:stop":                a.hForwardStop,
-		"host:note-list":              func(_ []interface{}) (interface{}, error) { return a.store.ListHostNotes() },
-		"host:note-set":               a.hHostNoteSet,
-		"shells:list":                 a.hShellsList,
-		"sshkey:generate":             a.hSshKeyGenerate,
-		"sshkey:import-private":       a.hSshKeyImportPrivate,
-		"sshkey:install-public":       a.hSshKeyInstallPublic,
-		"sshkey:read-public-file":     a.hSshKeyReadPublicFile,
+		"session:list":                 func(_ []interface{}) (interface{}, error) { return a.store.List() },
+		"session:create":               a.hSessionCreate,
+		"session:update":               a.hSessionUpdate,
+		"session:delete":               a.hSessionDelete,
+		"session:duplicate":            a.hSessionDuplicate,
+		"session:detect-os":            a.hSessionDetectOs,
+		"session:metrics":              a.hSessionMetrics,
+		"session:server-info":          a.hSessionServerInfo,
+		"session:kill-proc":            a.hSessionKillProc,
+		"session:docker":               a.hSessionDocker,
+		"session:docker-action":        a.hSessionDockerAction,
+		"session:docker-install":       a.hSessionDockerInstall,
+		"session:docker-service":       a.hSessionDockerService,
+		"session:docker-mirrors-set":   a.hSessionDockerMirrorsSet,
+		"session:script-run":           a.hSessionScriptRun,
+		"session:cron-list":            a.hSessionCronList,
+		"session:cron-add":             a.hSessionCronAdd,
+		"session:cron-del":             a.hSessionCronDel,
+		"session:web":                  a.hSessionWeb,
+		"session:web-install":          a.hSessionWebInstall,
+		"session:website":              a.hSessionWebSite,
+		"session:web-ssl":              a.hSessionWebSSL,
+		"session:web-service":          a.hSessionWebService,
+		"session:browser":              a.hSessionBrowser,
+		"session:browser-install":      a.hSessionBrowserInstall,
+		"session:browser-pause":        a.hSessionBrowserPause,
+		"session:browser-clear-cache":  a.hSessionBrowserClearCache,
+		"session:browser-service":      a.hSessionBrowserService,
+		"session:browser-connect":      a.hSessionBrowserConnect,
+		"session:browser-disconnect":   a.hSessionBrowserDisconnect,
+		"session:browser-switch":       a.hSessionBrowserSwitch,
+		"session:browser-pages":        a.hSessionBrowserPages,
+		"session:browser-command":      a.hSessionBrowserCommand,
+		"session:browser-input":        a.hSessionBrowserInput,
+		"session:browser-frame-socket": a.hSessionBrowserFrameSocket,
+		"session:set-os":               a.hSessionSetOs,
+		"session:reveal-secret":        a.hSessionRevealSecret,
+		"forward:list":                 a.hForwardList,
+		"forward:start":                a.hForwardStart,
+		"forward:stop":                 a.hForwardStop,
+		"host:note-list":               func(_ []interface{}) (interface{}, error) { return a.store.ListHostNotes() },
+		"host:note-set":                a.hHostNoteSet,
+		"shells:list":                  a.hShellsList,
+		"sshkey:generate":              a.hSshKeyGenerate,
+		"sshkey:import-private":        a.hSshKeyImportPrivate,
+		"sshkey:install-public":        a.hSshKeyInstallPublic,
+		"sshkey:read-public-file":      a.hSshKeyReadPublicFile,
 
 		// 终端
 		"term:create":    a.hTermCreate,

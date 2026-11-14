@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -374,6 +375,109 @@ func (a *App) hSessionBrowserService(args []interface{}) (interface{}, error) {
 		return nil, err
 	}
 	return nil, a.exec.BrowserService(id, op)
+}
+
+func (a *App) hSessionBrowserConnect(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.pool.OpenBrowserPreview(id, func(previewID int, method string, params json.RawMessage) {
+		a.emit("session:browser-frame", sshx.BrowserCdpEvent{
+			SessionID: id,
+			PreviewID: previewID,
+			Method:    method,
+			Params:    params,
+		})
+	})
+}
+
+func (a *App) hSessionBrowserDisconnect(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	previewID, err := arg[int](args, 1)
+	if err != nil {
+		return nil, err
+	}
+	a.pool.CloseBrowserPreview(id, previewID)
+	return nil, nil
+}
+
+func (a *App) hSessionBrowserSwitch(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	previewID, err := arg[int](args, 1)
+	if err != nil {
+		return nil, err
+	}
+	pageID, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.pool.SwitchBrowserPreview(id, previewID, pageID)
+}
+
+func (a *App) hSessionBrowserPages(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.pool.ListBrowserPages(id)
+}
+
+func (a *App) hSessionBrowserCommand(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	previewID, err := arg[int](args, 1)
+	if err != nil {
+		return nil, err
+	}
+	method, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	var params json.RawMessage
+	if len(args) > 3 && args[3] != nil {
+		params, err = json.Marshal(args[3])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return a.pool.BrowserCommand(id, previewID, method, params)
+}
+
+func (a *App) hSessionBrowserInput(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	previewID, err := arg[int](args, 1)
+	if err != nil {
+		return nil, err
+	}
+	events, err := arg[[]sshx.BrowserInput](args, 2)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.pool.PushBrowserInput(id, previewID, events)
+}
+
+func (a *App) hSessionBrowserFrameSocket(args []interface{}) (interface{}, error) {
+	previewID, err := arg[int](args, 0)
+	if err != nil {
+		return nil, err
+	}
+	url, err := a.frameSocketURL(previewID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"url": url}, nil
 }
 
 func (a *App) hSessionWebSSL(args []interface{}) (interface{}, error) {

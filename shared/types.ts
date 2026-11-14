@@ -202,6 +202,26 @@ export interface WebConfFile {
   content: string
 }
 
+/** 云浏览器预览。画面走事件，不从本机端口拉。 */
+export interface BrowserPageInfo {
+  id: string
+  title: string
+  url: string
+}
+
+export interface BrowserPreview {
+  id: number
+  pageId: string
+  pages: BrowserPageInfo[]
+}
+
+export interface BrowserCdpEvent {
+  sessionId: string
+  previewId: number
+  method: string
+  params?: Record<string, unknown>
+}
+
 /** 云浏览器容器的一次探测。docker 不可用时 state 为空，不能当成「云浏览器没装」。 */
 export interface BrowserInfo {
   dockerAvailable: boolean

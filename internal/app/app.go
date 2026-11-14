@@ -46,6 +46,7 @@ type App struct {
 	exec     *sshx.ExecService
 	local    *localfs.Service
 	mcp      *mcpx.Service
+	frames   *frameStream
 
 	Bridge *Bridge
 
@@ -165,6 +166,9 @@ func (a *App) Startup(ctx context.Context) {
 	}
 
 	go a.watchMaximize()
+	if err := a.listenFrames(); err != nil {
+		log.Printf("[TermPilot] 画面通道: %v", err)
+	}
 
 	// 助手只占用一个端口。后开的窗口听不上时，接着用先打开的那个窗口。
 	go a.startMcp()
@@ -192,6 +196,7 @@ func (a *App) startMcp() {
 }
 
 func (a *App) Shutdown(ctx context.Context) {
+	a.closeFrames()
 	a.terminal.DisposeAll()
 	a.sftp.DisposeAll()
 	if err := a.mcp.Stop(); err != nil {

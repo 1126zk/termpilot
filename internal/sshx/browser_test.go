@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -76,9 +77,15 @@ Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docke
 	}
 }
 
-func TestBrowserInstallScriptBindsLoopback(t *testing.T) {
-	if !strings.Contains(browserInstallScript, "--remote-debugging-address=127.0.0.1") {
-		t.Fatal("CDP must bind loopback")
+func TestBrowserInstallScriptLeavesDebugPortToImage(t *testing.T) {
+	if strings.Contains(browserInstallScript, "--remote-debugging-port=") || strings.Contains(browserInstallScript, "--remote-debugging-address=") {
+		t.Fatal("chrome debug flags steal 9222 from the image socat")
+	}
+	if strings.Contains(browserStartScript, "docker rm") {
+		t.Fatal("start should not remove the container")
+	}
+	if !strings.Contains(browserInstallScript, fmt.Sprint(browserCDPPort)) {
+		t.Fatal("install script and preview use different CDP ports")
 	}
 	if !strings.Contains(browserInstallScript, browserContainer) || !strings.Contains(browserInstallScript, browserImage) {
 		t.Fatal("container or image name missing")

@@ -455,10 +455,15 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
 }
 
 const BROWSER_WIDTH_KEY = 'termpilot.cloudBrowser.width'
+const TERMINAL_MIN = 320
 
 function readBrowserWidth(): number | null {
   const value = Number(localStorage.getItem(BROWSER_WIDTH_KEY))
   return Number.isFinite(value) && value >= 360 ? Math.round(value) : null
+}
+
+function maxBrowserWidth(rowWidth: number): number {
+  return Math.max(360, Math.round(rowWidth - 4 - TERMINAL_MIN))
 }
 
 /** 终端 + 云浏览器的分屏行：中间分隔条按住左右拖，浏览器栏宽度落到 localStorage。 */
@@ -468,6 +473,24 @@ function BrowserSplitRow(props: { termId: string }) {
   const [width, setWidth] = useState<number | null>(readBrowserWidth)
   const widthRef = useRef(width)
   widthRef.current = width
+
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    const clamp = () => {
+      const max = maxBrowserWidth(row.clientWidth)
+      setWidth((current) => {
+        if (current == null || current <= max) return current
+        widthRef.current = max
+        localStorage.setItem(BROWSER_WIDTH_KEY, String(max))
+        return max
+      })
+    }
+    clamp()
+    const observer = new ResizeObserver(clamp)
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [])
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const row = rowRef.current
@@ -487,8 +510,7 @@ function BrowserSplitRow(props: { termId: string }) {
         setWidth(current)
       },
       onMove: (x) => {
-        // 浏览器栏最小 360，最大顶满整行（终端可以一直拖到 0），减去分隔条避免溢出
-        const w = Math.round(Math.max(360, Math.min(rect.width - 4, rect.right - x)))
+        const w = Math.round(Math.max(360, Math.min(maxBrowserWidth(rect.width), rect.right - x)))
         widthRef.current = w
         setWidth(w)
       },
@@ -500,7 +522,7 @@ function BrowserSplitRow(props: { termId: string }) {
 
   return (
     <div ref={rowRef} className="flex min-h-0 min-w-0 flex-1 flex-row">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: '1 0 320px', minWidth: TERMINAL_MIN }}>
         <TerminalView termId={props.termId} active />
       </div>
       <div

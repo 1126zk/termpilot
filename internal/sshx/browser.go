@@ -7,11 +7,14 @@ import (
 )
 
 // 云浏览器是服务器上一个固定名字的容器，和 nginx/caddy 一样走 docker，
-// 不进网站管理。调试端口只绑 127.0.0.1，给人的预览和给 Agent 的 CDP 都从这里进。
+// 不进网站管理。镜像自己把宿主机 9222 转到 Chrome，预览和 Agent 都从这里进。
 
 const (
 	browserContainer = "termpilot-browser"
 	browserImage     = "chromedp/headless-shell"
+	// browserCDPPort 宿主机上的调试端口。镜像用 socat 听这里，再转到容器里 Chrome 的 9223。
+	// 不要把这个端口写进 docker run，否则 Chrome 会抢走 [::1]:9222，socat 连不上 9223。
+	browserCDPPort = 9222
 )
 
 // browserStatusScript 先分清 Docker 在不在、引擎开没开，再看容器。
@@ -64,9 +67,13 @@ do
 done
 `
 
-// browserWaitPort 容器起来之后等 CDP 端口。ss / netstat 没有时再试 bash 的 /dev/tcp。
+// browserWaitPort 容器起来之后等调试页真的有响应。只看到 9222 在听不够，那可能是 socat 在空转。
 const browserWaitPort = `
-port_up() {
+cdp_up() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -sf --noproxy '*' --max-time 1 http://127.0.0.1:9222/json/version >/dev/null 2>&1
+    return $?
+  fi
   if command -v ss >/dev/null 2>&1; then
     ss -ltn | grep -Eq ':(9222)([^0-9]|$)' && return 0
     return 1
@@ -79,17 +86,18 @@ port_up() {
   return 1
 }
 i=0
-while [ "$i" -lt 10 ]; do
-  if port_up; then exit 0; fi
+while [ "$i" -lt 15 ]; do
+  if cdp_up; then exit 0; fi
   i=$((i + 1))
   sleep 1
 done
-echo '浏览器已启动，但 9222 还没有监听' >&2
+echo '浏览器已启动，但调试端口没有响应' >&2
 exit 1
 `
 
-// browserInstallScript 没装就拉镜像并创建容器；容器已在（含已退出）则改为启动。
+// browserInstallScript 没装就拉镜像并创建容器；容器已在则改为启动。
 // 字体目录不存在时不挂，避免 Docker 在宿主机上建出空目录。
+// 调试端口交给镜像：它用 socat 把 9222 转到 Chrome 的 9223。
 const browserInstallScript = `
 set -e
 if ! command -v docker >/dev/null 2>&1; then
@@ -117,8 +125,6 @@ else
       -v "$HOME/.termpilot/browser:/data" \
       "$@" \
       chromedp/headless-shell \
-      --remote-debugging-address=127.0.0.1 \
-      --remote-debugging-port=9222 \
       --user-data-dir=/data \
       --no-sandbox \
       --disable-gpu \

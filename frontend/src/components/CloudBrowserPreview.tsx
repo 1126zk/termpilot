@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useRef, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { BrowserInfo } from '../../../shared/types'
+import { BrowserLive } from './BrowserLive'
 import { useAppStore } from '../stores/useAppStore'
 import { browserInstallKey, useInstallStore } from '../stores/useInstallStore'
 
@@ -84,9 +85,12 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
     <section
       ref={ref}
       className="flex min-h-0 min-w-0 flex-col border-l border-border"
-      style={props.width == null ? { flex: '1 1 0%' } : { width: props.width }}
+      style={props.width == null ? { flex: '1 1 0%' } : { width: props.width, flex: '0 0 auto' }}
     >
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-sm text-muted-foreground">
+      {info?.state === 'running' && sessionId ? (
+        <BrowserLive sessionId={sessionId} stopping={busy === 'stop'} onStop={() => run('stop')} />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-sm text-muted-foreground">
         <Globe className="size-8" />
         {message && <p>{message}</p>}
         {info?.dockerAvailable && info.dockerRunning && !info.state && (
@@ -120,11 +124,6 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
             </Button>
           </div>
         )}
-        {info?.state === 'running' && (
-          <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => run('stop')}>
-            {busy === 'stop' ? '关闭中…' : '关闭浏览器'}
-          </Button>
-        )}
         {info?.dockerRunning && !!info.state && info.state !== 'running' && (
           <Button size="sm" disabled={busy !== null} onClick={() => run('start')}>
             {busy === 'start' ? '启动中…' : '启动云浏览器'}
@@ -142,7 +141,8 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
             ))}
           </div>
         )}
-      </div>
+        </div>
+      )}
     </section>
   )
 })
