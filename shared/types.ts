@@ -209,6 +209,18 @@ export interface BrowserPageInfo {
   url: string
 }
 
+export interface BrowserBookmark {
+  url: string
+  title: string
+}
+
+export interface BrowserVisit {
+  url: string
+  title: string
+  /** 访问时间，Unix 毫秒 */
+  visitedAt: number
+}
+
 export interface BrowserPreview {
   id: number
   pageId: string

@@ -500,6 +500,83 @@ func (a *App) hSessionBrowserFrameSocket(args []interface{}) (interface{}, error
 	return map[string]string{"url": url}, nil
 }
 
+func (a *App) hSessionBrowserBookmarks(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	a.bookmarkMu.Lock()
+	defer a.bookmarkMu.Unlock()
+	return a.exec.LoadBookmarks(id)
+}
+
+func (a *App) hSessionBrowserBookmarkAdd(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	pageURL, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	title, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	a.bookmarkMu.Lock()
+	defer a.bookmarkMu.Unlock()
+	items, err := a.exec.LoadBookmarks(id)
+	if err != nil {
+		return nil, err
+	}
+	next, err := sshx.AddBookmark(items, pageURL, title)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.exec.SaveBookmarks(id, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+func (a *App) hSessionBrowserBookmarkRemove(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	pageURL, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	a.bookmarkMu.Lock()
+	defer a.bookmarkMu.Unlock()
+	items, err := a.exec.LoadBookmarks(id)
+	if err != nil {
+		return nil, err
+	}
+	next := sshx.RemoveBookmark(items, pageURL)
+	if err := a.exec.SaveBookmarks(id, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+func (a *App) hSessionBrowserHistory(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.BrowserHistory(id)
+}
+
+func (a *App) hSessionBrowserHistoryClear(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.exec.ClearBrowserHistory(id)
+}
+
 func (a *App) hSessionWebSSL(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

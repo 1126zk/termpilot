@@ -57,6 +57,8 @@ type App struct {
 	// 右键「在 TermPilot 中打开」传来的目录。前端挂上之后取走。
 	launchMu  sync.Mutex
 	launchDir string
+
+	bookmarkMu sync.Mutex
 }
 
 // userDataDir 固定 %APPDATA%\TermPilot；TERMPILOT_USERDATA 供冒烟测试覆盖。

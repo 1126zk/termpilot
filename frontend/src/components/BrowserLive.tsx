@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Globe, Minus, Plus, Power, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bookmark, Globe, History, Minus, Plus, Power, RotateCw, Star, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import type { BrowserPageInfo } from '../../../shared/types'
+import type { BrowserBookmark, BrowserPageInfo, BrowserVisit } from '../../../shared/types'
 import {
   buttonName,
   inputModifiers,
@@ -49,6 +51,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const onWheelRef = useRef<(event: WheelEvent) => void>(() => {})
   const applyZoomRef = useRef<(factor: number) => void>(() => {})
   const lastFrame = useRef<{ blob: Blob; meta: ScreencastMeta } | null>(null)
+  const acceptFrames = useRef(true)
   const inputBatch = useRef<{ seq: number; method: string; params: Record<string, unknown> }[]>([])
   const inputRaf = useRef(0)
   const wheelRef = useRef<{ x: number; y: number; dx: number; dy: number; modifiers: number } | null>(null)
@@ -70,9 +73,26 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const [zoom, setZoom] = useState(1)
   const [zoomHud, setZoomHud] = useState(false)
   const [middleMark, setMiddleMark] = useState<{ x: number; y: number } | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const switchingRef = useRef(false)
   const zoomHudTimer = useRef(0)
   const [status, setStatus] = useState('正在连接')
   const [adding, setAdding] = useState(false)
+  const [location, setLocation] = useState('')
+  const setLocationRef = useRef(setLocation)
+  setLocationRef.current = setLocation
+  const [bookmarks, setBookmarks] = useState<BrowserBookmark[]>([])
+  const [marking, setMarking] = useState(false)
+  const [visits, setVisits] = useState<BrowserVisit[] | null>(null)
+  const [historyQuery, setHistoryQuery] = useState('')
+  const [clearing, setClearing] = useState(false)
+  const [barOn, setBarOn] = useState(() => {
+    try {
+      return localStorage.getItem(`termpilot-browser-bar:${props.sessionId}`) !== '0'
+    } catch {
+      return true
+    }
+  })
   const [nav, setNav] = useState<{ index: number; entries: { id: number }[] }>({ index: 0, entries: [] })
   const navGen = useRef(0)
 
@@ -144,6 +164,18 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     scheduleFlush()
   }
 
+  const clearPicture = () => {
+    acceptFrames.current = false
+    switchingRef.current = true
+    setSwitching(true)
+  }
+
+  const resumePicture = () => {
+    acceptFrames.current = true
+    switchingRef.current = false
+    setSwitching(false)
+  }
+
   const fitPreview = () => {
     const stage = stageRef.current
     if (!previewRef.current || !stage) return Promise.resolve()
@@ -205,6 +237,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
 
     const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
     const showUrl = (url: string) => {
+      setLocationRef.current(url)
       if (editingRef.current) return
       setDraft(displayUrl(url))
     }
@@ -225,11 +258,15 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     const paintFrame = async (previewId: number, blob: Blob, meta: ScreencastMeta) => {
       const canvas = canvasRef.current
       const stage = stageRef.current
-      if (!canvas || !stage || blob.size === 0) return
+      if (!acceptFrames.current || !canvas || !stage || blob.size === 0) return
       const fit = await paintBlob(canvas, stage, blob, meta)
-      if (dead || previewRef.current !== previewId) return
+      if (!acceptFrames.current || dead || previewRef.current !== previewId) return
       lastFrame.current = { blob, meta }
       if (fit) fitRef.current = fit
+      if (switchingRef.current) {
+        switchingRef.current = false
+        setSwitching(false)
+      }
       setStatus((prev) => (prev === '' ? prev : ''))
     }
 
@@ -248,6 +285,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
           while (pending && !dead && previewRef.current === previewId) {
             const buf = pending
             pending = null
+            if (!acceptFrames.current) continue
             const view = new DataView(buf)
             await paintFrame(previewId, new Blob([buf.slice(12)], { type: 'image/jpeg' }), {
               deviceWidth: view.getUint32(0) || undefined,
@@ -265,6 +303,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         const stop = () => socket.close()
         ctrl.signal.addEventListener('abort', stop, { once: true })
         socket.onmessage = (event) => {
+          if (!acceptFrames.current) return
           if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 12) return
           got = true
           markFrame()
@@ -299,6 +338,10 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         const seq = Number(res.headers.get('X-Frame-Seq') || after)
         const blob = await res.blob()
         markFrame()
+        if (!acceptFrames.current) {
+          if (seq > after) after = seq
+          continue
+        }
         try {
           await paintFrame(previewId, blob, {
             deviceWidth: Number(res.headers.get('X-Device-Width')) || undefined,
@@ -641,16 +684,20 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     if (!page.id || page.id === wantedRef.current) return
     wantedRef.current = page.id
     setPageId(page.id)
+    setLocation(page.url)
     if (!editingRef.current) setDraft(displayUrl(page.url))
     const previewId = previewRef.current
     if (!previewId) return
+    clearPicture()
     void window.api.sessions
       .browserSwitch(props.sessionId, previewId, page.id)
       .then(() => {
+        resumePicture()
         void fitPreviewRef.current()
         readHistoryRef.current()
       })
       .catch((err: unknown) => {
+        resumePicture()
         setStatus(err instanceof Error ? err.message : '连不上浏览器')
       })
   }
@@ -684,8 +731,11 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         commitPages(applyTabOrder(props.sessionId, rest.length > 0 ? rest : [next]))
         wantedRef.current = next.id
         setPageId(next.id)
+        setLocation(next.url)
         if (!editingRef.current) setDraft(displayUrl(next.url))
+        clearPicture()
         await window.api.sessions.browserSwitch(props.sessionId, previewId, next.id)
+        resumePicture()
         void fitPreviewRef.current()
         readHistoryRef.current()
       } else {
@@ -693,6 +743,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       }
       await window.api.sessions.browserClosePage(props.sessionId, page.id)
     } catch (err) {
+      resumePicture()
       setStatus(err instanceof Error ? err.message : '这个标签已经关了')
     }
   }
@@ -711,17 +762,100 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     })
   }
 
-  const go = () => {
-    const url = normalizeUrl(draft)
-    if (!url) return
-    setDraft(url)
+  const openUrl = (raw: string) => {
+    const url = normalizeUrl(raw)
+    if (!url || props.stopping) return
     editingRef.current = false
+    setLocation(url)
+    setDraft(url)
     void command('Page.navigate', { url })
       .then((result) => {
         const errorText = (result as { errorText?: string } | undefined)?.errorText
         if (errorText) setStatus(errorText)
       })
       .catch((err: unknown) => setStatus(err instanceof Error ? err.message : '打不开这个地址'))
+  }
+
+  const go = () => openUrl(draft)
+
+  useEffect(() => {
+    let cancel = false
+    void window.api.sessions
+      .browserBookmarks(props.sessionId)
+      .then((items) => {
+        if (!cancel) setBookmarks(items ?? [])
+      })
+      .catch((err: unknown) => {
+        if (!cancel) setStatus(err instanceof Error ? err.message : '收藏读不出来')
+      })
+    return () => {
+      cancel = true
+    }
+  }, [props.sessionId])
+
+  const toggleBar = () => {
+    setBarOn((on) => {
+      const next = !on
+      try {
+        localStorage.setItem(`termpilot-browser-bar:${props.sessionId}`, next ? '1' : '0')
+      } catch {
+        // 记不住就只在这一次生效
+      }
+      return next
+    })
+  }
+
+  const loadVisits = () => {
+    void window.api.sessions
+      .browserHistory(props.sessionId)
+      .then((items) => setVisits(items ?? []))
+      .catch((err: unknown) => {
+        setVisits([])
+        setStatus(err instanceof Error ? err.message : '读不了历史记录')
+      })
+  }
+
+  const clearVisits = () => {
+    if (clearing || props.stopping) return
+    setClearing(true)
+    void window.api.sessions
+      .browserHistoryClear(props.sessionId)
+      .then(() => {
+        setVisits([])
+        setHistoryQuery('')
+      })
+      .catch((err: unknown) => setStatus(err instanceof Error ? err.message : '删不了历史记录'))
+      .finally(() => setClearing(false))
+  }
+
+  const historyNeedle = historyQuery.trim().toLowerCase()
+  const shownVisits = (visits ?? []).filter((visit) => {
+    if (!historyNeedle) return true
+    return decodeTitle(visit.title).toLowerCase().includes(historyNeedle) || visit.url.toLowerCase().includes(historyNeedle)
+  })
+
+  const starred = bookmarks.some((item) => item.url === location)
+  const activePage = pages.find((page) => page.id === pageId)
+  const toggleStar = () => {
+    if (marking || props.stopping || !canBookmark(location)) return
+    setMarking(true)
+    const req = starred
+      ? window.api.sessions.browserBookmarkRemove(props.sessionId, location)
+      : window.api.sessions.browserBookmarkAdd(props.sessionId, location, tabLabel({ title: activePage?.title ?? '', url: location }))
+    void req
+      .then((items) => setBookmarks(items ?? []))
+      .catch((err: unknown) => setStatus(err instanceof Error ? err.message : '收藏没有写上'))
+      .finally(() => setMarking(false))
+  }
+
+  const removeBookmark = (url: string) => {
+    if (marking || props.stopping) return
+    setMarking(true)
+    void window.api.sessions
+      .browserBookmarkRemove(props.sessionId, url)
+      .then((items) => setBookmarks(items ?? []))
+      .catch((err: unknown) => setStatus(err instanceof Error ? err.message : '收藏没有写上'))
+      .finally(() => setMarking(false))
   }
 
   const tabs = pages.length > 0 ? pages : [{ id: '', title: '', url: draft }]
@@ -740,6 +874,15 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
                     ? 'z-10 bg-muted text-foreground before:pointer-events-none before:absolute before:-left-2 before:bottom-0 before:size-2 before:bg-[radial-gradient(circle_at_0_0,transparent_8px,var(--muted)_9px)] after:pointer-events-none after:absolute after:-right-2 after:bottom-0 after:size-2 after:bg-[radial-gradient(circle_at_100%_0,transparent_8px,var(--muted)_9px)]'
                     : 'text-muted-foreground hover:bg-muted/60'
                 )}
+                onMouseDown={(event) => {
+                  if (event.button === 1) event.preventDefault()
+                }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1 || !page.id) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  void closeTab(page)
+                }}
                 onClick={() => openPage(page)}
               >
                 <TabIcon url={page.url} />
@@ -766,6 +909,55 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
             <Plus />
           </Button>
         </div>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className={cn('mb-0.5 shrink-0', barOn ? 'text-foreground' : 'text-muted-foreground')}
+          disabled={props.stopping}
+          onClick={toggleBar}
+        >
+          <Bookmark className={cn(barOn && 'fill-current')} />
+        </Button>
+        <DropdownMenu onOpenChange={(open) => {
+          if (open) loadVisits()
+          else setHistoryQuery('')
+        }}>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" className="mb-0.5 shrink-0" disabled={props.stopping}>
+              <History />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80 overflow-hidden p-0">
+            <div
+              className="flex items-center gap-1 border-b border-border p-1.5"
+              onPointerDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <Input
+                value={historyQuery}
+                placeholder="搜索"
+                className="h-7 text-sm"
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+              <Button size="icon-sm" variant="ghost" disabled={props.stopping || clearing} onClick={clearVisits}>
+                <Trash2 />
+              </Button>
+            </div>
+            <div className="max-h-64 overflow-y-auto p-1">
+              {visits == null ? null : shownVisits.length === 0 ? (
+                <DropdownMenuItem disabled>没有记录</DropdownMenuItem>
+              ) : (
+                shownVisits.map((visit) => (
+                  <DropdownMenuItem key={`${visit.visitedAt}:${visit.url}`} className="gap-3" onSelect={() => openUrl(visit.url)}>
+                    <span className="min-w-0 flex-1 truncate">{decodeTitle(visit.title) || visit.url}</span>
+                    <span className="shrink-0 text-xs tabular-nums">{visitWhen(visit.visitedAt)}</span>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button size="icon-sm" variant="ghost" className="mb-0.5 shrink-0" disabled={props.stopping} onClick={props.onStop}>
           <Power />
         </Button>
@@ -780,12 +972,12 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         <Button size="icon-sm" variant="ghost" className="text-foreground hover:bg-background/80" disabled={props.stopping || !previewRef.current} onClick={reloadPage}>
           <RotateCw />
         </Button>
-        <div className="min-w-0 flex-1">
+        <div className="flex h-7 min-w-0 flex-1 items-center overflow-hidden rounded-full border border-transparent bg-background pr-1.5 focus-within:border-foreground">
           <Input
             ref={addressRef}
             value={draft}
             placeholder="地址"
-            className="h-7 rounded-full border-transparent bg-background/80 px-3 shadow-none focus-visible:border-ring focus-visible:bg-background"
+            className="h-7 min-w-0 flex-1 border-transparent! bg-transparent! px-3 py-0 text-sm leading-7 text-foreground shadow-none focus-visible:border-transparent! focus-visible:bg-transparent! focus-visible:ring-0"
             onFocus={() => {
               editingRef.current = true
             }}
@@ -799,8 +991,38 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
               go()
             }}
           />
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="shrink-0 text-foreground"
+            disabled={props.stopping || marking || !canBookmark(location)}
+            onClick={toggleStar}
+          >
+            <Star className={cn(starred && 'fill-current')} />
+          </Button>
         </div>
       </div>
+      {barOn && (
+        <div className="flex h-8 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border bg-muted px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {bookmarks.map((item) => (
+            <ContextMenu key={item.url}>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-6 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] text-foreground hover:bg-background/80"
+                  onClick={() => openUrl(item.url)}
+                >
+                  <TabIcon url={item.url} />
+                  <span className="truncate">{decodeTitle(item.title) || item.url}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onClick={() => removeBookmark(item.url)}>删除</ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          ))}
+        </div>
+      )}
       <div
         ref={stageRef}
         tabIndex={0}
@@ -966,7 +1188,8 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
             </Button>
           </div>
         )}
-        {status && <p className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-sm text-muted-foreground">{status}</p>}
+        {switching && <div className="pointer-events-none absolute inset-0 z-10 bg-background/55" />}
+        {status && <p className="pointer-events-none absolute inset-x-0 bottom-2 z-10 text-center text-sm text-muted-foreground">{status}</p>}
       </div>
     </div>
   )
@@ -1000,6 +1223,25 @@ function TabIcon(props: { url: string }) {
   }, [src])
   if (!src || failed) return <Globe className="size-3.5 shrink-0 opacity-60" strokeWidth={2} />
   return <img src={src} alt="" draggable={false} className="size-3.5 shrink-0 rounded-sm" onError={() => setFailed(true)} />
+}
+
+function canBookmark(url: string) {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function visitWhen(ms: number) {
+  if (!ms) return ''
+  const date = new Date(ms)
+  if (Number.isNaN(date.getTime())) return ''
+  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) return time
+  return `${date.getMonth() + 1}/${date.getDate()} ${time}`
 }
 
 function displayUrl(url: string) {
@@ -1044,8 +1286,15 @@ function applyTabOrder(sessionId: string, found: BrowserPageInfo[]) {
   return kept
 }
 
+function decodeTitle(text: string) {
+  if (!text.includes('&')) return text
+  const node = document.createElement('textarea')
+  node.innerHTML = text
+  return node.value
+}
+
 function tabLabel(page: { title: string; url: string }) {
-  const title = page.title.trim()
+  const title = decodeTitle(page.title.trim())
   if (!page.url || page.url === 'about:blank') return '新标签页'
   if (title && title !== 'about:blank') return title
   try {

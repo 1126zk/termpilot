@@ -42,6 +42,8 @@ import type {
   BrowserInfo,
   BrowserPreview,
   BrowserPageInfo,
+  BrowserBookmark,
+  BrowserVisit,
   BrowserCdpEvent
 } from '../../shared/types'
 
@@ -143,6 +145,13 @@ const api = {
     browserInput: (id: string, previewId: number, events: { seq: number; method: string; params: Record<string, unknown> }[]) =>
       invoke<void>(IPC.sessionBrowserInput, [id, previewId, events]),
     browserFrameSocket: (previewId: number) => invoke<{ url: string }>(IPC.sessionBrowserFrameSocket, [previewId]),
+    browserBookmarks: (id: string) => invoke<BrowserBookmark[]>(IPC.sessionBrowserBookmarks, [id]),
+    browserBookmarkAdd: (id: string, url: string, title: string) =>
+      invoke<BrowserBookmark[]>(IPC.sessionBrowserBookmarkAdd, [id, url, title]),
+    browserBookmarkRemove: (id: string, url: string) =>
+      invoke<BrowserBookmark[]>(IPC.sessionBrowserBookmarkRemove, [id, url]),
+    browserHistory: (id: string) => invoke<BrowserVisit[]>(IPC.sessionBrowserHistory, [id]),
+    browserHistoryClear: (id: string) => invoke<void>(IPC.sessionBrowserHistoryClear, [id]),
     onBrowserFrame: (id: string, cb: (event: BrowserCdpEvent) => void) =>
       on<BrowserCdpEvent>(IPC.sessionBrowserFrame, (event) => {
         if (event.sessionId === id) cb(event)
