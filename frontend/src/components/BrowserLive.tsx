@@ -949,7 +949,8 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
                 <DropdownMenuItem disabled>没有记录</DropdownMenuItem>
               ) : (
                 shownVisits.map((visit) => (
-                  <DropdownMenuItem key={`${visit.visitedAt}:${visit.url}`} className="gap-3" onSelect={() => openUrl(visit.url)}>
+                  <DropdownMenuItem key={`${visit.visitedAt}:${visit.url}`} className="gap-2" onSelect={() => openUrl(visit.url)}>
+                    <TabIcon url={visit.url} />
                     <span className="min-w-0 flex-1 truncate">{decodeTitle(visit.title) || visit.url}</span>
                     <span className="shrink-0 text-xs tabular-nums">{visitWhen(visit.visitedAt)}</span>
                   </DropdownMenuItem>

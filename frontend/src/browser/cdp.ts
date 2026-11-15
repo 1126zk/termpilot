@@ -69,6 +69,8 @@ function drawBitmap(canvas: HTMLCanvasElement, stage: HTMLElement, bitmap: Image
     canvas.width = bitmap.width
     canvas.height = bitmap.height
   }
+  canvas.style.left = '0px'
+  canvas.style.top = '0px'
   canvas.style.width = `${paneW}px`
   canvas.style.height = `${paneH}px`
   const ctx = canvas.getContext('2d', { alpha: false })
@@ -109,14 +111,8 @@ export async function paintBlob(
   }
 }
 
-const maxEdge = 2560
-
 function pixelRatio() {
   return Math.min(window.devicePixelRatio || 1, 2)
-}
-
-function captureScale() {
-  return pixelRatio() > 1 ? 2 : 1
 }
 
 function cssSize(stage: HTMLElement | null) {
@@ -129,15 +125,10 @@ function cssSize(stage: HTMLElement | null) {
 function frameSize(stage: HTMLElement | null) {
   const { width, height } = cssSize(stage)
   const dpr = pixelRatio()
-  let viewW = Math.max(1, Math.round(width * dpr))
-  let viewH = Math.max(1, Math.round(height * dpr))
-  const long = Math.max(viewW, viewH)
-  if (long > maxEdge) {
-    const scale = maxEdge / long
-    viewW = Math.max(1, Math.round(viewW * scale))
-    viewH = Math.max(1, Math.round(viewH * scale))
+  return {
+    width: Math.max(1, Math.round(width * dpr)),
+    height: Math.max(1, Math.round(height * dpr))
   }
-  return { width: viewW, height: viewH }
 }
 
 export function viewportParams(stage: HTMLElement | null): Record<string, unknown> {
@@ -145,7 +136,7 @@ export function viewportParams(stage: HTMLElement | null): Record<string, unknow
   return {
     width,
     height,
-    deviceScaleFactor: captureScale(),
+    deviceScaleFactor: pixelRatio(),
     mobile: false
   }
 }
