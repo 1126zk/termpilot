@@ -459,7 +459,7 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
 
 const BROWSER_WIDTH_KEY = 'termpilot.cloudBrowser.width'
 const TERMINAL_MIN = 320
-const OPS_MIN = 640
+const OPS_MIN = 448
 
 function readBrowserWidth(): number | null {
   const value = Number(localStorage.getItem(BROWSER_WIDTH_KEY))
@@ -528,7 +528,7 @@ function BrowserSplitRow(props: { termId: string }) {
 
   return (
     <div ref={rowRef} className="flex min-h-0 min-w-0 flex-1 flex-row">
-      <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: `1 0 ${sideMin}px`, minWidth: sideMin }}>
+      <div className="flex min-h-0 flex-col overflow-hidden" style={{ flex: `1 0 ${sideMin}px`, minWidth: sideMin }}>
         {opsOpen ? <OpsPanel termId={props.termId} active /> : <TerminalView termId={props.termId} active />}
       </div>
       <div

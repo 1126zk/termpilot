@@ -60,7 +60,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   // 静态身份（主机名/系统/内核/IP）走 store 缓存：同一会话 10 分钟内只采一次
   const loadServerInfo = useAppStore((s) => s.loadServerInfo)
   const serverInfo = useAppStore((s) => (sessionId ? s.serverInfoBySession[sessionId]?.info : undefined))
-  // 终端是主角，吃剩余空间；左栏信息区固定宽度，默认就是最窄宽度，用分隔条加宽
+  // 终端是主角，吃剩余空间。左栏默认 520，最窄 440，再窄内容改排版，不再被旁边挤掉。
   const [leftWidth, setLeftWidth] = useState(520)
   const containerRef = useRef<HTMLDivElement>(null)
   const setNotice = useAppStore((s) => s.setNotice)
@@ -106,14 +106,15 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
       })
   }
 
-  // 按住分隔条左右拖：左栏在 520 ~（容器宽 - 240，给终端保底）之间调整
+  // 按住分隔条左右拖：左栏 440 ~（容器宽 - 240）。440 是底，不能再窄。
   const startDrag = (e: ReactPointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startWidth = leftWidth
-    const maxLeft = (containerRef.current?.clientWidth ?? 1440) - 240
+    const room = containerRef.current?.clientWidth ?? 1440
+    const maxLeft = Math.max(440, room - 240)
     const onMove = (ev: PointerEvent) => {
-      setLeftWidth(Math.min(maxLeft, Math.max(520, startWidth + (ev.clientX - startX))))
+      setLeftWidth(Math.min(maxLeft, Math.max(440, startWidth + (ev.clientX - startX))))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -149,25 +150,25 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
     <div ref={containerRef} className="flex min-h-0 flex-1">
       {/* 左栏是给人读的信息，允许选中复制；右栏终端的选择归 xterm 管 */}
       <div
-        className="flex shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
-        style={{ width: leftWidth }}
+        className="@container flex min-h-0 min-w-[440px] max-w-full shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
+        style={{ width: leftWidth, maxWidth: '100%' }}
       >
-        {/* 信息条：三列上下对齐（主机名/已运行、系统/内网、内核/外网），列宽取两项里更宽的。
-            栏不够宽时主机名和内核省略。没采到的用 — 占位。 */}
-        <div className="grid min-w-0 grid-cols-[minmax(0,max-content)_max-content_minmax(0,max-content)] items-baseline gap-x-4 gap-y-0.5 text-sm">
+        {/* 收到最窄：一行两个、共三行。拉到 520 以上恢复三列两行。 */}
+        <div className="grid min-w-0 grid-cols-2 items-baseline gap-x-4 gap-y-0.5 text-sm @[480px]:grid-cols-[minmax(0,max-content)_minmax(0,max-content)_minmax(0,max-content)]">
           <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} truncate />
-          <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} />
+          <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} truncate />
           <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} truncate />
           <InfoItem
             label="已运行"
             value={metrics && metrics.uptimeSec > 0 ? formatUptime(metrics.uptimeSec) : '—'}
+            truncate
           />
-          <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '—'} />
-          <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '—'} />
+          <InfoItem label="内网" value={serverInfo ? serverInfo.lanIps.join(' ') || '—' : '—'} truncate />
+          <InfoItem label="外网" value={serverInfo ? serverInfo.wanIp || '—' : '—'} truncate />
         </div>
         {error && <p className="text-sm text-destructive">采集失败：{error}</p>}
 
-        <div className="flex items-start gap-6 px-1">
+        <div className="grid grid-cols-3 justify-items-center gap-x-2 gap-y-3 px-1 @[480px]:w-max @[480px]:grid-cols-[repeat(5,max-content)] @[480px]:justify-items-start @[480px]:gap-6">
           <Ring label="CPU" percent={metrics?.cpuPercent ?? 0} center={metrics ? `${metrics.cpuPercent.toFixed(0)}%` : '—'}>
             {metrics ? (
               <>
@@ -245,7 +246,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
         </div>
 
         {opsTab === 'proc' ? (
-          <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+          <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-xl border">
             <ProcSection
               title="CPU 占用最高"
               procs={cpuProcs}
