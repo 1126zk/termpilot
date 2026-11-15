@@ -23,6 +23,7 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [tick, setTick] = useState(0)
+  const termStatus = useAppStore((s) => s.termState[props.termId]?.status)
   const [busy, setBusy] = useState<'start' | 'stop' | null>(null)
   const [pausing, setPausing] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -33,6 +34,10 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
   useEffect(() => {
     if (task?.status === 'success') setTick((n) => n + 1)
   }, [task?.status])
+
+  useEffect(() => {
+    if (termStatus === 'connected') setTick((n) => n + 1)
+  }, [termStatus])
 
   useEffect(() => {
     const el = logRef.current

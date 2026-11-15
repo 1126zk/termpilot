@@ -70,7 +70,8 @@ func translateSSH(message string) string {
 		return "对方拒绝分配终端"
 	case strings.Contains(message, "command shell failed"):
 		return "对方拒绝打开 shell"
-	case strings.Contains(lower, "administratively prohibited"):
+	case strings.Contains(lower, "administratively prohibited"),
+		strings.Contains(lower, "ssh: rejected:"):
 		return "对方拒绝了这个通道"
 	case strings.Contains(lower, "permission denied"):
 		return "没有权限"

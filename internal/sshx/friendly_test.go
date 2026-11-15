@@ -27,6 +27,7 @@ func TestFriendlyError(t *testing.T) {
 		"ssh: pty-req failed":                                                                                        "对方拒绝分配终端",
 		"ssh: command shell failed":                                                                                  "对方拒绝打开 shell",
 		"ssh: rejected: administratively prohibited (open failed)":                                                   "对方拒绝了这个通道",
+		"ssh: rejected: connect failed (open failed)":                                                             "对方拒绝了这个通道",
 		"EOF":                                 "对方关闭了连接",
 		"read tcp 1.2.3.4:1->5.6.7.8:22: EOF": "对方关闭了连接",
 		`sftp: "Permission denied" (SSH_FX_PERMISSION_DENIED)`: "没有权限",

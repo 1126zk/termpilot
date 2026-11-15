@@ -165,7 +165,7 @@ func parseBrowserInfo(stdout string) *BrowserInfo {
 func (s *ExecService) CollectBrowser(sessionID string) (*BrowserInfo, error) {
 	res, err := s.Exec(sessionID, ExecOptions{Command: browserStatusScript, TimeoutMs: 10000})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s", FriendlyError(err))
 	}
 	if res.TimedOut {
 		return nil, fmt.Errorf("检查云浏览器超时")

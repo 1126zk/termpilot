@@ -141,7 +141,7 @@ func NewApp() *App {
 		OnTransfer:      func(ev sftpx.TransferEvent) { a.emit("sftp:transfer", ev) },
 		OnInstall:       func(ev sftpx.InstallEvent) { a.emit("sftp:install", ev) },
 	})
-	a.exec = sshx.NewExecService(a.acquire)
+	a.exec = sshx.NewExecService(a.acquire, a.acquireIsolated)
 	a.local = localfs.New()
 	a.mcp = mcpx.New(mcpx.Deps{
 		Storage:  a.store,

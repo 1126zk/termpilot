@@ -90,6 +90,15 @@ func TestClipStream(t *testing.T) {
 	})
 }
 
+func TestChannelRejected(t *testing.T) {
+	if !channelRejected(errString("ssh: rejected: connect failed (open failed)")) {
+		t.Fatal("共享连接拒绝新通道时应换一条连接重试")
+	}
+	if channelRejected(errString("连接未建立")) {
+		t.Fatal("普通错误不该换连接")
+	}
+}
+
 func TestCappedWriter(t *testing.T) {
 	w := &cappedWriter{cap: 4}
 	w.Write([]byte("ab"))

@@ -47,16 +47,18 @@ type ExecResult struct {
 
 // ExecService 在共用 SSH 会话上开独立 exec 通道，不占终端画面，天然并发。
 // acquire 由调用方提供（一般接 Pool.Acquire + 存储层取密码），本包不碰凭据存储。
+// isolate 在共享连接拒绝新通道时另拨一条，避免把终端那条会话挤满。
 type ExecService struct {
 	mu      sync.Mutex
 	holds   map[string]*Hold
 	pulls   map[string]*browserPull
 	acquire func(sessionID string) (*Hold, error)
+	isolate func(sessionID string) (*Hold, error)
 }
 
-// NewExecService acquire 返回某会话的共享连接引用。
-func NewExecService(acquire func(sessionID string) (*Hold, error)) *ExecService {
-	return &ExecService{holds: map[string]*Hold{}, pulls: map[string]*browserPull{}, acquire: acquire}
+// NewExecService acquire 返回某会话的共享连接引用。isolate 可以为 nil。
+func NewExecService(acquire, isolate func(sessionID string) (*Hold, error)) *ExecService {
+	return &ExecService{holds: map[string]*Hold{}, pulls: map[string]*browserPull{}, acquire: acquire, isolate: isolate}
 }
 
 // hold 每条连接缓存一个引用，和终端、文件树共用同一条 SSH 会话。
@@ -104,6 +106,19 @@ func (s *ExecService) Exec(sessionID string, opts ExecOptions) (*ExecResult, err
 	if err == nil {
 		return result, nil
 	}
+	// 共享连接上的会话满了时，服务器会拒绝新通道，终端那条却还在。
+	// 另拨一条来跑命令，不把正在用的终端连接丢掉。
+	if s.isolate != nil && channelRejected(err) {
+		iso, isoErr := s.isolate(sessionID)
+		if isoErr == nil {
+			defer iso.Release()
+			if again, err2 := s.runOnce(iso, opts); err2 == nil {
+				return again, nil
+			} else {
+				err = err2
+			}
+		}
+	}
 	s.mu.Lock()
 	delete(s.holds, sessionID)
 	s.mu.Unlock()
@@ -113,6 +128,11 @@ func (s *ExecService) Exec(sessionID string, opts ExecOptions) (*ExecResult, err
 		return nil, err
 	}
 	return s.runOnce(hold, opts)
+}
+
+// channelRejected 服务器拒绝新开的通道。共享连接上已经有终端时，再开 exec 会碰到这个。
+func channelRejected(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "ssh: rejected:")
 }
 
 var sessionNameRe = regexp.MustCompile(`[^\w-]`)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Globe, Plus, Power, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Globe, Minus, Plus, Power, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -39,6 +39,12 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const editingRef = useRef(false)
   const composeRef = useRef(false)
   const clicks = useRef({ n: 0, t: 0, x: 0, y: 0 })
+  const scrollDrag = useRef<{ x: number; y: number; axis: 'x' | 'y'; scale: number; gen: number; pending: number } | null>(null)
+  const scrollGen = useRef(0)
+  const zoomRef = useRef(1)
+  const zoomWheel = useRef(0)
+  const onWheelRef = useRef<(event: WheelEvent) => void>(() => {})
+  const applyZoomRef = useRef<(factor: number) => void>(() => {})
   const lastFrame = useRef<{ blob: Blob; meta: ScreencastMeta } | null>(null)
   const inputBatch = useRef<{ seq: number; method: string; params: Record<string, unknown> }[]>([])
   const inputRaf = useRef(0)
@@ -58,6 +64,9 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const tabWatch = useRef<number[]>([])
   const [pageId, setPageId] = useState('')
   const [draft, setDraft] = useState('')
+  const [zoom, setZoom] = useState(1)
+  const [zoomHud, setZoomHud] = useState(false)
+  const zoomHudTimer = useRef(0)
   const [status, setStatus] = useState('正在连接')
   const [adding, setAdding] = useState(false)
   const [nav, setNav] = useState<{ index: number; entries: { id: number }[] }>({ index: 0, entries: [] })
@@ -153,6 +162,8 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     })
   }
 
+  useEffect(() => () => window.clearTimeout(zoomHudTimer.current), [])
+
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
@@ -165,23 +176,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       }, 200)
     })
     observer.observe(stage)
-    const onWheel = (event: WheelEvent) => {
-      const fit = fitRef.current
-      const rect = stage.getBoundingClientRect()
-      const point = fit ? pointerToViewport(event.clientX - rect.left, event.clientY - rect.top, fit) : null
-      if (!point) return
-      event.preventDefault()
-      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stage.clientHeight : 1
-      const prev = wheelRef.current
-      wheelRef.current = {
-        x: point.x,
-        y: point.y,
-        dx: (prev?.dx ?? 0) + event.deltaX * scale,
-        dy: (prev?.dy ?? 0) + event.deltaY * scale,
-        modifiers: inputModifiers(event)
-      }
-      scheduleFlushRef.current()
-    }
+    const onWheel = (event: WheelEvent) => onWheelRef.current(event)
     stage.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       observer.disconnect()
@@ -342,6 +337,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       if (frame?.url && !frame.parentId) {
         showUrl(frame.url)
         readHistoryRef.current()
+        if (zoomRef.current !== 1) applyZoomRef.current(zoomRef.current)
       }
     })
 
@@ -465,7 +461,10 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     const fit = fitRef.current
     if (!stage || !fit) return null
     const rect = stage.getBoundingClientRect()
-    return pointerToViewport(event.clientX - rect.left, event.clientY - rect.top, fit)
+    const point = pointerToViewport(event.clientX - rect.left, event.clientY - rect.top, fit)
+    if (!point) return null
+    const zoom = zoomRef.current || 1
+    return { x: point.x / zoom, y: point.y / zoom, rawX: point.x, rawY: point.y }
   }
 
   const watchNewTab = () => {
@@ -487,6 +486,107 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       pointerType: 'mouse'
     })
     if (type === 'mousePressed') watchNewTab()
+  }
+
+  const scrollbarAxis = (point: { rawX: number; rawY: number }) => {
+    const fit = fitRef.current
+    if (!fit) return null
+    const edge = 16
+    const fromRight = fit.devW - point.rawX
+    const fromBottom = fit.devH - point.rawY
+    if (fromRight <= edge && fromBottom <= edge) return fromRight < fromBottom ? 'y' : 'x'
+    if (fromRight <= edge) return 'y' as const
+    if (fromBottom <= edge) return 'x' as const
+    return null
+  }
+
+  const readScrollScale = (axis: 'x' | 'y', x: number, y: number) => {
+    const vertical = axis === 'y'
+    const expression = `(() => {
+      const vertical = ${vertical}
+      const root = document.scrollingElement || document.documentElement
+      let node = document.elementFromPoint(${x}, ${y})
+      const extra = (el) => vertical ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth
+      const can = (el) => {
+        if (!el || el.nodeType !== 1 || extra(el) <= 1) return false
+        if (el === root || el === document.body || el === document.documentElement) return true
+        const overflow = vertical ? getComputedStyle(el).overflowY : getComputedStyle(el).overflowX
+        return overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay'
+      }
+      while (node && !can(node)) node = node.parentElement
+      if (!can(node)) node = root
+      const track = vertical ? node.clientHeight : node.clientWidth
+      const extent = vertical ? node.scrollHeight : node.scrollWidth
+      if (!track || extent <= track) return 1
+      const thumb = Math.max(track * track / extent, 16)
+      const travel = Math.max(1, track - thumb)
+      return (extent - track) / travel
+    })()`
+    return command('Runtime.evaluate', { expression, returnByValue: true })
+      .then((result) => {
+        const value = (result as { result?: { value?: unknown } } | undefined)?.result?.value
+        return typeof value === 'number' && value >= 1 && value < 1000 ? value : 1
+      })
+      .catch(() => 1)
+  }
+
+  const emitScroll = (drag: { axis: 'x' | 'y' }, point: { x: number; y: number }, delta: number) => {
+    if (!delta) return
+    queueInput('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: drag.axis === 'y' ? Math.max(0, point.x - 24) : point.x,
+      y: drag.axis === 'x' ? Math.max(0, point.y - 24) : point.y,
+      deltaX: drag.axis === 'x' ? delta : 0,
+      deltaY: drag.axis === 'y' ? delta : 0,
+      modifiers: 0,
+      pointerType: 'mouse'
+    })
+  }
+
+  applyZoomRef.current = (factor) => {
+    const changed = Math.abs(factor - zoomRef.current) >= 0.01
+    zoomRef.current = factor
+    setZoom(factor)
+    if (changed) {
+      setZoomHud(true)
+      window.clearTimeout(zoomHudTimer.current)
+      zoomHudTimer.current = window.setTimeout(() => setZoomHud(false), 5000)
+    }
+    const value = factor === 1 ? '' : String(factor)
+    void command('Runtime.evaluate', {
+      expression: `document.documentElement.style.zoom=${JSON.stringify(value)}`
+    }).catch(() => {})
+  }
+
+  const stepZoom = (out: boolean) => {
+    const next = Math.min(3, Math.max(0.5, zoomRef.current * (out ? 1 / 1.1 : 1.1)))
+    if (Math.abs(next - zoomRef.current) < 0.01) return
+    applyZoomRef.current(Math.abs(next - 1) < 0.015 ? 1 : next)
+  }
+
+  onWheelRef.current = (event) => {
+    const point = pointOf(event)
+    if (!point) return
+    event.preventDefault()
+    if (event.ctrlKey || event.metaKey) {
+      zoomWheel.current += event.deltaY
+      if (Math.abs(zoomWheel.current) < 80) return
+      const out = zoomWheel.current > 0
+      zoomWheel.current = 0
+      stepZoom(out)
+      return
+    }
+    const stage = stageRef.current
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stage?.clientHeight || 1 : 1
+    const prev = wheelRef.current
+    wheelRef.current = {
+      x: point.x,
+      y: point.y,
+      dx: (prev?.dx ?? 0) + event.deltaX * scale,
+      dy: (prev?.dy ?? 0) + event.deltaY * scale,
+      modifiers: inputModifiers(event)
+    }
+    scheduleFlushRef.current()
   }
 
   const openPage = (page: BrowserPageInfo) => {
@@ -662,6 +762,23 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
           event.currentTarget.setPointerCapture(event.pointerId)
           const point = pointOf(event)
           if (!point) return
+          const axis = event.button === 0 ? scrollbarAxis(point) : null
+          if (axis) {
+            const gen = ++scrollGen.current
+            scrollDrag.current = { x: point.x, y: point.y, axis, scale: 0, gen, pending: 0 }
+            const probeX = axis === 'y' ? Math.max(0, point.x - 24) : point.x
+            const probeY = axis === 'x' ? Math.max(0, point.y - 24) : point.y
+            void readScrollScale(axis, probeX, probeY).then((scale) => {
+              const drag = scrollDrag.current
+              if (!drag || drag.gen !== gen) return
+              drag.scale = scale
+              const pending = drag.pending
+              drag.pending = 0
+              emitScroll(drag, drag, pending * scale)
+            })
+          } else {
+            scrollDrag.current = null
+          }
           const now = Date.now()
           const prev = clicks.current
           const next = now - prev.t < 500 && Math.hypot(point.x - prev.x, point.y - prev.y) < 4 ? prev.n + 1 : 1
@@ -671,9 +788,26 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
           prev.y = point.y
           sendMouse('mousePressed', event, next)
         }}
-        onPointerMove={(event) => sendMouse('mouseMoved', event)}
-        onPointerUp={(event) => sendMouse('mouseReleased', event, clicks.current.n || 1)}
-        onPointerCancel={(event) => sendMouse('mouseReleased', event, 1)}
+        onPointerMove={(event) => {
+          const point = pointOf(event)
+          const drag = scrollDrag.current
+          if (drag && point) {
+            const step = drag.axis === 'y' ? point.y - drag.y : point.x - drag.x
+            drag.x = point.x
+            drag.y = point.y
+            if (drag.scale > 0) emitScroll(drag, point, step * drag.scale)
+            else drag.pending += step
+          }
+          sendMouse('mouseMoved', event)
+        }}
+        onPointerUp={(event) => {
+          scrollDrag.current = null
+          sendMouse('mouseReleased', event, clicks.current.n || 1)
+        }}
+        onPointerCancel={(event) => {
+          scrollDrag.current = null
+          sendMouse('mouseReleased', event, 1)
+        }}
         onContextMenu={(event) => event.preventDefault()}
         onKeyDown={(event) => {
           if (event.target !== stageRef.current) return
@@ -722,6 +856,29 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         }}
       >
         <canvas ref={canvasRef} className="absolute left-0 top-0" />
+        {zoomHud && (
+          <div
+            className="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background/95 px-2 py-0.5 shadow-md"
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerMove={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+          >
+            <span className="px-1 text-sm tabular-nums text-foreground">{Math.round(zoom * 100)}%</span>
+            <Button size="icon-sm" variant="ghost" className="text-foreground" disabled={zoom <= 0.5} onClick={() => stepZoom(true)}>
+              <Minus />
+            </Button>
+            <Button size="icon-sm" variant="ghost" className="text-foreground" disabled={zoom >= 3} onClick={() => stepZoom(false)}>
+              <Plus />
+            </Button>
+            <Button size="sm" variant="secondary" className="ml-1 h-7 px-2.5" onClick={() => applyZoomRef.current(1)}>
+              重置
+            </Button>
+          </div>
+        )}
         {status && <p className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-sm text-muted-foreground">{status}</p>}
       </div>
     </div>
