@@ -141,11 +141,12 @@ export function viewportParams(stage: HTMLElement | null): Record<string, unknow
   }
 }
 
-export function screencastParams(stage: HTMLElement | null): Record<string, unknown> {
+export function screencastParams(stage: HTMLElement | null, quality = 90): Record<string, unknown> {
   const { width, height } = frameSize(stage)
+  const level = Math.min(100, Math.max(0, Math.round(quality)))
   return {
     format: 'jpeg',
-    quality: 80,
+    quality: level,
     maxWidth: width,
     maxHeight: height,
     everyNthFrame: 1

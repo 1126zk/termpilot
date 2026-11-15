@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bookmark, Globe, History, Minus, Plus, Power, RotateCw, Star, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bookmark, Globe, History, Minus, Plus, Power, RotateCw, Settings, Star, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { BrowserBookmark, BrowserPageInfo, BrowserVisit } from '../../../shared/types'
@@ -86,6 +86,9 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const [visits, setVisits] = useState<BrowserVisit[] | null>(null)
   const [historyQuery, setHistoryQuery] = useState('')
   const [clearing, setClearing] = useState(false)
+  const [quality, setQuality] = useState(readQuality)
+  const qualityRef = useRef(quality)
+  qualityRef.current = quality
   const [barOn, setBarOn] = useState(() => {
     try {
       return localStorage.getItem(`termpilot-browser-bar:${props.sessionId}`) !== '0'
@@ -182,7 +185,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     const gen = ++fitGen.current
     return command('Emulation.setDeviceMetricsOverride', viewportParams(stage)).then(() => {
       if (gen !== fitGen.current) return
-      return command('Page.startScreencast', screencastParams(stage))
+      return command('Page.startScreencast', screencastParams(stage, qualityRef.current))
     })
   }
   const fitPreviewRef = useRef(fitPreview)
@@ -444,7 +447,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       if (!stage) return
       lastFrameAt = Date.now()
       void commandRef.current('Page.bringToFront', {}).catch(() => {})
-      void commandRef.current('Page.startScreencast', screencastParams(stage)).catch(() => {})
+      void commandRef.current('Page.startScreencast', screencastParams(stage, qualityRef.current)).catch(() => {})
     }, 2000)
 
     const syncPages = (found: BrowserPageInfo[]) => {
@@ -828,6 +831,23 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       .finally(() => setClearing(false))
   }
 
+  const chooseQuality = (value: string) => {
+    const next = Number(value)
+    if (!qualitySteps.includes(next)) return
+    setQuality(next)
+    qualityRef.current = next
+    try {
+      localStorage.setItem(qualityKey, String(next))
+    } catch {
+      // 记不住就只用这一次
+    }
+    const stage = stageRef.current
+    if (!previewRef.current || !stage) return
+    void command('Page.startScreencast', screencastParams(stage, next)).catch((err: unknown) => {
+      setStatus(err instanceof Error ? err.message : '画质没有换上')
+    })
+  }
+
   const historyNeedle = historyQuery.trim().toLowerCase()
   const shownVisits = (visits ?? []).filter((visit) => {
     if (!historyNeedle) return true
@@ -957,6 +977,21 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
                 ))
               )}
             </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" className="mb-0.5 shrink-0" disabled={props.stopping}>
+              <Settings />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-32">
+            <DropdownMenuLabel>画质</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={String(quality)} onValueChange={chooseQuality}>
+              {qualitySteps.map((step) => (
+                <DropdownMenuRadioItem key={step} value={String(step)}>{step}</DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
         <Button size="icon-sm" variant="ghost" className="mb-0.5 shrink-0" disabled={props.stopping} onClick={props.onStop}>
@@ -1224,6 +1259,19 @@ function TabIcon(props: { url: string }) {
   }, [src])
   if (!src || failed) return <Globe className="size-3.5 shrink-0 opacity-60" strokeWidth={2} />
   return <img src={src} alt="" draggable={false} className="size-3.5 shrink-0 rounded-sm" onError={() => setFailed(true)} />
+}
+
+const qualitySteps = [60, 70, 80, 90, 100]
+const qualityKey = 'termpilot-browser-quality'
+
+function readQuality() {
+  try {
+    const saved = Number(localStorage.getItem(qualityKey))
+    if (qualitySteps.includes(saved)) return saved
+  } catch {
+    // 读不到就用默认
+  }
+  return 90
 }
 
 function canBookmark(url: string) {
