@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sort"
 	"sync"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // 对应 src/main/services/SshPool.ts：同一个保存的连接只拨号一次，
@@ -42,12 +44,20 @@ type Pool struct {
 	mu        sync.Mutex
 	slots     map[string]*poolSlot
 	dial      func(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string, opts *DialOptions) (*Conn, error)
+	frameDial func(sessionID string) (*ssh.Client, func(), error)
 	tunnelSeq int
 }
 
 // NewPool 建一个空池。
 func NewPool() *Pool {
 	return &Pool{slots: map[string]*poolSlot{}, dial: Dial}
+}
+
+// SetFrameDial 画面单独拨一条 SSH。键鼠仍走共享连接，大图不会把点击堵在后面。
+func (p *Pool) SetFrameDial(dial func(sessionID string) (*ssh.Client, func(), error)) {
+	p.mu.Lock()
+	p.frameDial = dial
+	p.mu.Unlock()
 }
 
 // SetDialer 替换底层拨号函数（测试或定制传输用）。

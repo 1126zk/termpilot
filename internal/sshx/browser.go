@@ -95,6 +95,18 @@ echo '浏览器已启动，但调试端口没有响应' >&2
 exit 1
 `
 
+// browserEnsureFonts 容器里没有中文字体时装上，再重启让 Chrome 重新读字体。
+// 只往容器的可写层里装，不删容器，登录数据还在挂载目录里。
+const browserEnsureFonts = `
+if docker inspect termpilot-browser >/dev/null 2>&1; then
+  if ! docker exec termpilot-browser sh -c 'find /usr/share/fonts -type f 2>/dev/null | grep -Eiq "wqy|noto.*cjk|sourcehan|uming|ukai"'; then
+    echo '正在安装中文字体'
+    docker exec termpilot-browser sh -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-wqy-microhei fontconfig && fc-cache -f'
+    docker restart termpilot-browser >/dev/null
+  fi
+fi
+`
+
 // browserInstallScript 没装就拉镜像并创建容器；容器已在则改为启动。
 // 字体目录不存在时不挂，避免 Docker 在宿主机上建出空目录。
 // 调试端口交给镜像：它用 socat 把 9222 转到 Chrome 的 9223。
@@ -139,12 +151,12 @@ else
     run_browser
   fi
 fi
-` + browserWaitPort
+` + browserEnsureFonts + browserWaitPort
 
 const browserStartScript = `
 set -e
 docker start termpilot-browser
-` + browserWaitPort
+` + browserEnsureFonts + browserWaitPort
 
 // parseBrowserInfo 把探测脚本的分段输出收成状态。Docker 没在跑时不读容器状态。
 func parseBrowserInfo(stdout string) *BrowserInfo {
@@ -282,6 +294,28 @@ func (s *ExecService) BrowserInstall(sessionID string, onLine func(string)) erro
 	return nil
 }
 
+// EnsureBrowserFonts 预览打开前补中文字体。已经有字体时马上返回。
+func (s *ExecService) EnsureBrowserFonts(sessionID string) error {
+	res, err := s.Exec(sessionID, ExecOptions{Command: browserEnsureFonts + browserWaitPort, TimeoutMs: 180000})
+	if err != nil {
+		return err
+	}
+	if res.TimedOut {
+		return fmt.Errorf("安装中文字体超时")
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		msg := strings.TrimSpace(res.Stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(res.Stdout)
+		}
+		if msg == "" {
+			return fmt.Errorf("安装中文字体失败（退出码 %d）", *res.ExitCode)
+		}
+		return fmt.Errorf("安装中文字体失败（退出码 %d）：%s", *res.ExitCode, msg)
+	}
+	return nil
+}
+
 // BrowserService 启动或关闭已安装的云浏览器。op 只认 start / stop。
 func (s *ExecService) BrowserService(sessionID, op string) error {
 	cmd := ""
@@ -289,6 +323,7 @@ func (s *ExecService) BrowserService(sessionID, op string) error {
 	switch op {
 	case "start":
 		cmd = browserStartScript
+		timeoutMs = 180000
 	case "stop":
 		cmd = "docker stop " + browserContainer
 	default:

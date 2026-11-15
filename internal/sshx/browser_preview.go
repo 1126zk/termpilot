@@ -2,6 +2,7 @@ package sshx
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -76,14 +77,16 @@ type BrowserInput struct {
 
 // browserPreview 一条 SSH 上的 CDP 连接。refs 是还没关掉的预览面板数。
 type browserPreview struct {
-	id       int
-	refs     int
-	targetID string
-	closer   io.Closer
-	session  *cdpSession
-	input    *cdpSession
-	onEvent  browserEvent
-	mu       sync.Mutex
+	id           int
+	refs         int
+	targetID     string
+	closer       io.Closer
+	session      *cdpSession
+	input        *cdpSession
+	frameSSH     *ssh.Client
+	frameRelease func()
+	onEvent      browserEvent
+	mu           sync.Mutex
 
 	inputStop    chan struct{}
 	inputKick    chan struct{}
@@ -95,9 +98,11 @@ func (b *browserPreview) Close() error {
 	b.mu.Lock()
 	c := b.closer
 	input := b.input
+	release := b.frameRelease
 	b.closer = nil
 	b.session = nil
 	b.input = nil
+	b.frameRelease = nil
 	stop := b.inputStop
 	b.inputStop = nil
 	b.mu.Unlock()
@@ -106,6 +111,9 @@ func (b *browserPreview) Close() error {
 	}
 	if input != nil {
 		_ = input.Close()
+	}
+	if release != nil {
+		release()
 	}
 	if c != nil {
 		return c.Close()
@@ -186,36 +194,38 @@ func (p *Pool) OpenBrowserPreview(sessionID string, onEvent browserEvent) (Brows
 	id := p.tunnelSeq
 	p.mu.Unlock()
 
-	session, input, err := dialBrowserPagePair(client, target)
+	session, input, err := p.openPreviewSessions(sessionID, client, target)
 	if err != nil {
-		return BrowserPreview{}, errors.New("连不上浏览器")
+		return BrowserPreview{}, err
 	}
-	view := &browserPreview{id: id, refs: 1, targetID: target.ID, onEvent: onEvent, session: session, input: input, closer: session}
+	view := &browserPreview{id: id, refs: 1, targetID: target.ID, onEvent: onEvent, session: session, input: input, closer: session, frameSSH: session.frameSSH, frameRelease: session.frameRelease}
+	session.frameRelease = nil
+	session.frameSSH = nil
 	session.owner = view
 	go session.readLoop()
 	if err := session.arm(); err != nil {
-		_ = input.Close()
-		_ = session.Close()
+		_ = view.Close()
 		return BrowserPreview{}, err
 	}
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.liveSlot(sessionID) != slot {
-		_ = input.Close()
-		_ = session.Close()
+		p.mu.Unlock()
+		_ = view.Close()
 		return BrowserPreview{}, errBrowserNotConnected
 	}
 	if slot.browser != nil && slot.browser.alive() {
 		slot.browser.refs++
 		slot.browser.onEvent = onEvent
-		_ = input.Close()
-		_ = session.Close()
-		return BrowserPreview{ID: slot.browser.id, PageID: slot.browser.targetID, Pages: publicPages(pages)}, nil
+		out := BrowserPreview{ID: slot.browser.id, PageID: slot.browser.targetID, Pages: publicPages(pages)}
+		p.mu.Unlock()
+		_ = view.Close()
+		return out, nil
 	}
 	slot.browser = view
 	session.accepted.Store(true)
 	view.startInput()
+	p.mu.Unlock()
 	return BrowserPreview{ID: id, PageID: target.ID, Pages: publicPages(pages)}, nil
 }
 
@@ -252,7 +262,13 @@ func (p *Pool) SwitchBrowserPreview(sessionID string, id int, pageID string) err
 	if err != nil {
 		return err
 	}
-	session, input, err := dialBrowserPagePair(client, target)
+	view.mu.Lock()
+	frameSSH := view.frameSSH
+	view.mu.Unlock()
+	if frameSSH == nil {
+		frameSSH = client
+	}
+	session, input, err := dialBrowserPagePair(frameSSH, client, target)
 	if err != nil {
 		return errors.New("连不上浏览器")
 	}
@@ -463,6 +479,39 @@ func (p *Pool) browserClient(sessionID string, id int) (*browserPreview, *ssh.Cl
 	return slot.browser, slot.conn.Client, nil
 }
 
+// openFrameClient 画面用单独的 SSH。拨号失败时退回共享连接，预览仍能打开。
+func (p *Pool) openFrameClient(sessionID string, shared *ssh.Client) (*ssh.Client, func()) {
+	p.mu.Lock()
+	dial := p.frameDial
+	p.mu.Unlock()
+	noop := func() {}
+	if dial == nil {
+		return shared, noop
+	}
+	client, release, err := dial(sessionID)
+	if err != nil || client == nil {
+		return shared, noop
+	}
+	if release == nil {
+		release = noop
+	}
+	var once sync.Once
+	return client, func() { once.Do(release) }
+}
+
+// openPreviewSessions 画面和键鼠各一条 CDP。画面走单独的 SSH。
+func (p *Pool) openPreviewSessions(sessionID string, shared *ssh.Client, page cdpPage) (*cdpSession, *cdpSession, error) {
+	frameClient, release := p.openFrameClient(sessionID, shared)
+	frame, input, err := dialBrowserPagePair(frameClient, shared, page)
+	if err != nil {
+		release()
+		return nil, nil, errors.New("连不上浏览器")
+	}
+	frame.frameSSH = frameClient
+	frame.frameRelease = release
+	return frame, input, nil
+}
+
 func (b *browserPreview) call(method string, params json.RawMessage) (json.RawMessage, error) {
 	b.mu.Lock()
 	session := b.session
@@ -479,8 +528,14 @@ func listBrowserPages(client *ssh.Client) ([]cdpPage, error) {
 	})
 }
 
+// browserPageCreateMu 挡住同时连上的两次预览。开发模式会把连接跑两遍，
+// 两边都看到没有页面时会各开一个标签。
+var browserPageCreateMu sync.Mutex
+
 // browserPages 读取已有标签。一个都没有时打开默认页，再把这个标签交回去。
 func browserPages(dial func() (net.Conn, error)) ([]cdpPage, error) {
+	browserPageCreateMu.Lock()
+	defer browserPageCreateMu.Unlock()
 	body, err := fetchCDP(dial, http.MethodGet, "/json/list")
 	if err != nil {
 		return nil, errors.New("调试端口没有打开")
@@ -618,20 +673,27 @@ func parseCdpPages(body []byte) ([]cdpPage, error) {
 }
 
 type cdpSession struct {
-	ws       *websocket.Conn
-	owner    *browserPreview
-	writeMu  sync.Mutex
-	mu       sync.Mutex
-	next     int
-	pending  map[int]chan cdpResult
-	accepted atomic.Bool
-	closed   atomic.Bool
+	ws           *websocket.Conn
+	owner        *browserPreview
+	writeMu      sync.Mutex
+	mu           sync.Mutex
+	next         int
+	pending      map[int]chan cdpResult
+	accepted     atomic.Bool
+	closed       atomic.Bool
+	frameSSH     *ssh.Client
+	frameRelease func()
 
 	done      chan struct{}
 	doneOnce  sync.Once
 	frameMu   sync.Mutex
 	frame     liveFrame
 	frameWait []chan struct{}
+
+	paintMu   sync.Mutex
+	paintRaw  json.RawMessage
+	paintWake chan struct{}
+	paintOnce sync.Once
 }
 
 type liveFrame struct {
@@ -677,13 +739,13 @@ func dialBrowserPage(client *ssh.Client, page cdpPage) (*cdpSession, error) {
 	return session, nil
 }
 
-// dialBrowserPagePair 画面和键鼠各一条连接。键鼠若跟在直播帧后面写，点击会一直排着。
-func dialBrowserPagePair(client *ssh.Client, page cdpPage) (main *cdpSession, input *cdpSession, err error) {
-	main, err = dialBrowserPage(client, page)
+// dialBrowserPagePair 画面和键鼠各一条 CDP。frameClient 传画面，inputClient 传键鼠。
+func dialBrowserPagePair(frameClient, inputClient *ssh.Client, page cdpPage) (main *cdpSession, input *cdpSession, err error) {
+	main, err = dialBrowserPage(frameClient, page)
 	if err != nil {
 		return nil, nil, err
 	}
-	input, err = dialBrowserPage(client, page)
+	input, err = dialBrowserPage(inputClient, page)
 	if err != nil {
 		_ = main.Close()
 		return nil, nil, err
@@ -789,13 +851,87 @@ func (s *cdpSession) readLoop() {
 			continue
 		}
 		if msg.Method == "Page.screencastFrame" {
-			s.storeScreencast(msg.Params)
+			s.offerFrame(msg.Params)
 			continue
 		}
-		if msg.Method != "Page.frameNavigated" {
+		if msg.Method != "Page.frameNavigated" || !mainFrameNav(msg.Params) {
 			continue
 		}
-		s.owner.emit(msg.Method, msg.Params)
+		params := append(json.RawMessage(nil), msg.Params...)
+		go s.owner.emit(msg.Method, params)
+	}
+}
+
+func mainFrameNav(params json.RawMessage) bool {
+	var body struct {
+		Frame struct {
+			ParentID string `json:"parentId"`
+		} `json:"frame"`
+	}
+	if json.Unmarshal(params, &body) != nil {
+		return false
+	}
+	return body.Frame.ParentID == ""
+}
+
+func screencastSessionID(params []byte) int {
+	key := []byte(`"sessionId"`)
+	i := bytes.Index(params, key)
+	if i < 0 {
+		return 0
+	}
+	i += len(key)
+	for i < len(params) && (params[i] == ' ' || params[i] == ':' || params[i] == '\t') {
+		i++
+	}
+	n := 0
+	for i < len(params) && params[i] >= '0' && params[i] <= '9' {
+		n = n*10 + int(params[i]-'0')
+		i++
+	}
+	return n
+}
+
+func (s *cdpSession) offerFrame(params json.RawMessage) {
+	copied := append(json.RawMessage(nil), params...)
+	go s.ackFrameID(screencastSessionID(copied))
+	s.paintMu.Lock()
+	if s.paintWake == nil {
+		s.paintWake = make(chan struct{}, 1)
+	}
+	s.paintRaw = copied
+	wake := s.paintWake
+	s.paintMu.Unlock()
+	s.paintOnce.Do(func() { go s.paintFrames() })
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *cdpSession) paintFrames() {
+	for {
+		s.paintMu.Lock()
+		wake := s.paintWake
+		s.paintMu.Unlock()
+		select {
+		case <-s.done:
+			return
+		case <-wake:
+		}
+		for {
+			s.paintMu.Lock()
+			raw := s.paintRaw
+			s.paintRaw = nil
+			s.paintMu.Unlock()
+			if len(raw) == 0 {
+				break
+			}
+			if s.closed.Load() {
+				return
+			}
+			s.storeScreencast(raw)
+		}
 	}
 }
 
@@ -811,8 +947,6 @@ func (s *cdpSession) storeScreencast(params json.RawMessage) {
 	if json.Unmarshal(params, &frame) != nil {
 		return
 	}
-	// 马上确认，但不要堵在读循环里。确认写不出去时，读循环还要继续把帧读走。
-	go s.ackFrameID(frame.SessionID)
 	if frame.Data == "" {
 		return
 	}

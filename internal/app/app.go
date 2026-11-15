@@ -20,6 +20,8 @@ import (
 	"termpilot/internal/sshx"
 	"termpilot/internal/storage"
 	"termpilot/internal/terminal"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // appVersion 是关于页显示的版本号。唯一来源是 frontend/package.json，
@@ -125,6 +127,13 @@ func NewApp() *App {
 	syncer.importSshConfig()
 
 	a.pool = sshx.NewPool()
+	a.pool.SetFrameDial(func(sessionID string) (*ssh.Client, func(), error) {
+		hold, err := a.acquireIsolated(sessionID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return hold.Conn.Client, hold.Release, nil
+	})
 	a.terminal = terminal.NewService(sessionStoreAdapter{a}, historyStoreAdapter{a}, appEmitter{a}, a.pool)
 	a.sftp = sftpx.New(sftpx.Options{
 		Acquire:         a.acquire,

@@ -3,10 +3,12 @@ package sshx
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,6 +139,62 @@ func TestBrowserPagesOpensBlankWhenEmpty(t *testing.T) {
 	}
 	if len(pages) != 1 || pages[0].ID != "p" || pages[0].URL != "https://www.google.com" {
 		t.Fatalf("pages: %+v", pages)
+	}
+}
+
+func TestBrowserPagesConcurrentOpenCreatesOne(t *testing.T) {
+	var mu sync.Mutex
+	opened := 0
+	var listed []byte
+	empty := []byte(`[{"id":"b","type":"browser","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/b"}]`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/json/list":
+			mu.Lock()
+			body := listed
+			mu.Unlock()
+			if body == nil {
+				body = empty
+			}
+			_, _ = w.Write(body)
+		case "/json/new":
+			mu.Lock()
+			opened++
+			listed = []byte(`[{"id":"b","type":"browser","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/b"},{"id":"p","type":"page","title":"Google","url":"https://www.google.com","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}]`)
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"id":"p","type":"page","title":"Google","url":"https://www.google.com","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dial := func() (net.Conn, error) {
+		return net.Dial("tcp", srv.Listener.Addr().String())
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := browserPages(dial)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if len(got) != 1 || got[0].ID != "p" {
+				errCh <- fmt.Errorf("pages: %+v", got)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	if opened != 1 {
+		t.Fatalf("opened %d tabs", opened)
 	}
 }
 

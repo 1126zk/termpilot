@@ -382,6 +382,9 @@ func (a *App) hSessionBrowserConnect(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := a.exec.EnsureBrowserFonts(id); err != nil {
+		return nil, err
+	}
 	return a.pool.OpenBrowserPreview(id, func(previewID int, method string, params json.RawMessage) {
 		a.emit("session:browser-frame", sshx.BrowserCdpEvent{
 			SessionID: id,
