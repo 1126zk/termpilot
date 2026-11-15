@@ -41,6 +41,9 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const clicks = useRef({ n: 0, t: 0, x: 0, y: 0 })
   const scrollDrag = useRef<{ x: number; y: number; axis: 'x' | 'y'; scale: number; gen: number; pending: number } | null>(null)
   const scrollGen = useRef(0)
+  const middleDrag = useRef<{ x: number; y: number; ox: number; oy: number; moved: boolean } | null>(null)
+  const middleLoop = useRef(0)
+  const stepMiddleRef = useRef<() => void>(() => {})
   const zoomRef = useRef(1)
   const zoomWheel = useRef(0)
   const onWheelRef = useRef<(event: WheelEvent) => void>(() => {})
@@ -66,6 +69,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const [draft, setDraft] = useState('')
   const [zoom, setZoom] = useState(1)
   const [zoomHud, setZoomHud] = useState(false)
+  const [middleMark, setMiddleMark] = useState<{ x: number; y: number } | null>(null)
   const zoomHudTimer = useRef(0)
   const [status, setStatus] = useState('正在连接')
   const [adding, setAdding] = useState(false)
@@ -162,7 +166,13 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     })
   }
 
-  useEffect(() => () => window.clearTimeout(zoomHudTimer.current), [])
+  useEffect(
+    () => () => {
+      window.clearTimeout(zoomHudTimer.current)
+      if (middleLoop.current) window.cancelAnimationFrame(middleLoop.current)
+    },
+    []
+  )
 
   useEffect(() => {
     const stage = stageRef.current
@@ -543,6 +553,44 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     })
   }
 
+  const emitWheel = (point: { x: number; y: number }, dx: number, dy: number) => {
+    if (!dx && !dy) return
+    queueInput('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: point.x,
+      y: point.y,
+      deltaX: dx,
+      deltaY: dy,
+      modifiers: 0,
+      pointerType: 'mouse'
+    })
+  }
+
+  const stopMiddleScroll = () => {
+    middleDrag.current = null
+    setMiddleMark(null)
+    if (middleLoop.current) {
+      window.cancelAnimationFrame(middleLoop.current)
+      middleLoop.current = 0
+    }
+  }
+
+  stepMiddleRef.current = () => {
+    middleLoop.current = 0
+    const mid = middleDrag.current
+    if (!mid) return
+    const dead = 12
+    const dx = mid.x - mid.ox
+    const dy = mid.y - mid.oy
+    const speed = (delta: number) => {
+      const extra = Math.abs(delta) - dead
+      if (extra <= 0) return 0
+      return Math.sign(delta) * extra * 0.08
+    }
+    emitWheel({ x: mid.ox, y: mid.oy }, speed(dx), speed(dy))
+    middleLoop.current = window.requestAnimationFrame(() => stepMiddleRef.current())
+  }
+
   applyZoomRef.current = (factor) => {
     const changed = Math.abs(factor - zoomRef.current) >= 0.01
     zoomRef.current = factor
@@ -760,8 +808,22 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         onPointerDown={(event) => {
           event.currentTarget.focus()
           event.currentTarget.setPointerCapture(event.pointerId)
+          if (middleDrag.current) {
+            stopMiddleScroll()
+            return
+          }
           const point = pointOf(event)
           if (!point) return
+          if (event.button === 1) {
+            event.preventDefault()
+            const stage = stageRef.current
+            const rect = stage?.getBoundingClientRect()
+            middleDrag.current = { x: point.x, y: point.y, ox: point.x, oy: point.y, moved: false }
+            scrollDrag.current = null
+            if (rect) setMiddleMark({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+            if (!middleLoop.current) middleLoop.current = window.requestAnimationFrame(() => stepMiddleRef.current())
+            return
+          }
           const axis = event.button === 0 ? scrollbarAxis(point) : null
           if (axis) {
             const gen = ++scrollGen.current
@@ -790,6 +852,12 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         }}
         onPointerMove={(event) => {
           const point = pointOf(event)
+          const mid = middleDrag.current
+          if (mid && point) {
+            mid.x = point.x
+            mid.y = point.y
+            if (Math.hypot(point.x - mid.ox, point.y - mid.oy) > 12) mid.moved = true
+          }
           const drag = scrollDrag.current
           if (drag && point) {
             const step = drag.axis === 'y' ? point.y - drag.y : point.x - drag.x
@@ -801,13 +869,27 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
           sendMouse('mouseMoved', event)
         }}
         onPointerUp={(event) => {
+          const mid = middleDrag.current
+          if (event.button === 1 && mid) {
+            const moved = mid.moved
+            stopMiddleScroll()
+            if (!moved) {
+              sendMouse('mousePressed', event, 1)
+              sendMouse('mouseReleased', event, 1)
+            }
+            return
+          }
           scrollDrag.current = null
           sendMouse('mouseReleased', event, clicks.current.n || 1)
         }}
         onPointerCancel={(event) => {
+          const mid = middleDrag.current
+          stopMiddleScroll()
           scrollDrag.current = null
+          if (mid) return
           sendMouse('mouseReleased', event, 1)
         }}
+        onAuxClick={(event) => event.preventDefault()}
         onContextMenu={(event) => event.preventDefault()}
         onKeyDown={(event) => {
           if (event.target !== stageRef.current) return
@@ -856,6 +938,11 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         }}
       >
         <canvas ref={canvasRef} className="absolute left-0 top-0" />
+        {middleMark && (
+          <div className="pointer-events-none absolute z-10" style={{ left: middleMark.x, top: middleMark.y, transform: 'translate(-50%, -50%)' }}>
+            <MiddleScrollMark />
+          </div>
+        )}
         {zoomHud && (
           <div
             className="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background/95 px-2 py-0.5 shadow-md"
@@ -882,6 +969,16 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         {status && <p className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-sm text-muted-foreground">{status}</p>}
       </div>
     </div>
+  )
+}
+
+function MiddleScrollMark() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="14" fill="rgb(28 28 28 / 0.88)" stroke="white" strokeWidth="1.5" />
+      <circle cx="16" cy="16" r="2" fill="white" />
+      <path fill="white" d="M16 4.5 12.8 8.6h6.4zM16 27.5 19.2 23.4h-6.4zM4.5 16 8.6 12.8v6.4zM27.5 16 23.4 19.2v-6.4z" />
+    </svg>
   )
 }
 
