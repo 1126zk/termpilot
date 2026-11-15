@@ -77,15 +77,15 @@ Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docke
 	}
 }
 
-func TestBrowserInstallScriptLeavesDebugPortToImage(t *testing.T) {
-	if strings.Contains(browserInstallScript, "--remote-debugging-port=") || strings.Contains(browserInstallScript, "--remote-debugging-address=") {
-		t.Fatal("chrome debug flags steal 9222 from the image socat")
+func TestBrowserInstallScriptListensOnPreviewPort(t *testing.T) {
+	if !strings.Contains(browserInstallScript, "--remote-debugging-port=9222") || !strings.Contains(browserInstallScript, "--remote-debugging-address=127.0.0.1") {
+		t.Fatal("chrome must listen on the preview port")
 	}
 	if !strings.Contains(browserInstallScript, "--force-device-scale-factor=2") {
 		t.Fatal("screencast stays layout-sized without a forced device scale")
 	}
-	if !strings.Contains(browserInstallScript, "fonts-wqy-microhei") || !strings.Contains(browserStartScript, "fonts-wqy-microhei") {
-		t.Fatal("browser should install a CJK font when the container has none")
+	if !strings.Contains(browserInstallScript, "--disable-backgrounding-occluded-windows") || !strings.Contains(browserInstallScript, "CalculateNativeWinOcclusion") {
+		t.Fatal("idle chrome freezes the page when it thinks the window is covered")
 	}
 	if strings.Contains(browserInstallScript, "docker rm") {
 		t.Fatal("install should not remove the container")
@@ -111,7 +111,7 @@ func TestBrowserCacheScriptKeepsImages(t *testing.T) {
 	if !strings.Contains(browserClearCacheScript, "/ingest") || !strings.Contains(browserClearCacheScript, "/var/lib/docker/tmp") {
 		t.Fatal("clear cache should remove unfinished downloads")
 	}
-	if !strings.Contains(browserStopPullScript, "docker pull chromedp/headless-shell") {
+	if !strings.Contains(browserStopPullScript, "docker pull selenium/standalone-chrome") {
 		t.Fatal("pause should stop the image pull")
 	}
 }

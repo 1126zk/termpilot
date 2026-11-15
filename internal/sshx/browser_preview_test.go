@@ -303,3 +303,57 @@ func TestCdpSessionAcksScreencast(t *testing.T) {
 	}
 	_ = session.Close()
 }
+
+func TestCdpSessionKeepsPageActive(t *testing.T) {
+	got := make(chan string, 8)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var msg struct {
+				ID     int    `json:"id"`
+				Method string `json:"method"`
+			}
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+			if msg.Method == "Page.enable" {
+				_ = conn.WriteJSON(map[string]any{"id": msg.ID, "result": map[string]any{}})
+			}
+			select {
+			case got <- msg.Method:
+			default:
+			}
+		}
+	}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/devtools/page/p"
+	dialer := websocket.Dialer{NetDial: func(network, addr string) (net.Conn, error) {
+		return net.Dial("tcp", srv.Listener.Addr().String())
+	}}
+	ws, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &cdpSession{ws: ws, pending: map[int]chan cdpResult{}, next: 1, done: make(chan struct{})}
+	go session.readLoop()
+	if err := session.arm(); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for !seen["Emulation.setFocusEmulationEnabled"] || !seen["Page.setWebLifecycleState"] || !seen["Emulation.setIdleOverride"] || !seen["Page.bringToFront"] {
+		select {
+		case method := <-got:
+			seen[method] = true
+		case <-deadline:
+			t.Fatalf("page was not marked active: %v", seen)
+		}
+	}
+	_ = session.Close()
+}

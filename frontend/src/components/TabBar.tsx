@@ -114,16 +114,6 @@ function WindowControls(props: { terminalActive: boolean }) {
       <button type="button" className={topBtn} title="新窗口" onClick={() => void window.api.win.newWindow()}>
         <AppWindow className="size-4" strokeWidth={2} />
       </button>
-      {browserOk && activeTab && (
-        <button
-          type="button"
-          className={cn(topBtn, browserOpen && 'bg-accent text-foreground')}
-          title={browserOpen ? '关闭云浏览器' : '云浏览器'}
-          onClick={() => toggleBrowserPreview(activeTab.id)}
-        >
-          <Globe className="size-4" strokeWidth={2} />
-        </button>
-      )}
       {opsOk && activeTab && (
         <button
           type="button"
@@ -132,6 +122,16 @@ function WindowControls(props: { terminalActive: boolean }) {
           onClick={() => toggleOpsPanel(activeTab.id)}
         >
           <Gauge className="size-4" strokeWidth={2} />
+        </button>
+      )}
+      {browserOk && activeTab && (
+        <button
+          type="button"
+          className={cn(topBtn, browserOpen && 'bg-accent text-foreground')}
+          title={browserOpen ? '关闭云浏览器' : '云浏览器'}
+          onClick={() => toggleBrowserPreview(activeTab.id)}
+        >
+          <Globe className="size-4" strokeWidth={2} />
         </button>
       )}
       {props.terminalActive && (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Globe, Plus, Power, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Globe, Plus, Power, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -40,17 +40,28 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const composeRef = useRef(false)
   const clicks = useRef({ n: 0, t: 0, x: 0, y: 0 })
   const lastFrame = useRef<{ blob: Blob; meta: ScreencastMeta } | null>(null)
-  const inputSeq = useRef(0)
   const inputBatch = useRef<{ seq: number; method: string; params: Record<string, unknown> }[]>([])
   const inputRaf = useRef(0)
   const wheelRef = useRef<{ x: number; y: number; dx: number; dy: number; modifiers: number } | null>(null)
   const fitGen = useRef(0)
   const scheduleFlushRef = useRef<() => void>(() => {})
   const [pages, setPages] = useState<BrowserPageInfo[]>([])
+  const pagesRef = useRef<BrowserPageInfo[]>([])
+  const commitPages = (next: BrowserPageInfo[]) => {
+    pagesRef.current = next
+    setPages(next)
+  }
+  const commitPagesRef = useRef(commitPages)
+  commitPagesRef.current = commitPages
+  const openPageRef = useRef<(page: BrowserPageInfo) => void>(() => {})
+  const lookForTabRef = useRef<() => void>(() => {})
+  const tabWatch = useRef<number[]>([])
   const [pageId, setPageId] = useState('')
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState('正在连接')
   const [adding, setAdding] = useState(false)
+  const [nav, setNav] = useState<{ index: number; entries: { id: number }[] }>({ index: 0, entries: [] })
+  const navGen = useRef(0)
 
   const command = (method: string, params?: Record<string, unknown>) => {
     const previewId = previewRef.current
@@ -60,13 +71,31 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
   const commandRef = useRef(command)
   commandRef.current = command
 
+  const readHistory = () => {
+    const gen = ++navGen.current
+    void command('Page.getNavigationHistory')
+      .then((result) => {
+        if (gen !== navGen.current) return
+        const body = result as { currentIndex?: number; entries?: { id?: number }[] } | undefined
+        const entries = (body?.entries ?? []).filter((item): item is { id: number } => typeof item?.id === 'number')
+        const index = body?.currentIndex ?? 0
+        setNav((prev) => {
+          if (prev.index === index && prev.entries.length === entries.length && prev.entries.every((item, i) => item.id === entries[i]?.id)) return prev
+          return { index, entries }
+        })
+      })
+      .catch(() => {})
+  }
+  const readHistoryRef = useRef(readHistory)
+  readHistoryRef.current = readHistory
+
   const flushInput = () => {
     inputRaf.current = 0
     const wheel = wheelRef.current
     wheelRef.current = null
     if (wheel) {
       inputBatch.current.push({
-        seq: ++inputSeq.current,
+        seq: nextInputSeq(props.sessionId),
         method: 'Input.dispatchMouseEvent',
         params: {
           type: 'mouseWheel',
@@ -97,7 +126,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved' && last?.method === method && last.params.type === 'mouseMoved') {
       last.params = params
     } else {
-      batch.push({ seq: ++inputSeq.current, method, params })
+      batch.push({ seq: nextInputSeq(props.sessionId), method, params })
     }
     scheduleFlush()
   }
@@ -175,6 +204,19 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       setDraft(displayUrl(url))
     }
 
+    let lastFrameAt = Date.now()
+    const markFrame = () => {
+      lastFrameAt = Date.now()
+    }
+    const wake = () => {
+      const run = (method: string, params: Record<string, unknown>) => {
+        void commandRef.current(method, params).catch(() => {})
+      }
+      run('Emulation.setFocusEmulationEnabled', { enabled: true })
+      run('Page.setWebLifecycleState', { state: 'active' })
+      run('Emulation.setIdleOverride', { isUserActive: true, isScreenUnlocked: true })
+    }
+
     const paintFrame = async (previewId: number, blob: Blob, meta: ScreencastMeta) => {
       const canvas = canvasRef.current
       const stage = stageRef.current
@@ -220,6 +262,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         socket.onmessage = (event) => {
           if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 12) return
           got = true
+          markFrame()
           pending = event.data
           void paintNext()
         }
@@ -250,6 +293,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         }
         const seq = Number(res.headers.get('X-Frame-Seq') || after)
         const blob = await res.blob()
+        markFrame()
         try {
           await paintFrame(previewId, blob, {
             deviceWidth: Number(res.headers.get('X-Device-Width')) || undefined,
@@ -297,6 +341,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       const frame = event.params?.frame as { url?: string; parentId?: string } | undefined
       if (frame?.url && !frame.parentId) {
         showUrl(frame.url)
+        readHistoryRef.current()
       }
     })
 
@@ -311,11 +356,13 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
           }
           current = info.id
           previewRef.current = info.id
-          setPages(info.pages)
+          commitPagesRef.current(applyTabOrder(sessionId, info.pages))
           setPageId(info.pageId)
           wantedRef.current = info.pageId
           showUrl(info.pages.find((item) => item.id === info.pageId)?.url ?? '')
           void fitPreviewRef.current().catch(() => {})
+          readHistoryRef.current()
+          wake()
           void pullFrames(info.id)
           if (pendingClose !== info.id) {
             await new Promise<void>((resolve) => {
@@ -332,12 +379,53 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         const old = current
         current = 0
         previewRef.current = 0
+        navGen.current++
+        setNav({ index: 0, entries: [] })
         if (old) await window.api.sessions.browserDisconnect(sessionId, old).catch(() => {})
         if (!dead) await sleep(800)
       }
     }
 
     void run()
+    const beat = window.setInterval(() => {
+      if (dead || !previewRef.current) return
+      wake()
+      if (Date.now() - lastFrameAt < 2500) return
+      const stage = stageRef.current
+      if (!stage) return
+      lastFrameAt = Date.now()
+      void commandRef.current('Page.bringToFront', {}).catch(() => {})
+      void commandRef.current('Page.startScreencast', screencastParams(stage)).catch(() => {})
+    }, 2000)
+
+    const syncPages = (found: BrowserPageInfo[]) => {
+      const prev = pagesRef.current
+      const ordered = applyTabOrder(sessionId, found)
+      commitPagesRef.current(ordered)
+      const known = new Set(prev.map((item) => item.id))
+      if (prev.length > 0) {
+        const appeared = ordered.filter((page) => page.id && !known.has(page.id))
+        const opened = appeared[appeared.length - 1]
+        if (opened) {
+          openPageRef.current(opened)
+          const strip = stripRef.current
+          if (strip) strip.scrollLeft = strip.scrollWidth
+        }
+      }
+      return ordered
+    }
+    lookForTabRef.current = () => {
+      if (dead || !current) return
+      const previewId = current
+      void window.api.sessions
+        .browserPages(sessionId)
+        .then((found) => {
+          if (dead || current !== previewId) return
+          syncPages(found)
+        })
+        .catch(() => {})
+    }
+
     const poll = window.setInterval(() => {
       if (!current || dead) return
       const previewId = current
@@ -345,20 +433,12 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
         .browserPages(sessionId)
         .then((found) => {
           if (dead || current !== previewId) return
-          let ordered = found
-          setPages((prev) => {
-            ordered = mergePages(prev, found)
-            return ordered
-          })
+          const ordered = syncPages(found)
+          readHistoryRef.current()
           if (wantedRef.current && !found.some((item) => item.id === wantedRef.current)) {
             const next = ordered[ordered.length - 1]
             if (!next) return
-            wantedRef.current = next.id
-            setPageId(next.id)
-            void window.api.sessions
-              .browserSwitch(sessionId, previewId, next.id)
-              .then(() => fitPreviewRef.current())
-              .catch(() => {})
+            openPageRef.current(next)
           }
         })
         .catch(() => {})
@@ -368,7 +448,10 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       dead = true
       resolveWait()
       pullAbort?.abort()
+      window.clearInterval(beat)
       window.clearInterval(poll)
+      for (const id of tabWatch.current) window.clearTimeout(id)
+      tabWatch.current = []
       off()
       const old = current
       current = 0
@@ -385,6 +468,11 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     return pointerToViewport(event.clientX - rect.left, event.clientY - rect.top, fit)
   }
 
+  const watchNewTab = () => {
+    for (const id of tabWatch.current) window.clearTimeout(id)
+    tabWatch.current = [400].map((wait) => window.setTimeout(() => lookForTabRef.current(), wait))
+  }
+
   const sendMouse = (type: 'mousePressed' | 'mouseReleased' | 'mouseMoved', event: PointEvent, clickCount = 1) => {
     const point = pointOf(event)
     if (!point) return
@@ -398,6 +486,7 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
       modifiers: inputModifiers(event),
       pointerType: 'mouse'
     })
+    if (type === 'mousePressed') watchNewTab()
   }
 
   const openPage = (page: BrowserPageInfo) => {
@@ -409,18 +498,23 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     if (!previewId) return
     void window.api.sessions
       .browserSwitch(props.sessionId, previewId, page.id)
-      .then(() => fitPreviewRef.current())
+      .then(() => {
+        void fitPreviewRef.current()
+        readHistoryRef.current()
+      })
       .catch((err: unknown) => {
         setStatus(err instanceof Error ? err.message : '连不上浏览器')
       })
   }
+  openPageRef.current = openPage
 
   const addTab = async () => {
     if (adding) return
     setAdding(true)
     try {
       const page = await window.api.sessions.browserNewPage(props.sessionId)
-      setPages((prev) => (prev.some((item) => item.id === page.id) ? prev : [...prev, page]))
+      const prev = pagesRef.current
+      commitPages(applyTabOrder(props.sessionId, prev.some((item) => item.id === page.id) ? prev : [...prev, page]))
       openPage(page)
       const strip = stripRef.current
       if (strip) strip.scrollLeft = strip.scrollWidth
@@ -439,19 +533,34 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
     try {
       if (active && previewId) {
         const next = rest[rest.length - 1] ?? (await window.api.sessions.browserNewPage(props.sessionId))
-        setPages(rest.length > 0 ? rest : [next])
+        commitPages(applyTabOrder(props.sessionId, rest.length > 0 ? rest : [next]))
         wantedRef.current = next.id
         setPageId(next.id)
         if (!editingRef.current) setDraft(displayUrl(next.url))
         await window.api.sessions.browserSwitch(props.sessionId, previewId, next.id)
         void fitPreviewRef.current()
+        readHistoryRef.current()
       } else {
-        setPages(rest)
+        commitPages(applyTabOrder(props.sessionId, rest))
       }
       await window.api.sessions.browserClosePage(props.sessionId, page.id)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '这个标签已经关了')
     }
+  }
+
+  const goEntry = (id: number | undefined) => {
+    if (id == undefined || props.stopping) return
+    void command('Page.navigateToHistoryEntry', { entryId: id }).catch((err: unknown) => {
+      setStatus(err instanceof Error ? err.message : '浏览器没有回应')
+    })
+  }
+
+  const reloadPage = () => {
+    if (props.stopping) return
+    void command('Page.reload').catch((err: unknown) => {
+      setStatus(err instanceof Error ? err.message : '浏览器没有回应')
+    })
   }
 
   const go = () => {
@@ -513,25 +622,36 @@ export function BrowserLive(props: { sessionId: string; stopping: boolean; onSto
           <Power />
         </Button>
       </div>
-      <div className="flex h-9 shrink-0 items-center border-b border-border bg-muted px-2">
-        <Input
-          ref={addressRef}
-          value={draft}
-          placeholder="地址"
-          className="h-7 rounded-full border-transparent bg-background/80 px-3 shadow-none focus-visible:border-ring focus-visible:bg-background"
-          onFocus={() => {
-            editingRef.current = true
-          }}
-          onBlur={() => {
-            editingRef.current = false
-          }}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return
-            event.preventDefault()
-            go()
-          }}
-        />
+      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border bg-muted px-1.5">
+        <Button size="icon-sm" variant="ghost" className="text-foreground hover:bg-background/80" disabled={props.stopping || nav.entries[nav.index - 1] == undefined} onClick={() => goEntry(nav.entries[nav.index - 1]?.id)}>
+          <ArrowLeft />
+        </Button>
+        <Button size="icon-sm" variant="ghost" className="text-foreground hover:bg-background/80" disabled={props.stopping || nav.entries[nav.index + 1] == undefined} onClick={() => goEntry(nav.entries[nav.index + 1]?.id)}>
+          <ArrowRight />
+        </Button>
+        <Button size="icon-sm" variant="ghost" className="text-foreground hover:bg-background/80" disabled={props.stopping || !previewRef.current} onClick={reloadPage}>
+          <RotateCw />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <Input
+            ref={addressRef}
+            value={draft}
+            placeholder="地址"
+            className="h-7 rounded-full border-transparent bg-background/80 px-3 shadow-none focus-visible:border-ring focus-visible:bg-background"
+            onFocus={() => {
+              editingRef.current = true
+            }}
+            onBlur={() => {
+              editingRef.current = false
+            }}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              go()
+            }}
+          />
+        </div>
       </div>
       <div
         ref={stageRef}
@@ -633,13 +753,40 @@ function displayUrl(url: string) {
   return url
 }
 
-function mergePages(prev: BrowserPageInfo[], found: BrowserPageInfo[]) {
-  const byId = new Map(found.map((page) => [page.id, page]))
-  const kept = prev.filter((page) => byId.has(page.id)).map((page) => byId.get(page.id)!)
-  const seen = new Set(kept.map((page) => page.id))
-  for (const page of found) {
-    if (!seen.has(page.id)) kept.push(page)
+/** 每个服务器的标签顺序。预览卸掉也不清，换终端回来还按打开先后排。 */
+const tabOrder = new Map<string, string[]>()
+
+function nextInputSeq(sessionId: string) {
+  const key = `termpilot-browser-input:${sessionId}`
+  let cur = 0
+  try {
+    cur = Number(sessionStorage.getItem(key) || '0')
+  } catch {
+    cur = 0
   }
+  if (!Number.isFinite(cur) || cur < 0) cur = 0
+  const seq = cur + 1
+  try {
+    sessionStorage.setItem(key, String(seq))
+  } catch {
+    // 存不下就只用这一次的序号
+  }
+  return seq
+}
+
+function applyTabOrder(sessionId: string, found: BrowserPageInfo[]) {
+  const byId = new Map(found.filter((page) => page.id).map((page) => [page.id, page]))
+  const kept: BrowserPageInfo[] = []
+  for (const id of tabOrder.get(sessionId) ?? []) {
+    const page = byId.get(id)
+    if (!page) continue
+    kept.push(page)
+    byId.delete(id)
+  }
+  for (const page of found) {
+    if (page.id && byId.has(page.id)) kept.push(page)
+  }
+  tabOrder.set(sessionId, kept.map((page) => page.id))
   return kept
 }
 

@@ -375,6 +375,24 @@ func (b *browserPreview) startInput() {
 func (b *browserPreview) pushInput(events []BrowserInput) {
 	b.startInput()
 	b.mu.Lock()
+	// 预览重新挂上时序号会从 1 再计。旧游标比它大的话，这些点击会被全部丢掉。
+	restart := len(events) > 0
+	minSeq := 0
+	for _, event := range events {
+		if event.Seq < 1 || !inputMethod(event.Method) {
+			continue
+		}
+		if event.Seq >= b.inputNext {
+			restart = false
+		}
+		if minSeq == 0 || event.Seq < minSeq {
+			minSeq = event.Seq
+		}
+	}
+	if restart && minSeq > 0 {
+		b.inputNext = minSeq
+		b.inputPending = map[int]BrowserInput{}
+	}
 	for _, event := range events {
 		if event.Seq < 1 || !inputMethod(event.Method) {
 			continue
@@ -783,7 +801,36 @@ func (s *cdpSession) Close() error {
 
 func (s *cdpSession) arm() error {
 	_, err := s.call("Page.enable", json.RawMessage(`{}`))
-	return err
+	if err != nil {
+		return err
+	}
+	s.wakePage()
+	go s.keepAwake()
+	return nil
+}
+
+// wakePage 告诉无头 Chrome 这个窗口还在前台。挂着不动时它会把渲染冻住，点击和画面一起停。
+func (s *cdpSession) wakePage() {
+	if s.closed.Load() {
+		return
+	}
+	_ = s.write(s.allocID(), "Emulation.setFocusEmulationEnabled", json.RawMessage(`{"enabled":true}`))
+	_ = s.write(s.allocID(), "Page.setWebLifecycleState", json.RawMessage(`{"state":"active"}`))
+	_ = s.write(s.allocID(), "Emulation.setIdleOverride", json.RawMessage(`{"isUserActive":true,"isScreenUnlocked":true}`))
+	_ = s.write(s.allocID(), "Page.bringToFront", json.RawMessage(`{}`))
+}
+
+func (s *cdpSession) keepAwake() {
+	tick := time.NewTicker(8 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-tick.C:
+			s.wakePage()
+		}
+	}
 }
 
 func (s *cdpSession) call(method string, params json.RawMessage) (json.RawMessage, error) {
@@ -980,7 +1027,9 @@ func (s *cdpSession) ackFrameID(sessionID int) {
 	if err != nil {
 		return
 	}
-	_ = s.write(s.allocID(), "Page.screencastFrameAck", raw)
+	if err := s.write(s.allocID(), "Page.screencastFrameAck", raw); err != nil && !s.closed.Load() {
+		_ = s.write(s.allocID(), "Page.screencastFrameAck", raw)
+	}
 }
 
 func (s *cdpSession) waitFrame(after int, timeout time.Duration) (seq int, jpeg []byte, width, height int, ack func(), err error) {

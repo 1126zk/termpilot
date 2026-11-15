@@ -7,13 +7,12 @@ import (
 )
 
 // 云浏览器是服务器上一个固定名字的容器，和 nginx/caddy 一样走 docker，
-// 不进网站管理。镜像自己把宿主机 9222 转到 Chrome，预览和 Agent 都从这里进。
+// 不进网站管理。Chrome 听在宿主机 9222，预览和 Agent 都从这里进。
 
 const (
 	browserContainer = "termpilot-browser"
-	browserImage     = "chromedp/headless-shell"
-	// browserCDPPort 宿主机上的调试端口。镜像用 socat 听这里，再转到容器里 Chrome 的 9223。
-	// 不要把这个端口写进 docker run，否则 Chrome 会抢走 [::1]:9222，socat 连不上 9223。
+	browserImage     = "selenium/standalone-chrome:latest"
+	// browserCDPPort 宿主机上的调试端口。Chrome 直接听在这里，预览和 Agent 都从这里进。
 	browserCDPPort = 9222
 )
 
@@ -46,7 +45,7 @@ var errBrowserPaused = fmt.Errorf("已暂停")
 const browserStopPullScript = `
 ps -eo pid=,args= | while read -r pid args; do
   case "$args" in
-    *'docker pull chromedp/headless-shell'*)
+    *'docker pull selenium/standalone-chrome'*)
       kill "$pid" 2>/dev/null || true
       ;;
   esac
@@ -95,22 +94,8 @@ echo '浏览器已启动，但调试端口没有响应' >&2
 exit 1
 `
 
-// browserEnsureFonts 容器里没有中文字体时装上，再重启让 Chrome 重新读字体。
-// 只往容器的可写层里装，不删容器，登录数据还在挂载目录里。
-const browserEnsureFonts = `
-if docker inspect termpilot-browser >/dev/null 2>&1; then
-  if ! docker exec termpilot-browser sh -c 'find /usr/share/fonts -type f 2>/dev/null | grep -Eiq "wqy|noto.*cjk|sourcehan|uming|ukai"'; then
-    echo '正在安装中文字体'
-    docker exec termpilot-browser sh -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-wqy-microhei fontconfig && fc-cache -f'
-    docker restart termpilot-browser >/dev/null
-  fi
-fi
-`
-
 // browserInstallScript 没装就拉镜像并创建容器；容器已在则改为启动。
-// 字体目录不存在时不挂，避免 Docker 在宿主机上建出空目录。
-// 调试端口交给镜像：它用 socat 把 9222 转到 Chrome 的 9223。
-// --force-device-scale-factor=2 让直播帧带上两倍像素。只在页面里改缩放时，这版无头 Chrome 的直播仍是布局大小。
+// --force-device-scale-factor=2 让直播帧带上两倍像素。
 const browserInstallScript = `
 set -e
 if ! command -v docker >/dev/null 2>&1; then
@@ -121,42 +106,46 @@ mkdir -p "$HOME/.termpilot/browser"
 if docker inspect termpilot-browser >/dev/null 2>&1; then
   docker start termpilot-browser
 else
-  if ! docker image inspect chromedp/headless-shell >/dev/null 2>&1; then
+  if ! docker image inspect selenium/standalone-chrome:latest >/dev/null 2>&1; then
     # 管道里 docker 不刷百分比。script 分配一个伪终端，进度才会用回车符刷新。
     if script -q -f -e -c "true" /dev/null >/dev/null 2>&1; then
-      script -q -f -e -c "timeout 180 docker pull chromedp/headless-shell" /dev/null
+      script -q -f -e -c "timeout 600 docker pull selenium/standalone-chrome:latest" /dev/null
     else
-      timeout 180 docker pull chromedp/headless-shell
+      timeout 600 docker pull selenium/standalone-chrome:latest
     fi
   fi
-  run_browser() {
-    docker run -d \
-      --name termpilot-browser \
-      --restart unless-stopped \
-      --network host \
-      --shm-size=1g \
-      -v "$HOME/.termpilot/browser:/data" \
-      "$@" \
-      chromedp/headless-shell \
-      --user-data-dir=/data \
-      --no-sandbox \
-      --disable-gpu \
-      --use-gl=angle \
-      --use-angle=swiftshader \
-      --force-device-scale-factor=2
-  }
-  if [ -d /usr/share/fonts ]; then
-    run_browser -v /usr/share/fonts:/usr/share/fonts:ro
-  else
-    run_browser
-  fi
+  docker run -d \
+    --name termpilot-browser \
+    --restart unless-stopped \
+    --network host \
+    --shm-size=1g \
+    --user root \
+    -v "$HOME/.termpilot/browser:/data" \
+    --entrypoint google-chrome \
+    selenium/standalone-chrome:latest \
+    --headless=new \
+    --user-data-dir=/data \
+    --no-sandbox \
+    --disable-gpu \
+    --use-gl=angle \
+    --use-angle=swiftshader \
+    --force-device-scale-factor=2 \
+    --disable-background-timer-throttling \
+    --disable-backgrounding-occluded-windows \
+    --disable-renderer-backgrounding \
+    --disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion \
+    --remote-debugging-port=9222 \
+    --remote-debugging-address=127.0.0.1 \
+    --remote-allow-origins=* \
+    --no-first-run \
+    --no-default-browser-check
 fi
-` + browserEnsureFonts + browserWaitPort
+` + browserWaitPort
 
 const browserStartScript = `
 set -e
 docker start termpilot-browser
-` + browserEnsureFonts + browserWaitPort
+` + browserWaitPort
 
 // parseBrowserInfo 把探测脚本的分段输出收成状态。Docker 没在跑时不读容器状态。
 func parseBrowserInfo(stdout string) *BrowserInfo {
@@ -264,7 +253,7 @@ func (s *ExecService) BrowserInstall(sessionID string, onLine func(string)) erro
 	defer s.endBrowserPull(sessionID, pull)
 	res, err := s.Exec(sessionID, ExecOptions{
 		Command:   browserInstallScript,
-		TimeoutMs: 300000,
+		TimeoutMs: 600000,
 		OnLine:    onLine,
 		Cancel:    pull.cancel,
 	})
@@ -275,7 +264,7 @@ func (s *ExecService) BrowserInstall(sessionID string, onLine func(string)) erro
 		return err
 	}
 	if res.TimedOut {
-		return fmt.Errorf("安装云浏览器超时（5 分钟），镜像可能还在后台拉取，稍后再试")
+		return fmt.Errorf("安装云浏览器超时（10 分钟），镜像可能还在后台拉取，稍后再试")
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
 		// 124 是 timeout 杀掉拉取的退出码。原始输出是整段进度条，不能拿去当提示。
@@ -294,28 +283,6 @@ func (s *ExecService) BrowserInstall(sessionID string, onLine func(string)) erro
 	return nil
 }
 
-// EnsureBrowserFonts 预览打开前补中文字体。已经有字体时马上返回。
-func (s *ExecService) EnsureBrowserFonts(sessionID string) error {
-	res, err := s.Exec(sessionID, ExecOptions{Command: browserEnsureFonts + browserWaitPort, TimeoutMs: 180000})
-	if err != nil {
-		return err
-	}
-	if res.TimedOut {
-		return fmt.Errorf("安装中文字体超时")
-	}
-	if res.ExitCode != nil && *res.ExitCode != 0 {
-		msg := strings.TrimSpace(res.Stderr)
-		if msg == "" {
-			msg = strings.TrimSpace(res.Stdout)
-		}
-		if msg == "" {
-			return fmt.Errorf("安装中文字体失败（退出码 %d）", *res.ExitCode)
-		}
-		return fmt.Errorf("安装中文字体失败（退出码 %d）：%s", *res.ExitCode, msg)
-	}
-	return nil
-}
-
 // BrowserService 启动或关闭已安装的云浏览器。op 只认 start / stop。
 func (s *ExecService) BrowserService(sessionID, op string) error {
 	cmd := ""
@@ -323,7 +290,6 @@ func (s *ExecService) BrowserService(sessionID, op string) error {
 	switch op {
 	case "start":
 		cmd = browserStartScript
-		timeoutMs = 180000
 	case "stop":
 		cmd = "docker stop " + browserContainer
 	default:
