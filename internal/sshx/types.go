@@ -187,6 +187,8 @@ type BrowserInfo struct {
 	NeedSudo bool `json:"needSudo"`
 	// State 容器状态：running / exited 等。空串 = Docker 在跑但容器还没装。
 	State string `json:"state"`
+	// HasData 配置目录里还有登录、收藏或历史。容器删掉之后才用来显示「删除数据」。
+	HasData bool `json:"hasData"`
 }
 
 // DiskUsage 一个挂载点的用量，字节数。

@@ -243,6 +243,8 @@ export interface BrowserInfo {
   needSudo: boolean
   /** running / exited 等。空串 = Docker 在跑但容器还没装 */
   state: string
+  /** 配置目录里还有登录、收藏或历史。容器删掉之后才显示删除数据 */
+  hasData: boolean
 }
 
 /** 一条 crontab 条目，与 Go 端 sshx.CronEntry 对应。ours=true 是面板建的（行尾有标记），

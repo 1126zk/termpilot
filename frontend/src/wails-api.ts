@@ -132,7 +132,7 @@ const api = {
       on<{ id: string; line: string }>(IPC.sessionBrowserInstallProgress, (p) => {
         if (p.id === id) cb(p.line)
       }),
-    browserService: (id: string, op: 'start' | 'stop') => invoke<void>(IPC.sessionBrowserService, [id, op]),
+    browserService: (id: string, op: 'start' | 'stop' | 'remove' | 'clear-data') => invoke<void>(IPC.sessionBrowserService, [id, op]),
     browserConnect: (id: string) => invoke<BrowserPreview>(IPC.sessionBrowserConnect, [id]),
     browserDisconnect: (id: string, previewId: number) => invoke<void>(IPC.sessionBrowserDisconnect, [id, previewId]),
     browserSwitch: (id: string, previewId: number, pageId: string) =>

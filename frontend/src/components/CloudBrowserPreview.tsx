@@ -24,7 +24,7 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
   const [loaded, setLoaded] = useState(false)
   const [tick, setTick] = useState(0)
   const termStatus = useAppStore((s) => s.termState[props.termId]?.status)
-  const [busy, setBusy] = useState<'start' | 'stop' | null>(null)
+  const [busy, setBusy] = useState<'start' | 'stop' | 'remove' | 'clear-data' | null>(null)
   const [pausing, setPausing] = useState(false)
   const [clearing, setClearing] = useState(false)
   const installing = task?.status === 'running'
@@ -72,8 +72,10 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
     }
   }, [sessionId, tick])
 
-  const run = (op: 'start' | 'stop') => {
+  const run = (op: 'start' | 'stop' | 'remove' | 'clear-data') => {
     if (!sessionId || busy) return
+    if (op === 'remove' && !confirm('删除容器和镜像？')) return
+    if (op === 'clear-data' && !confirm('删除浏览器数据？')) return
     setBusy(op)
     void window.api.sessions
       .browserService(sessionId, op)
@@ -118,7 +120,7 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
             <Button
               size="sm"
               variant="outline"
-              disabled={installing || clearing}
+              disabled={installing || clearing || busy !== null}
               onClick={() => {
                 if (!sessionId) return
                 setClearing(true)
@@ -127,12 +129,22 @@ export const CloudBrowserPreview = forwardRef<HTMLElement, { termId: string; wid
             >
               {clearing ? '清空中…' : '清空缓存'}
             </Button>
+            {info.hasData && (
+              <Button size="sm" variant="outline" disabled={installing || clearing || busy !== null} onClick={() => run('clear-data')}>
+                {busy === 'clear-data' ? '删除中…' : '删除数据'}
+              </Button>
+            )}
           </div>
         )}
         {info?.dockerRunning && !!info.state && info.state !== 'running' && (
-          <Button size="sm" disabled={busy !== null} onClick={() => run('start')}>
-            {busy === 'start' ? '启动中…' : '启动云浏览器'}
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button size="sm" disabled={busy !== null} onClick={() => run('start')}>
+              {busy === 'start' ? '启动中…' : '启动云浏览器'}
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => run('remove')}>
+              {busy === 'remove' ? '删除中…' : '删除'}
+            </Button>
+          </div>
         )}
         {log.length > 0 && !info?.state && (
           <div

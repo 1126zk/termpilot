@@ -75,6 +75,21 @@ Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docke
 	if !down.DockerAvailable || down.DockerRunning || down.NeedSudo || down.State != "" {
 		t.Fatalf("daemon down must not look like a missing browser: %+v", down)
 	}
+
+	kept := parseBrowserInfo(`
+#TP-DOCKER#
+yes
+#TP-RUNNING#
+yes
+#TP-ERR#
+#TP-STATE#
+#TP-DATA#
+yes
+#TP-END#
+`)
+	if kept.State != "" || !kept.HasData {
+		t.Fatalf("leftover profile: %+v", kept)
+	}
 }
 
 func TestBrowserInstallScriptListensOnPreviewPort(t *testing.T) {
@@ -92,6 +107,18 @@ func TestBrowserInstallScriptListensOnPreviewPort(t *testing.T) {
 	}
 	if strings.Contains(browserStartScript, "docker rm") {
 		t.Fatal("start should not remove the container")
+	}
+	if !strings.Contains(browserRemoveScript, "docker rm -f "+browserContainer) || !strings.Contains(browserRemoveScript, "docker rmi "+browserImage) {
+		t.Fatal("remove should delete the container and the image")
+	}
+	if strings.Contains(browserRemoveScript, ".termpilot/browser") {
+		t.Fatal("remove should keep the profile")
+	}
+	if !strings.Contains(browserClearDataScript, `"$HOME/.termpilot/browser"`) || !strings.Contains(browserClearDataScript, "-mindepth 1 -delete") {
+		t.Fatal("clear data should wipe the profile")
+	}
+	if strings.Contains(browserClearDataScript, "docker rm") || strings.Contains(browserClearDataScript, "docker rmi") {
+		t.Fatal("clear data should not remove the container or the image")
 	}
 	if !strings.Contains(browserInstallScript, fmt.Sprint(browserCDPPort)) {
 		t.Fatal("install script and preview use different CDP ports")

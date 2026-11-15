@@ -121,7 +121,7 @@ func TestBrowserPagesOpensBlankWhenEmpty(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":"b","type":"browser","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/b"}]`))
 		case "/json/new":
 			opened = r.Method + " " + r.URL.RequestURI()
-			_, _ = w.Write([]byte(`{"id":"p","type":"page","title":"Google","url":"https://www.google.com","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}`))
+			_, _ = w.Write([]byte(`{"id":"p","type":"page","title":"New Tab","url":"chrome://newtab/","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -134,10 +134,10 @@ func TestBrowserPagesOpensBlankWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened != "PUT /json/new?https://www.google.com" {
+	if opened != "PUT /json/new?chrome://newtab/" {
 		t.Fatalf("open: %s", opened)
 	}
-	if len(pages) != 1 || pages[0].ID != "p" || pages[0].URL != "https://www.google.com" {
+	if len(pages) != 1 || pages[0].ID != "p" || pages[0].URL != "chrome://newtab/" {
 		t.Fatalf("pages: %+v", pages)
 	}
 }
@@ -160,9 +160,9 @@ func TestBrowserPagesConcurrentOpenCreatesOne(t *testing.T) {
 		case "/json/new":
 			mu.Lock()
 			opened++
-			listed = []byte(`[{"id":"b","type":"browser","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/b"},{"id":"p","type":"page","title":"Google","url":"https://www.google.com","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}]`)
+			listed = []byte(`[{"id":"b","type":"browser","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/b"},{"id":"p","type":"page","title":"New Tab","url":"chrome://newtab/","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}]`)
 			mu.Unlock()
-			_, _ = w.Write([]byte(`{"id":"p","type":"page","title":"Google","url":"https://www.google.com","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}`))
+			_, _ = w.Write([]byte(`{"id":"p","type":"page","title":"New Tab","url":"chrome://newtab/","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/p"}`))
 		default:
 			http.NotFound(w, r)
 		}

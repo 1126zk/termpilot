@@ -20,8 +20,8 @@ import (
 
 const browserCDPAddr = "127.0.0.1:9222"
 
-// 新标签和第一次没有页面时打开的地址。无头 Chrome 没有自己的新标签页。
-const browserNewTabURL = "https://www.google.com"
+// 新标签和第一次没有页面时打开的地址。用 Chrome 自己的新标签页，不进搜索结果。
+const browserNewTabURL = "chrome://newtab/"
 
 // BrowserPage 一个浏览器标签。
 type BrowserPage struct {

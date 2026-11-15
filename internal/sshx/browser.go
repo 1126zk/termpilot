@@ -29,6 +29,12 @@ cat "$errf" 2>/dev/null
 rm -f "$errf"
 echo '#TP-STATE#'
 docker inspect -f '{{.State.Status}}' termpilot-browser 2>/dev/null
+echo '#TP-DATA#'
+if [ -d "$HOME/.termpilot/browser" ] && [ -n "$(find "$HOME/.termpilot/browser" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+  echo yes
+else
+  echo no
+fi
 echo '#TP-END#'
 `
 
@@ -147,6 +153,34 @@ set -e
 docker start termpilot-browser
 ` + browserWaitPort
 
+// browserRemoveScript 删掉容器和镜像。登录、收藏、历史在配置目录里，不跟着删。
+const browserRemoveScript = `
+set -e
+docker rm -f termpilot-browser
+if docker image inspect selenium/standalone-chrome:latest >/dev/null 2>&1; then
+  docker rmi selenium/standalone-chrome:latest
+fi
+`
+
+// browserClearDataScript 删掉配置目录。容器以 root 写进去的文件，本机用户可能删不掉，
+// 镜像还在时就借它清；镜像已经删了再直接删目录。
+const browserClearDataScript = `
+set -e
+dir="$HOME/.termpilot/browser"
+if [ ! -d "$dir" ]; then
+  exit 0
+fi
+if docker image inspect selenium/standalone-chrome:latest >/dev/null 2>&1; then
+  docker run --rm --network none --user root \
+    -v "$dir:/data" \
+    --entrypoint find \
+    selenium/standalone-chrome:latest \
+    /data -mindepth 1 -delete
+else
+  rm -rf "$dir"
+fi
+`
+
 // parseBrowserInfo 把探测脚本的分段输出收成状态。Docker 没在跑时不读容器状态。
 func parseBrowserInfo(stdout string) *BrowserInfo {
 	sec := splitSections(stdout)
@@ -158,6 +192,7 @@ func parseBrowserInfo(stdout string) *BrowserInfo {
 	if info.DockerRunning {
 		info.State = strings.TrimSpace(sec["STATE"])
 	}
+	info.HasData = strings.TrimSpace(sec["DATA"]) == "yes"
 	return info
 }
 
@@ -283,7 +318,7 @@ func (s *ExecService) BrowserInstall(sessionID string, onLine func(string)) erro
 	return nil
 }
 
-// BrowserService 启动或关闭已安装的云浏览器。op 只认 start / stop。
+// BrowserService 启动、关闭、删除容器镜像，或清掉浏览器数据。op 只认 start / stop / remove / clear-data。
 func (s *ExecService) BrowserService(sessionID, op string) error {
 	cmd := ""
 	timeoutMs := 30000
@@ -292,6 +327,12 @@ func (s *ExecService) BrowserService(sessionID, op string) error {
 		cmd = browserStartScript
 	case "stop":
 		cmd = "docker stop " + browserContainer
+	case "remove":
+		cmd = browserRemoveScript
+		timeoutMs = 120000
+	case "clear-data":
+		cmd = browserClearDataScript
+		timeoutMs = 60000
 	default:
 		return fmt.Errorf("不支持的操作：%q", op)
 	}
@@ -309,8 +350,14 @@ func (s *ExecService) BrowserService(sessionID, op string) error {
 }
 
 func browserOpLabel(op string) string {
-	if op == "start" {
+	switch op {
+	case "start":
 		return "启动"
+	case "remove":
+		return "删除"
+	case "clear-data":
+		return "删除数据"
+	default:
+		return "关闭"
 	}
-	return "关闭"
 }
