@@ -337,6 +337,39 @@ func TestPublicIDUnique(t *testing.T) {
 	}
 }
 
+func TestReorderSessions(t *testing.T) {
+	s := newStore(t)
+	mk := func(name string) *SessionConfig {
+		t.Helper()
+		created, err := s.Create(&SessionInput{Name: name, Host: "h", Port: 22, Username: "u"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+	a := mk("a")
+	b := mk("b")
+	c := mk("c")
+	if err := s.Reorder([]string{c.ID, a.ID, b.ID}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list[0].ID != c.ID || list[1].ID != a.ID || list[2].ID != b.ID {
+		t.Fatalf("order: %s %s %s", list[0].Name, list[1].Name, list[2].Name)
+	}
+	d := mk("d")
+	list, err = s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list[len(list)-1].ID != d.ID {
+		t.Fatalf("new host landed at %s", list[len(list)-1].Name)
+	}
+}
+
 func TestHostNotes(t *testing.T) {
 	s := newStore(t)
 	notes, err := s.SetHostNote("[FE80::1] ", "  跳板机  ")

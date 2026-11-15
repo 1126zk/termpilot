@@ -18,7 +18,8 @@ const translateOf = (axis: FlipAxis, delta: number): string =>
 /** 按住拖动的状态机。move 回调拿轴坐标（x 给 clientX，y 给 clientY）。 */
 export function startPointerDrag(opts: {
   event: { button: number; clientX: number; clientY: number }
-  axis: FlipAxis
+  /** both：网格拖拽，横竖超过阈值都算开始。onMove 仍只回水平坐标。 */
+  axis: FlipAxis | 'both'
   threshold?: number
   onActivate: () => void
   onMove: (position: number) => void
@@ -26,12 +27,15 @@ export function startPointerDrag(opts: {
 }): void {
   if (opts.event.button !== 0) return
   const threshold = opts.threshold ?? 4
-  const start = opts.axis === 'x' ? opts.event.clientX : opts.event.clientY
+  const startX = opts.event.clientX
+  const startY = opts.event.clientY
+  const start = opts.axis === 'y' ? startY : startX
   let active = false
   const move = (ev: PointerEvent) => {
-    const position = opts.axis === 'x' ? ev.clientX : ev.clientY
+    const position = opts.axis === 'y' ? ev.clientY : ev.clientX
     if (!active) {
-      if (Math.abs(position - start) < threshold) return
+      const moved = opts.axis === 'both' ? Math.hypot(ev.clientX - startX, ev.clientY - startY) : Math.abs(position - start)
+      if (moved < threshold) return
       active = true
       opts.onActivate()
     }
@@ -136,6 +140,136 @@ export function useFlipSlide(
     }
     if (animating.length === 0) return
     // 强制 reflow，让无过渡的位移先生效，再上过渡滑回去
+    void container.offsetHeight
+    for (const el of animating) {
+      el.style.transition = 'transform 160ms ease'
+      el.style.transform = ''
+      const clear = () => {
+        el.style.transition = ''
+      }
+      el.addEventListener('transitionend', clear, { once: true })
+      window.setTimeout(clear, 220)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
+export type FlipPoint = { x: number; y: number }
+
+/** 重排前快照网格里各项的左上角。offset* 不受 transform 影响。 */
+export function capturePoints(container: HTMLElement, attr: string, map: Map<string, FlipPoint>): void {
+  map.clear()
+  for (const el of container.querySelectorAll<HTMLElement>(`[${attr}]`)) {
+    const id = el.getAttribute(attr)
+    if (id) map.set(id, { x: el.offsetLeft, y: el.offsetTop })
+  }
+}
+
+/**
+ * 只和紧挨着的上、下、左、右一张对调。中心越过两张卡片布局中点的连线中点才换。
+ * 不把中间的卡片顺次挤开，换行时也不会带动整行。顺序没变返回 null。
+ * left/top/width/height 是被拖卡片跟手后的视觉框（容器坐标）。
+ */
+export function gridNeighborSwap(
+  container: HTMLElement,
+  attr: string,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  skipId: string,
+  orderedIds: string[]
+): string[] | null {
+  const boxes = new Map<string, HTMLElement>()
+  for (const el of container.querySelectorAll<HTMLElement>(`[${attr}]`)) {
+    const id = el.getAttribute(attr)
+    if (id && orderedIds.includes(id)) boxes.set(id, el)
+  }
+  const rows: string[][] = []
+  for (const id of orderedIds) {
+    const el = boxes.get(id)
+    if (!el) continue
+    const row = rows.find((line) => {
+      const head = boxes.get(line[0])
+      return head != null && Math.abs(head.offsetTop - el.offsetTop) < 4
+    })
+    if (row) row.push(id)
+    else rows.push([id])
+  }
+  let rowIndex = -1
+  let colIndex = -1
+  rows.forEach((row, index) => {
+    const col = row.indexOf(skipId)
+    if (col >= 0) {
+      rowIndex = index
+      colIndex = col
+    }
+  })
+  const own = boxes.get(skipId)
+  if (!own || rowIndex < 0) return null
+  const around = [
+    rows[rowIndex]?.[colIndex - 1],
+    rows[rowIndex]?.[colIndex + 1],
+    rows[rowIndex - 1]?.[colIndex],
+    rows[rowIndex + 1]?.[colIndex]
+  ].filter((id): id is string => !!id)
+  const cx = left + width / 2
+  const cy = top + height / 2
+  const ownX = own.offsetLeft + own.offsetWidth / 2
+  const ownY = own.offsetTop + own.offsetHeight / 2
+  let nextTo: string | null = null
+  let crossed = 0
+  for (const id of around) {
+    const el = boxes.get(id)
+    if (!el) continue
+    const nx = el.offsetLeft + el.offsetWidth / 2
+    const ny = el.offsetTop + el.offsetHeight / 2
+    const horizontal = Math.abs(ny - ownY) < Math.abs(nx - ownX)
+    const mid = horizontal ? (ownX + nx) / 2 : (ownY + ny) / 2
+    const dir = horizontal ? Math.sign(nx - ownX) || 1 : Math.sign(ny - ownY) || 1
+    const past = ((horizontal ? cx : cy) - mid) * dir
+    if (past > crossed) {
+      crossed = past
+      nextTo = id
+    }
+  }
+  if (!nextTo) return null
+  const from = orderedIds.indexOf(skipId)
+  const to = orderedIds.indexOf(nextTo)
+  if (from < 0 || to < 0) return null
+  const next = orderedIds.slice()
+  next[from] = nextTo
+  next[to] = skipId
+  return next
+}
+
+/** 网格 FLIP：其余卡片从旧的左上角滑到新位置。跟手的那张自己用 translate 跟着指针。 */
+export function useFlipMove(
+  active: boolean,
+  containerRef: RefObject<HTMLElement | null>,
+  attr: string,
+  skipId: string | null,
+  prev: RefObject<Map<string, FlipPoint>>,
+  deps: unknown[]
+): void {
+  useLayoutEffect(() => {
+    if (!active) return
+    const container = containerRef.current
+    if (!container) return
+    const animating: HTMLElement[] = []
+    for (const el of container.querySelectorAll<HTMLElement>(`[${attr}]`)) {
+      const id = el.getAttribute(attr)
+      if (!id || id === skipId) continue
+      const old = prev.current.get(id)
+      if (!old) continue
+      const dx = old.x - el.offsetLeft
+      const dy = old.y - el.offsetTop
+      if (dx === 0 && dy === 0) continue
+      el.style.transition = 'none'
+      el.style.transform = `translate(${dx}px, ${dy}px)`
+      animating.push(el)
+    }
+    if (animating.length === 0) return
     void container.offsetHeight
     for (const el of animating) {
       el.style.transition = 'transform 160ms ease'

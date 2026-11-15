@@ -158,6 +158,9 @@ interface AppState {
   /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面）。
       分屏时数组里带 SPLIT_MARK，它后面的标签归辅栏 */
   reorderTabs: (ids: string[]) => void
+  /** 主机页拖动排序。先改内存里的顺序，松手再写库 */
+  reorderSessions: (ids: string[]) => void
+  saveSessionOrder: () => Promise<void>
   /** 右键标签「分右栏」：这个标签单独进辅栏。已有会话分栏时不做 */
   splitTab: (tabId: string, dir: SplitDir) => void
   /** 右键文件条「分右栏」：当前会话内左主右辅。已有窗口分栏时不做 */
@@ -872,6 +875,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
+  reorderSessions: (ids) => {
+    const rank = new Map(ids.map((id, index) => [id, index]))
+    const sessions = [...get().sessions].sort(
+      (a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+    )
+    if (sessions.every((session, index) => session.id === get().sessions[index]?.id)) return
+    set({ sessions })
+  },
+
+  saveSessionOrder: async () => {
+    const ids = get().sessions.map((session) => session.id)
+    try {
+      await window.api.sessions.reorder(ids)
+    } catch (error) {
+      get().setNotice(error instanceof Error ? error.message : '顺序没有记下')
+      await get().loadSessions()
+    }
+  },
+
   reorderTabs: (ids) => {
     const pos = new Map(ids.map((id, index) => [id, index]))
     const tabs = [...get().tabs].sort(
@@ -998,7 +1020,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const shown = next.focus === 'secondary' ? next.secondaryView : next.primaryView
     set({
       sessionSplit: { ...get().sessionSplit, [parentId]: next },
-      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, shown)
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, shown),
+      // 看到的是文件时关掉运维面板，预览才不会被主栏挡住
+      ...(termIdFromView(shown) ? {} : { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== parentId) })
     })
   },
 
@@ -1207,7 +1231,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const existing = tabs.find((t) => t.key === key)
     const pane = get().sessionSplit[termId]
     const place = (editorTabs: EditorTab[]) => {
-      if (!pane) return { editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key } }
+      const opsPanelTermIds = get().opsPanelTermIds.filter((id) => id !== termId)
+      if (!pane) return { editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }, opsPanelTermIds }
       const alive = new Set(editorTabs.map((tab) => tab.key))
       const keep = (id: string) => termIdFromView(id) !== null || alive.has(id)
       const secondary = pane.secondary.filter(keep)
@@ -1217,13 +1242,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!placed) {
         return {
           ...releaseSideTerms(get(), termId),
-          editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }
+          editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key },
+          opsPanelTermIds
         }
       }
       const shown = placed.focus === 'secondary' ? placed.secondaryView : placed.primaryView
       return {
         sessionSplit: { ...get().sessionSplit, [termId]: placed },
-        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, termId, shown)
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, termId, shown),
+        opsPanelTermIds
       }
     }
     if (existing) {
@@ -1313,7 +1340,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   activateEditorTab: (termId, key) =>
     set({
-      editorKeyByTerm: key ? { ...get().editorKeyByTerm, [termId]: key } : withoutKey(get().editorKeyByTerm, termId)
+      editorKeyByTerm: key ? { ...get().editorKeyByTerm, [termId]: key } : withoutKey(get().editorKeyByTerm, termId),
+      ...(key ? { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== termId) } : {})
     }),
   setEditorDirty: (key, dirty) =>
     set({
@@ -1337,6 +1365,7 @@ export function connErrorText(err: string): string {
     ['deadline exceeded', '连接超时'],
     ['no route to host', '没有到主机的路由'],
     ['no such host', '域名解析失败'],
+    ['aborted by the software in your host machine', '本机中断了连接'],
     ['connection reset by peer', '对方重置了连接'],
     ['unable to authenticate', '认证失败（密码或密钥不对）'],
     ['permission denied', '认证失败（密码或密钥不对）'],

@@ -99,6 +99,14 @@ func (a *App) hSessionDelete(args []interface{}) (interface{}, error) {
 	return a.store.Delete(id)
 }
 
+func (a *App) hSessionReorder(args []interface{}) (interface{}, error) {
+	ids, err := arg[[]string](args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.store.Reorder(ids)
+}
+
 func (a *App) hSessionDuplicate(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {

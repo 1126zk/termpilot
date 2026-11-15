@@ -144,6 +144,10 @@ func Open(dir string, cipher Cipher) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("添加 use_key 列失败: %w", err)
 	}
+	if err := ensureColumn(db, "sessions", "sort_order", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("添加 sort_order 列失败: %w", err)
+	}
 	for _, column := range []string{"jump_host", "jump_port", "jump_username", "jump_secret_encrypted"} {
 		if err := dropColumnIfExists(db, "sessions", column); err != nil {
 			db.Close()
@@ -392,7 +396,7 @@ func (r *sessionRow) toPublic() *SessionConfig {
 
 // List 对应 TS list()。
 func (s *Store) List() ([]*SessionConfig, error) {
-	rows, err := s.db.Query("SELECT " + sessionColumns + " FROM sessions ORDER BY created_at ASC, rowid ASC")
+	rows, err := s.db.Query("SELECT " + sessionColumns + " FROM sessions ORDER BY sort_order ASC, created_at ASC, rowid ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -473,6 +477,9 @@ func (s *Store) Create(input *SessionInput) (*SessionConfig, error) {
 		nullStringArg(jumps), nullStringArg(options), nullStringArg(forwards), useKey,
 	)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.appendSort(id); err != nil {
 		return nil, err
 	}
 	saved, err := s.Get(id)
@@ -666,12 +673,44 @@ func (s *Store) Duplicate(id string) (*SessionConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.appendSort(newID); err != nil {
+		return nil, err
+	}
 	saved, err := s.Get(newID)
 	if err != nil {
 		return nil, err
 	}
 	s.publishSaved(newID)
 	return saved, nil
+}
+
+// appendSort 把新建的主机排到现有顺序的末尾。没排过序时大家都是 0，新的也落在最后。
+func (s *Store) appendSort(id string) error {
+	_, err := s.db.Exec(
+		`UPDATE sessions SET sort_order = (
+		   SELECT COALESCE(MAX(sort_order), -1) + 1 FROM sessions WHERE id != ?
+		 ) WHERE id = ?`,
+		id, id,
+	)
+	return err
+}
+
+// Reorder 按给出的 id 顺序重写 sort_order。没出现在列表里的主机保持原序号。
+func (s *Store) Reorder(ids []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for i, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, err := tx.Exec("UPDATE sessions SET sort_order = ? WHERE id = ?", i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SetOs 探测到对端系统/发行版后存下来，连接列表的图标用。

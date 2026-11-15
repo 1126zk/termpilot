@@ -85,6 +85,7 @@ const api = {
     update: (id: string, patch: SessionInput) => invoke(IPC.sessionUpdate, [id, patch]),
     delete: (id: string) => invoke(IPC.sessionDelete, [id]),
     duplicate: (id: string) => invoke<SessionConfig | null>(IPC.sessionDuplicate, [id]),
+    reorder: (ids: string[]) => invoke<void>(IPC.sessionReorder, [ids]),
     detectOs: (id: string) => invoke<OsInfo>(IPC.sessionDetectOs, [id]),
     metrics: (id: string) => invoke<ServerMetrics>(IPC.sessionMetrics, [id]),
     serverInfo: (id: string) => invoke<ServerInfo>(IPC.sessionServerInfo, [id]),

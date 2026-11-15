@@ -5,6 +5,7 @@ export const IPC = {
   sessionUpdate: 'session:update',
   sessionDelete: 'session:delete',
   sessionDuplicate: 'session:duplicate',
+  sessionReorder: 'session:reorder',
   /** main → renderer，Agent 改了会话列表 */
   sessionChanged: 'session:changed',
   hostNoteList: 'host:note-list',

@@ -52,6 +52,8 @@ func translateSSH(message string) string {
 		strings.Contains(message, "ENETUNREACH"),
 		strings.Contains(lower, "unreachable"):
 		return "主机不可达：检查网络"
+	case strings.Contains(lower, "aborted by the software in your host machine"):
+		return "本机中断了连接"
 	case strings.Contains(lower, "connection reset by peer"),
 		strings.Contains(lower, "forcibly closed by the remote host"):
 		return "连接被对方重置"

@@ -40,6 +40,7 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"session:update":                  a.hSessionUpdate,
 		"session:delete":                  a.hSessionDelete,
 		"session:duplicate":               a.hSessionDuplicate,
+		"session:reorder":                 a.hSessionReorder,
 		"session:detect-os":               a.hSessionDetectOs,
 		"session:metrics":                 a.hSessionMetrics,
 		"session:server-info":             a.hSessionServerInfo,
