@@ -51,14 +51,13 @@ type ExecResult struct {
 type ExecService struct {
 	mu      sync.Mutex
 	holds   map[string]*Hold
-	pulls   map[string]*browserPull
 	acquire func(sessionID string) (*Hold, error)
 	isolate func(sessionID string) (*Hold, error)
 }
 
 // NewExecService acquire 返回某会话的共享连接引用。isolate 可以为 nil。
 func NewExecService(acquire, isolate func(sessionID string) (*Hold, error)) *ExecService {
-	return &ExecService{holds: map[string]*Hold{}, pulls: map[string]*browserPull{}, acquire: acquire, isolate: isolate}
+	return &ExecService{holds: map[string]*Hold{}, acquire: acquire, isolate: isolate}
 }
 
 // hold 每条连接缓存一个引用，和终端、文件树共用同一条 SSH 会话。

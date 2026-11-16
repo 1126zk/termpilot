@@ -38,13 +38,7 @@ import type {
   TermModeReply,
   TermModeRun,
   TermStatusEvent,
-  WebInfo,
-  BrowserInfo,
-  BrowserPreview,
-  BrowserPageInfo,
-  BrowserBookmark,
-  BrowserVisit,
-  BrowserCdpEvent
+  WebInfo
 } from '../../shared/types'
 
 /**
@@ -125,38 +119,6 @@ const api = {
       invoke<void>(IPC.sessionWebSSL, [id, domain, op]),
     webService: (id: string, service: string, op: 'start' | 'stop' | 'restart' | 'rm') =>
       invoke<void>(IPC.sessionWebService, [id, service, op]),
-    browser: (id: string) => invoke<BrowserInfo>(IPC.sessionBrowser, [id]),
-    browserInstall: (id: string) => invoke<void>(IPC.sessionBrowserInstall, [id]),
-    browserPause: (id: string) => invoke<void>(IPC.sessionBrowserPause, [id]),
-    browserClearCache: (id: string) => invoke<void>(IPC.sessionBrowserClearCache, [id]),
-    onBrowserInstallProgress: (id: string, cb: (line: string) => void) =>
-      on<{ id: string; line: string }>(IPC.sessionBrowserInstallProgress, (p) => {
-        if (p.id === id) cb(p.line)
-      }),
-    browserService: (id: string, op: 'start' | 'stop' | 'remove' | 'clear-data') => invoke<void>(IPC.sessionBrowserService, [id, op]),
-    browserConnect: (id: string) => invoke<BrowserPreview>(IPC.sessionBrowserConnect, [id]),
-    browserDisconnect: (id: string, previewId: number) => invoke<void>(IPC.sessionBrowserDisconnect, [id, previewId]),
-    browserSwitch: (id: string, previewId: number, pageId: string) =>
-      invoke<void>(IPC.sessionBrowserSwitch, [id, previewId, pageId]),
-    browserPages: (id: string) => invoke<BrowserPageInfo[]>(IPC.sessionBrowserPages, [id]),
-    browserNewPage: (id: string) => invoke<BrowserPageInfo>(IPC.sessionBrowserNewPage, [id]),
-    browserClosePage: (id: string, pageId: string) => invoke<void>(IPC.sessionBrowserClosePage, [id, pageId]),
-    browserCommand: (id: string, previewId: number, method: string, params: Record<string, unknown>) =>
-      invoke<unknown>(IPC.sessionBrowserCommand, [id, previewId, method, params]),
-    browserInput: (id: string, previewId: number, events: { seq: number; method: string; params: Record<string, unknown> }[]) =>
-      invoke<void>(IPC.sessionBrowserInput, [id, previewId, events]),
-    browserFrameSocket: (previewId: number) => invoke<{ url: string }>(IPC.sessionBrowserFrameSocket, [previewId]),
-    browserBookmarks: (id: string) => invoke<BrowserBookmark[]>(IPC.sessionBrowserBookmarks, [id]),
-    browserBookmarkAdd: (id: string, url: string, title: string) =>
-      invoke<BrowserBookmark[]>(IPC.sessionBrowserBookmarkAdd, [id, url, title]),
-    browserBookmarkRemove: (id: string, url: string) =>
-      invoke<BrowserBookmark[]>(IPC.sessionBrowserBookmarkRemove, [id, url]),
-    browserHistory: (id: string) => invoke<BrowserVisit[]>(IPC.sessionBrowserHistory, [id]),
-    browserHistoryClear: (id: string) => invoke<void>(IPC.sessionBrowserHistoryClear, [id]),
-    onBrowserFrame: (id: string, cb: (event: BrowserCdpEvent) => void) =>
-      on<BrowserCdpEvent>(IPC.sessionBrowserFrame, (event) => {
-        if (event.sessionId === id) cb(event)
-      }),
     revealSecret: (id: string) => invoke<string | null>(IPC.sessionRevealSecret, [id]),
     setOs: (id: string, os: string) => invoke(IPC.sessionSetOs, [id, os]),
     onChanged: (cb: (sessions: SessionConfig[]) => void) => on(IPC.sessionChanged, cb)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { RightPanel } from './components/RightPanel'
@@ -9,7 +9,6 @@ import { McpConfirmDialog } from './components/McpConfirmDialog'
 import { NoticeToast } from './components/NoticeToast'
 import { SftpInstallDialog } from './components/SftpInstallDialog'
 import { TerminalView } from './components/TerminalView'
-import { CloudBrowserPreview } from './components/CloudBrowserPreview'
 import { OpsPanel } from './components/OpsPanel'
 import { RemoteEditor } from './components/RemoteEditor'
 import { HostsPage } from './components/HostsPage'
@@ -167,7 +166,6 @@ export default function App() {
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const split = useAppStore((s) => s.split)
   const opsPanelTermIds = useAppStore((s) => s.opsPanelTermIds)
-  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const toolsOpen = useAppStore((s) => s.toolsOpen)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
@@ -175,10 +173,7 @@ export default function App() {
   // 文件标签跟着终端页走，切到主机页、工具页、设置页时收起
   const onTerminalPage = !!activeTab && !hostsOpen && !toolsOpen && !settingsOpen
   const editing = useAppStore((s) => s.editing)
-  const browserOpen = onTerminalPage && !!activeTab && browserPreviewTermIds.includes(activeTab.id)
-  const panelOpen = Boolean(
-    editing || (!browserOpen && rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab)
-  )
+  const panelOpen = Boolean(editing || (rightPanelOpen && !hostsOpen && !toolsOpen && !settingsOpen && activeTab))
   const gridRef = useRef<HTMLDivElement>(null)
 
   // a 是主栏（左 / 上），b 是辅栏（右 / 下）；不分屏时只有 a。每一栏有自己的文件标签和正在看的文件
@@ -189,10 +184,9 @@ export default function App() {
     ] as const
   ).flatMap(([area, termId]) => {
     if (!onTerminalPage || !termId) return []
-    const browser = browserPreviewTermIds.includes(termId)
-    const files = browser ? [] : editorTabs.filter((t) => t.termId === termId)
-    const inner = browser ? null : (sessionSplit[termId] ?? null)
-    const file = browser || inner ? null : (files.find((t) => t.key === editorKeyByTerm[termId]) ?? null)
+    const files = editorTabs.filter((t) => t.termId === termId)
+    const inner = sessionSplit[termId] ?? null
+    const file = inner ? null : (files.find((t) => t.key === editorKeyByTerm[termId]) ?? null)
     return [{ area, termId, files, file, inner }]
   })
   const bars = panes.filter((pane) => pane.files.length > 0 || pane.inner).map((pane) => pane.area)
@@ -202,7 +196,7 @@ export default function App() {
   const termAreas: Record<string, PaneArea> = {}
   for (const pane of panes) {
     if (pane.inner || pane.file) continue
-    if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId) && !browserPreviewTermIds.includes(pane.termId)) {
+    if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId)) {
       opsAreas[pane.termId] = pane.area
     } else termAreas[pane.termId] = pane.area
   }
@@ -228,7 +222,7 @@ export default function App() {
             <OpsPanels areas={opsAreas} />
             <TerminalViews
               areas={termAreas}
-              parked={Object.keys(sessionSplit).filter((termId) => !browserPreviewTermIds.includes(termId))}
+              parked={Object.keys(sessionSplit)}
             />
             {split && onTerminalPage && <SplitDivider dir={split.dir} gridRef={gridRef} />}
             {settingsOpen ? (
@@ -345,12 +339,9 @@ function SplitDivider(props: { dir: SplitDir; gridRef: RefObject<HTMLDivElement 
 function OpsPanels(props: { areas: Record<string, PaneArea> }) {
   const tabs = useAppStore((s) => s.tabs)
   const openIds = useAppStore((s) => s.opsPanelTermIds)
-  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
   const sessionSplit = useAppStore((s) => s.sessionSplit)
   const focusPane = useAppStore((s) => s.focusPane)
-  const openTabs = tabs.filter(
-    (tab) => openIds.includes(tab.id) && !sessionSplit[tab.id] && !browserPreviewTermIds.includes(tab.id)
-  )
+  const openTabs = tabs.filter((tab) => openIds.includes(tab.id) && !sessionSplit[tab.id])
   return (
     <>
       {openTabs.map((tab) => {
@@ -420,7 +411,6 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
 /** 终端视图。看过的标签保持挂载，切回来不重挂；areas 决定谁显示在哪一栏。 */
 function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string[] }) {
   const tabs = useAppStore((s) => s.tabs)
-  const browserPreviewTermIds = useAppStore((s) => s.browserPreviewTermIds)
   const focusPane = useAppStore((s) => s.focusPane)
   const [visited, setVisited] = useState<string[]>([])
   const shownKey = Object.keys(props.areas).join()
@@ -435,7 +425,6 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
     <>
       {visible.map((tab) => {
         const area = props.areas[tab.id]
-        const browser = !!area && browserPreviewTermIds.includes(tab.id)
         return (
           <div
             key={tab.id}
@@ -443,99 +432,12 @@ function TerminalViews(props: { areas: Record<string, PaneArea>; parked?: string
             style={area ? { gridArea: area } : undefined}
             onPointerDownCapture={() => focusPane(tab.id)}
           >
-            {browser && area ? (
-              <BrowserSplitRow termId={tab.id} />
-            ) : (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <TerminalView termId={tab.id} active={!!area} />
-              </div>
-            )}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <TerminalView termId={tab.id} active={!!area} />
+            </div>
           </div>
         )
       })}
     </>
-  )
-}
-
-const BROWSER_WIDTH_KEY = 'termpilot.cloudBrowser.width'
-const TERMINAL_MIN = 320
-const OPS_MIN = 448
-
-function readBrowserWidth(): number | null {
-  const value = Number(localStorage.getItem(BROWSER_WIDTH_KEY))
-  return Number.isFinite(value) && value >= 360 ? Math.round(value) : null
-}
-
-function maxBrowserWidth(rowWidth: number, sideMin: number): number {
-  return Math.max(360, Math.round(rowWidth - 4 - sideMin))
-}
-
-/** 终端 + 云浏览器的分屏行：中间分隔条按住左右拖，浏览器栏宽度落到 localStorage。 */
-function BrowserSplitRow(props: { termId: string }) {
-  const opsOpen = useAppStore((s) => s.opsPanelTermIds.includes(props.termId))
-  const sideMin = opsOpen ? OPS_MIN : TERMINAL_MIN
-  const rowRef = useRef<HTMLDivElement>(null)
-  const panelRef = useRef<HTMLElement>(null)
-  const [width, setWidth] = useState<number | null>(readBrowserWidth)
-  const widthRef = useRef(width)
-  widthRef.current = width
-
-  useEffect(() => {
-    const row = rowRef.current
-    if (!row) return
-    const clamp = () => {
-      const max = maxBrowserWidth(row.clientWidth, sideMin)
-      setWidth((current) => {
-        if (current == null || current <= max) return current
-        widthRef.current = max
-        localStorage.setItem(BROWSER_WIDTH_KEY, String(max))
-        return max
-      })
-    }
-    clamp()
-    const observer = new ResizeObserver(clamp)
-    observer.observe(row)
-    return () => observer.disconnect()
-  }, [sideMin])
-
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const row = rowRef.current
-    const panel = panelRef.current
-    if (!row || !panel) return
-    // 不让拖动时选中两边的文字
-    event.preventDefault()
-    const rect = row.getBoundingClientRect()
-    // 拖动前浏览器栏还是 flex:1，先固化当前实际宽度，第一下才不会跳
-    const current = panel.getBoundingClientRect().width
-    startPointerDrag({
-      event,
-      axis: 'x',
-      threshold: 0,
-      onActivate: () => {
-        widthRef.current = current
-        setWidth(current)
-      },
-      onMove: (x) => {
-        const w = Math.round(Math.max(360, Math.min(maxBrowserWidth(rect.width, sideMin), rect.right - x)))
-        widthRef.current = w
-        setWidth(w)
-      },
-      onEnd: () => {
-        if (widthRef.current != null) localStorage.setItem(BROWSER_WIDTH_KEY, String(widthRef.current))
-      }
-    })
-  }
-
-  return (
-    <div ref={rowRef} className="flex min-h-0 min-w-0 flex-1 flex-row">
-      <div className="flex min-h-0 flex-col overflow-hidden" style={{ flex: `1 0 ${sideMin}px`, minWidth: sideMin }}>
-        {opsOpen ? <OpsPanel termId={props.termId} active /> : <TerminalView termId={props.termId} active />}
-      </div>
-      <div
-        className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
-        onPointerDown={startDrag}
-      />
-      <CloudBrowserPreview ref={panelRef} termId={props.termId} width={width} />
-    </div>
   )
 }

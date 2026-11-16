@@ -29,7 +29,7 @@ func TestReadProgressCRLF(t *testing.T) {
 
 func TestBriefCommandOutputDropsProgress(t *testing.T) {
 	raw := "Using default tag: latest\r\n" +
-		"latest: Pulling from chromedp/headless-shell\n" +
+		"latest: Pulling from library/nginx\n" +
 		"deeff7fa601f: Downloading [=>] 22MB/131MB\rdeeff7fa601f: Downloading [==>] 40MB/131MB\n" +
 		"\x1b[2KError response from daemon: i/o timeout\n"
 	got := briefCommandOutput(raw)

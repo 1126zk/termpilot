@@ -20,8 +20,6 @@ import (
 	"termpilot/internal/sshx"
 	"termpilot/internal/storage"
 	"termpilot/internal/terminal"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // appVersion 是关于页显示的版本号。唯一来源是 frontend/package.json，
@@ -48,7 +46,6 @@ type App struct {
 	exec     *sshx.ExecService
 	local    *localfs.Service
 	mcp      *mcpx.Service
-	frames   *frameStream
 
 	Bridge *Bridge
 
@@ -57,8 +54,6 @@ type App struct {
 	// 右键「在 TermPilot 中打开」传来的目录。前端挂上之后取走。
 	launchMu  sync.Mutex
 	launchDir string
-
-	bookmarkMu sync.Mutex
 }
 
 // userDataDir 固定 %APPDATA%\TermPilot；TERMPILOT_USERDATA 供冒烟测试覆盖。
@@ -129,13 +124,6 @@ func NewApp() *App {
 	syncer.importSshConfig()
 
 	a.pool = sshx.NewPool()
-	a.pool.SetFrameDial(func(sessionID string) (*ssh.Client, func(), error) {
-		hold, err := a.acquireIsolated(sessionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		return hold.Conn.Client, hold.Release, nil
-	})
 	a.terminal = terminal.NewService(sessionStoreAdapter{a}, historyStoreAdapter{a}, appEmitter{a}, a.pool)
 	a.sftp = sftpx.New(sftpx.Options{
 		Acquire:         a.acquire,
@@ -177,9 +165,6 @@ func (a *App) Startup(ctx context.Context) {
 	}
 
 	go a.watchMaximize()
-	if err := a.listenFrames(); err != nil {
-		log.Printf("[TermPilot] 画面通道: %v", err)
-	}
 
 	// 助手只占用一个端口。后开的窗口听不上时，接着用先打开的那个窗口。
 	go a.startMcp()
@@ -207,7 +192,6 @@ func (a *App) startMcp() {
 }
 
 func (a *App) Shutdown(ctx context.Context) {
-	a.closeFrames()
 	a.terminal.DisposeAll()
 	a.sftp.DisposeAll()
 	if err := a.mcp.Stop(); err != nil {

@@ -202,51 +202,6 @@ export interface WebConfFile {
   content: string
 }
 
-/** 云浏览器预览。画面走事件，不从本机端口拉。 */
-export interface BrowserPageInfo {
-  id: string
-  title: string
-  url: string
-}
-
-export interface BrowserBookmark {
-  url: string
-  title: string
-}
-
-export interface BrowserVisit {
-  url: string
-  title: string
-  /** 访问时间，Unix 毫秒 */
-  visitedAt: number
-}
-
-export interface BrowserPreview {
-  id: number
-  pageId: string
-  pages: BrowserPageInfo[]
-}
-
-export interface BrowserCdpEvent {
-  sessionId: string
-  previewId: number
-  method: string
-  params?: Record<string, unknown>
-}
-
-/** 云浏览器容器的一次探测。docker 不可用时 state 为空，不能当成「云浏览器没装」。 */
-export interface BrowserInfo {
-  dockerAvailable: boolean
-  /** 引擎在跑。没装、没启动、权限不够都是 false */
-  dockerRunning: boolean
-  /** 当前用户连不上 docker.sock */
-  needSudo: boolean
-  /** running / exited 等。空串 = Docker 在跑但容器还没装 */
-  state: string
-  /** 配置目录里还有登录、收藏或历史。容器删掉之后才显示删除数据 */
-  hasData: boolean
-}
-
 /** 一条 crontab 条目，与 Go 端 sshx.CronEntry 对应。ours=true 是面板建的（行尾有标记），
     可以删；其余是用户自己手写的，只展示。 */
 export interface CronEntry {

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"sort"
 	"sync"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // 对应 src/main/services/SshPool.ts：同一个保存的连接只拨号一次，
@@ -35,29 +33,18 @@ type poolSlot struct {
 	err   error
 	// forwards 这条连接上正在监听的端口映射，按 ForwardRule.key 索引。连接关掉后置 nil。
 	forwards map[string]*activeForward
-	// browser 云浏览器预览的 CDP 连接，不进用户的端口映射列表。连接关掉后置 nil。
-	browser *browserPreview
 }
 
 // Pool 连接池。dial 可替换（测试用），默认是包级 Dial。
 type Pool struct {
-	mu        sync.Mutex
-	slots     map[string]*poolSlot
-	dial      func(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string, opts *DialOptions) (*Conn, error)
-	frameDial func(sessionID string) (*ssh.Client, func(), error)
-	tunnelSeq int
+	mu    sync.Mutex
+	slots map[string]*poolSlot
+	dial  func(ctx context.Context, session *SessionConfig, secret string, jumpSecrets []string, opts *DialOptions) (*Conn, error)
 }
 
 // NewPool 建一个空池。
 func NewPool() *Pool {
 	return &Pool{slots: map[string]*poolSlot{}, dial: Dial}
-}
-
-// SetFrameDial 画面单独拨一条 SSH。键鼠仍走共享连接，大图不会把点击堵在后面。
-func (p *Pool) SetFrameDial(dial func(sessionID string) (*ssh.Client, func(), error)) {
-	p.mu.Lock()
-	p.frameDial = dial
-	p.mu.Unlock()
 }
 
 // SetDialer 替换底层拨号函数（测试或定制传输用）。
@@ -109,9 +96,9 @@ func (p *Pool) Acquire(ctx context.Context, session *SessionConfig, secret strin
 		if p.slots[session.ID] == slot {
 			delete(p.slots, session.ID)
 		}
-		forwards, browser := slot.takeSide()
+		forwards := slot.takeSide()
 		p.mu.Unlock()
-		closeSide(forwards, browser)
+		closeSide(forwards)
 	}()
 	return &Hold{Conn: conn, releaseFn: func() { p.release(session.ID, slot) }}, nil
 }
@@ -244,5 +231,23 @@ func (p *Pool) StopForward(sessionID string, rule ForwardRule) {
 	p.mu.Unlock()
 	if f != nil {
 		_ = f.closer.Close()
+	}
+}
+
+// takeSide 摘下这条连接上还开着的端口映射。调用方持有池锁。
+func (slot *poolSlot) takeSide() []*activeForward {
+	closing := make([]*activeForward, 0, len(slot.forwards))
+	for _, f := range slot.forwards {
+		closing = append(closing, f)
+	}
+	slot.forwards = nil
+	return closing
+}
+
+func closeSide(forwards []*activeForward) {
+	for _, f := range forwards {
+		if f != nil && f.closer != nil {
+			_ = f.closer.Close()
+		}
 	}
 }

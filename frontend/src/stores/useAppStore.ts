@@ -102,8 +102,6 @@ interface AppState {
   sideTerms: SideTerm[]
   /** 已打开运维面板的终端标签，互不影响。 */
   opsPanelTermIds: string[]
-  /** 云浏览器静态预览的标签；只控制界面，不启动远端服务。 */
-  browserPreviewTermIds: string[]
 
   /** 会话编辑弹窗。host 表示在这台机器下再加一条连接 */
   editing:
@@ -190,7 +188,6 @@ interface AppState {
 
   toggleRightPanel: () => void
   toggleOpsPanel: (termId: string) => void
-  toggleBrowserPreview: (termId: string) => void
   setRightPanelPane: (pane: RightPanelPane) => void
   /** readOnly 不传时沿用已打开标签的模式，新标签默认查看 */
   openRemoteEditor: (
@@ -438,7 +435,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   sideTerms: [],
   rightPanelOpen: false,
   opsPanelTermIds: [],
-  browserPreviewTermIds: [],
   hostsOpen: false,
   toolsOpen: false,
   rightPanelPane: 'files',
@@ -845,7 +841,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     const editorKeyByTerm = withoutKey(get().editorKeyByTerm, tabId)
     const opsPanelTermIds = get().opsPanelTermIds.filter((id) => id !== tabId)
-    const browserPreviewTermIds = get().browserPreviewTermIds.filter((id) => id !== tabId)
     const released = releaseSideTerms({ ...get(), termState }, tabId)
     set({
       ...withTabs(get, tabs, activeTabId),
@@ -853,7 +848,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       editorTabs,
       editorKeyByTerm,
       opsPanelTermIds,
-      browserPreviewTermIds,
       sessionSplit: released.sessionSplit,
       sideTerms: released.sideTerms
     })
@@ -1201,15 +1195,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       opsPanelTermIds: [...open, termId],
       ...(splitOn ? {} : { editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) })
-    })
-  },
-
-  toggleBrowserPreview: (termId) => {
-    const open = get().browserPreviewTermIds
-    const opening = !open.includes(termId)
-    set({
-      browserPreviewTermIds: opening ? [...open, termId] : open.filter((id) => id !== termId),
-      ...(opening ? { rightPanelOpen: false } : {})
     })
   },
 
