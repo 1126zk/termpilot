@@ -29,6 +29,30 @@ import { applyAppearance, readCachedAppearance, type ResolvedAppTheme } from '..
 
 const EDITOR_WRAP_KEY = 'termpilot.editorWrap'
 
+/** 同一扇终端重新拨号。先退掉全屏程序留下的鼠标跟踪和备用屏幕，再开新壳。 */
+function relaunchTerm(
+  termId: string,
+  kind: 'ssh' | 'local',
+  sessionId: string | undefined,
+  title: string,
+  shell: LocalShell | undefined
+): void {
+  terminalPool.releaseProgram(termId, '', () => {
+    if (kind === 'local') {
+      terminalPool.clear(termId)
+      window.api.term.bindView(termId)
+    }
+    window.api.term.create({
+      termId,
+      kind,
+      sessionId,
+      title,
+      shell: kind === 'local' ? shell : undefined,
+      ...(terminalPool.size(termId) ?? { cols: 80, rows: 24 })
+    })
+  })
+}
+
 export interface EditorTab {
   key: string
   /** 所属终端标签，只在这个终端下显示 */
@@ -785,18 +809,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const parent = get().tabs.find((item) => item.id === side.parentId)
       const status = get().termState[tabId]?.status
       if (!parent || status === 'connected' || status === 'connecting') return
-      if (parent.kind === 'local') {
-        terminalPool.clear(side.id)
-        window.api.term.bindView(side.id)
-      }
-      window.api.term.create({
-        termId: side.id,
-        kind: parent.kind,
-        sessionId: parent.sessionId ?? undefined,
-        title: side.title,
-        shell: parent.kind === 'local' ? parent.shell : undefined,
-        ...(terminalPool.size(side.id) ?? { cols: 80, rows: 24 })
-      })
+      relaunchTerm(side.id, parent.kind, parent.sessionId ?? undefined, side.title, parent.shell)
       return
     }
     const tab = get().tabs.find((item) => item.id === tabId)
@@ -807,18 +820,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...withTabs(get, get().tabs, tabId),
       editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId)
     })
-    if (tab.kind === 'local') {
-      terminalPool.clear(tab.id)
-      window.api.term.bindView(tab.id)
-    }
-    window.api.term.create({
-      termId: tab.id,
-      kind: tab.kind,
-      sessionId: tab.sessionId ?? undefined,
-      title: tab.title,
-      shell: tab.kind === 'local' ? tab.shell : undefined,
-      ...(terminalPool.size(tab.id) ?? { cols: 80, rows: 24 })
-    })
+    relaunchTerm(tab.id, tab.kind, tab.sessionId ?? undefined, tab.title, tab.shell)
   },
 
   closeTab: (tabId) => {
@@ -1154,7 +1156,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const changed = previous?.status !== e.status || (e.error && e.error !== previous?.error)
     if (down && changed) {
       const message = e.error || '连接已断开，请重新连接'
-      terminalPool.write(e.termId, `\r\n\x1b[1;31m✗ ${connErrorText(message)}\x1b[0m\r\n`)
+      terminalPool.releaseProgram(e.termId, `\r\n\x1b[1;31m✗ ${connErrorText(message)}\x1b[0m\r\n`)
     }
   },
 

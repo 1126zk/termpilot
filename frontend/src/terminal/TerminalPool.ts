@@ -34,6 +34,22 @@ interface PoolEntry {
 // 与默认外观 Source Code Pro 的字体栈一致，外观设置推过来之前先用这一套。
 const DEFAULT_FONT_FAMILY = '"SauceCodePro Nerd Font Mono", Consolas, "Cascadia Mono", "Microsoft YaHei", monospace'
 
+/**
+ * Pi 这类全屏程序会打开鼠标跟踪和备用屏幕。连接突然断时，关闭序列到不了，
+ * 滚轮和鼠标移动仍按 SGR 报告发给新 shell，画面就叠在旧的全屏上。
+ * 只写给本地 xterm。退备用屏幕会把光标拉回进入前的位置，所以只在还停在备用屏幕时退。
+ */
+function releaseProgramModes(leaveAlternate: boolean): string {
+  const modes =
+    '\x1b[?1;9;45;66;1000;1002;1003;1004;1006;1016;2004;2026l' +
+    '\x1b[?7;25h' +
+    '\x1b[4l' +
+    '\x1b[0 q' +
+    '\x1b[0m\x1b(B\x1b)B\x0f'
+  if (!leaveAlternate) return modes
+  return modes + '\x1b[?6l\x1b[r\x1b[?1049l\x1b[0m\x1b(B\x1b)B\x0f'
+}
+
 export interface TermLook {
   cols: number
   rows: number
@@ -49,6 +65,8 @@ class TerminalPool {
   private palette: ITheme = terminalPalette('termius-dark').theme
   /** 字体设置来自外观配置，启动时 applyAppearance 会推过来。 */
   private font = { family: DEFAULT_FONT_FAMILY, size: 14 }
+  /** 退备用屏幕的序列已经排进解析队列时，不要再排一次，否则会把光标拽回进入前的位置。 */
+  private altReleaseQueued = new Set<string>()
 
   /** 换终端配色。已经打开的终端一起改，后面新建的也用这一套。 */
   setTheme(theme: ITheme): void {
@@ -357,6 +375,27 @@ class TerminalPool {
     term.scrollToTop()
   }
 
+  /**
+   * 关掉全屏程序留下的模式。after 接在复位序列后面一次写完，断线提示用这个，避免提示画进备用屏幕。
+   * done 在解析完之后调用，本机重连要等退回主屏幕再清缓冲。
+   */
+  releaseProgram(termId: string, after = '', done?: () => void): void {
+    const term = this.entries.get(termId)?.term
+    if (!term) {
+      done?.()
+      return
+    }
+    const leave = term.buffer.active.type === 'alternate' && !this.altReleaseQueued.has(termId)
+    if (leave) this.altReleaseQueued.add(termId)
+    const finish = () => {
+      if (leave) this.altReleaseQueued.delete(termId)
+      if (!this.entries.has(termId)) return
+      if (leave) term.scrollToBottom()
+      done?.()
+    }
+    term.write(releaseProgramModes(leave) + after, finish)
+  }
+
   /** 读出缓冲里的行。start 含、end 不含。没传范围时返回当前画面。 */
   bufferLines(
     termId: string,
@@ -387,6 +426,7 @@ class TerminalPool {
     e.disposeScrollHint()
     e.term.dispose()
     this.entries.delete(termId)
+    this.altReleaseQueued.delete(termId)
   }
 
   private paint(entry: PoolEntry): void {
