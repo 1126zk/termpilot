@@ -4,9 +4,10 @@ import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } f
 import { PasswordGenerator } from './tools/PasswordGenerator'
 import { PreviewViewer } from './tools/PreviewViewer'
 import { SshKeyTool } from './tools/SshKeyTool'
+import { TodoTool } from './tools/TodoTool'
 
 const ORDER_KEY = 'termpilot.toolOrder'
-const HIDDEN_KEY = 'termpilot.toolHidden'
+const DEFAULT_TOOL = 'todo'
 
 export interface ToolProps {
   /** 当前是否只显示这一个工具 */
@@ -24,6 +25,7 @@ interface ToolDef {
 }
 
 const tools: ToolDef[] = [
+  { id: 'todo', name: '待办', component: TodoTool },
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
   { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
   { id: 'preview', name: '预览', component: PreviewViewer }
@@ -32,40 +34,34 @@ const tools: ToolDef[] = [
 function readOrder(): string[] {
   try {
     const raw = localStorage.getItem(ORDER_KEY)
-    if (!raw) return tools.map((t) => t.id)
+    if (!raw) return tools.map((tool) => tool.id)
     const saved = JSON.parse(raw) as string[]
-    const known = new Set(tools.map((t) => t.id))
+    const known = new Set(tools.map((tool) => tool.id))
     const ordered = saved.filter((id) => known.has(id))
-    for (const tool of tools) if (!ordered.includes(tool.id)) ordered.push(tool.id)
+    for (const tool of tools) {
+      if (ordered.includes(tool.id)) continue
+      if (tool.id === DEFAULT_TOOL) ordered.unshift(tool.id)
+      else ordered.push(tool.id)
+    }
     return ordered
   } catch {
-    return tools.map((t) => t.id)
+    return tools.map((tool) => tool.id)
   }
 }
 
-function readHidden(): string[] {
-  try {
-    const raw = localStorage.getItem(HIDDEN_KEY)
-    if (raw) return JSON.parse(raw) as string[]
-  } catch {
-    // 本地数据损坏时当作全部可见
-  }
-  return []
-}
-
-/** 工具页：一行一个工具，可拖拽排序，顺序保存在本地。 */
+/** 工具页：一次只显示一个工具。打开时先看到待办。标签可拖拽排序。 */
 export function ToolsPage() {
   const [order, setOrder] = useState<string[]>(readOrder)
-  const [hiddenIds, setHiddenIds] = useState<string[]>(readHidden)
-  const [soloId, setSoloId] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState(DEFAULT_TOOL)
   const [fullDiagram, setFullDiagram] = useState(false)
   const orderRef = useRef(order)
   const listRef = useRef<HTMLDivElement>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOffset, setDragOffset] = useState(0)
-  const prevTop = useRef(new Map<string, number>())
+  const prevLeft = useRef(new Map<string, number>())
   const dragStart = useRef({ pos: 0, layout: 0, grab: 0, size: 0 })
-  const pointerY = useRef(0)
+  const pointerX = useRef(0)
+  const suppressClick = useRef(false)
 
   const updateOrder = (next: string[]) => {
     orderRef.current = next
@@ -76,56 +72,63 @@ export function ToolsPage() {
     const list = listRef.current
     const el = list?.querySelector<HTMLElement>(`[data-tool-id="${id}"]`)
     if (!list || !el) return
-    const offset = pointerY.current - dragStart.current.pos - (el.offsetTop - dragStart.current.layout)
+    const offset = pointerX.current - dragStart.current.pos - (el.offsetLeft - dragStart.current.layout)
     const items = list.querySelectorAll<HTMLElement>('[data-tool-id]')
     const first = items[0]
     const last = items[items.length - 1]
     if (!first || !last) return setDragOffset(offset)
-    const min = first.offsetTop - el.offsetTop
-    const max = last.offsetTop + last.offsetHeight - el.offsetHeight - el.offsetTop
+    const min = first.offsetLeft - el.offsetLeft
+    const max = last.offsetLeft + last.offsetWidth - el.offsetWidth - el.offsetLeft
     setDragOffset(Math.min(max, Math.max(min, offset)))
   }
 
-  const dropOrder = (clientY: number, id: string): string[] | null => {
+  const dropOrder = (clientX: number, id: string): string[] | null => {
     const list = listRef.current
     if (!list) return null
-    const pointer = clientY - list.getBoundingClientRect().top + list.scrollTop
-    const start = pointer - dragStart.current.grab
+    const raw = clientX - list.getBoundingClientRect().left + list.scrollLeft - dragStart.current.grab
+    const items = list.querySelectorAll<HTMLElement>('[data-tool-id]')
+    const first = items[0]
+    const last = items[items.length - 1]
+    const start =
+      first && last
+        ? Math.min(last.offsetLeft + last.offsetWidth - dragStart.current.size, Math.max(first.offsetLeft, raw))
+        : raw
     return moveTo(
       orderRef.current,
       id,
-      dropIndex(list, 'data-tool-id', 'y', start, start + dragStart.current.size, id, orderRef.current)
+      dropIndex(list, 'data-tool-id', 'x', start, start + dragStart.current.size, id, orderRef.current)
     )
   }
 
   const startDrag = (event: React.PointerEvent, id: string) => {
     startPointerDrag({
       event,
-      axis: 'y',
+      axis: 'x',
       onActivate: () => {
         const list = listRef.current
         const el = list?.querySelector<HTMLElement>(`[data-tool-id="${id}"]`)
-        const pointer = list ? event.clientY - list.getBoundingClientRect().top + list.scrollTop : 0
+        const pointer = list ? event.clientX - list.getBoundingClientRect().left + list.scrollLeft : 0
         dragStart.current = {
-          pos: event.clientY,
-          layout: el?.offsetTop ?? 0,
-          grab: pointer - (el?.offsetTop ?? 0),
-          size: el?.offsetHeight ?? 0
+          pos: event.clientX,
+          layout: el?.offsetLeft ?? 0,
+          grab: pointer - (el?.offsetLeft ?? 0),
+          size: el?.offsetWidth ?? 0
         }
         setDragId(id)
         setDragOffset(0)
       },
-      onMove: (y) => {
-        pointerY.current = y
-        const next = dropOrder(y, id)
+      onMove: (x) => {
+        pointerX.current = x
+        const next = dropOrder(x, id)
         if (next && listRef.current) {
-          capturePositions(listRef.current, 'data-tool-id', 'y', prevTop.current)
+          capturePositions(listRef.current, 'data-tool-id', 'x', prevLeft.current)
           updateOrder(next)
         }
         followPointer(id)
       },
       onEnd: () => {
-        prevTop.current.clear()
+        suppressClick.current = true
+        prevLeft.current.clear()
         setDragId(null)
         setDragOffset(0)
         localStorage.setItem(ORDER_KEY, JSON.stringify(orderRef.current))
@@ -133,42 +136,47 @@ export function ToolsPage() {
     })
   }
 
-  useFlipSlide(dragId !== null, listRef, 'data-tool-id', 'y', dragId, prevTop, [order, dragId])
+  useFlipSlide(dragId !== null, listRef, 'data-tool-id', 'x', dragId, prevLeft, [order, dragId])
   useLayoutEffect(() => {
     if (dragId) followPointer(dragId)
   }, [order, dragId])
 
-  const toggleHidden = (id: string) => {
-    setHiddenIds((current) => {
-      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
-      localStorage.setItem(HIDDEN_KEY, JSON.stringify(next))
-      return next
-    })
-  }
-
-  const visibleOrder = order.filter((id) => !hiddenIds.includes(id) && (!soloId || id === soloId))
+  const selected = order.includes(activeId) ? activeId : DEFAULT_TOOL
+  const active = tools.find((tool) => tool.id === selected) ?? tools[0]
+  const ActiveTool = active.component
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', fullDiagram ? 'overflow-hidden' : 'overflow-y-auto')}>
       <div className={cn('flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'gap-3 px-6 py-5')}>
         {!fullDiagram && (
-          <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-1.5">
+          <div
+            ref={listRef}
+            className="relative mx-auto flex w-full max-w-3xl flex-nowrap items-center gap-1.5 overflow-x-auto"
+          >
             {order.map((id) => {
-              const tool = tools.find((t) => t.id === id)
+              const tool = tools.find((item) => item.id === id)
               if (!tool) return null
-              const hidden = hiddenIds.includes(id)
+              const on = tool.id === selected
               return (
                 <button
                   key={id}
                   type="button"
+                  data-tool-id={id}
                   className={cn(
-                    'flex h-7 items-center rounded-md px-3 text-[13px] font-medium transition-colors',
-                    hidden
-                      ? 'bg-muted/60 text-muted-foreground hover:bg-accent'
-                      : 'bg-primary/15 text-primary hover:bg-primary/20'
+                    'flex h-7 shrink-0 items-center rounded-md px-3 text-[13px] font-medium transition-colors',
+                    on ? 'bg-primary/15 text-primary' : 'bg-muted/60 text-muted-foreground hover:bg-accent',
+                    dragId === id && 'relative z-10 shadow-lg ring-1 ring-foreground/30'
                   )}
-                  title={hidden ? '点击显示' : '点击隐藏'}
-                  onClick={() => toggleHidden(id)}
+                  style={dragId === id ? { transform: `translateX(${dragOffset}px)` } : undefined}
+                  title="拖拽排序"
+                  onPointerDown={(event) => startDrag(event, id)}
+                  onClick={() => {
+                    if (suppressClick.current) {
+                      suppressClick.current = false
+                      return
+                    }
+                    setActiveId(id)
+                  }}
                 >
                   {tool.name}
                 </button>
@@ -176,54 +184,13 @@ export function ToolsPage() {
             })}
           </div>
         )}
-        <div
-          ref={listRef}
-          className={cn('relative flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'mx-auto max-w-3xl')}
-        >
-          {visibleOrder.length === 0 && (
-            <p className="py-10 text-center text-xs text-muted-foreground">所有工具已隐藏，点上方标签重新打开</p>
-          )}
-          {visibleOrder.map((id) => {
-            const tool = tools.find((t) => t.id === id)
-            if (!tool) return null
-            const Component = tool.component
-            return (
-              <div
-                key={tool.id}
-                data-tool-id={tool.id}
-                className={cn(
-                  fullDiagram
-                    ? 'flex min-h-0 flex-1'
-                    : 'flex items-center gap-3 border-b border-border py-4 first:pt-0 last:border-b-0',
-                  dragId === tool.id && 'relative z-10 bg-background shadow-lg ring-1 ring-foreground/30'
-                )}
-                style={dragId === tool.id ? { transform: `translateY(${dragOffset}px)` } : undefined}
-              >
-                {!fullDiagram && (
-                  <div className="flex w-32 shrink-0 items-center">
-                    <span
-                      className="cursor-grab select-none text-sm font-medium text-foreground active:cursor-grabbing"
-                      title="拖拽排序"
-                      onPointerDown={(e) => startDrag(e, tool.id)}
-                    >
-                      {tool.name}
-                    </span>
-                  </div>
-                )}
-                <div className={cn('min-w-0 flex-1', fullDiagram && 'flex min-h-0 flex-col')}>
-                  <Component
-                    solo={soloId === id}
-                    onSolo={() => setSoloId((current) => (current === id ? null : id))}
-                    onFullDiagram={(full) => {
-                      setFullDiagram(full)
-                      // 退出全屏时恢复显示全部工具，否则 solo 会把其他工具一直过滤掉
-                      if (!full) setSoloId(null)
-                    }}
-                  />
-                </div>
-              </div>
-            )
-          })}
+        <div className={cn('flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'mx-auto max-w-3xl')}>
+          <ActiveTool
+            solo
+            onFullDiagram={(full) => {
+              setFullDiagram(full)
+            }}
+          />
         </div>
       </div>
     </div>
