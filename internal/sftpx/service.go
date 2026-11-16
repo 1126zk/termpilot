@@ -2,9 +2,9 @@ package sftpx
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,9 +30,6 @@ type Options struct {
 	// AcquireIsolated 另拨一条独立连接（sshx.Pool.AcquireIsolated）。
 	// 改过 sshd 子系统之后必须走它，旧会话仍按登录时的配置执行 SFTP。
 	AcquireIsolated func(sessionID string) (*sshx.Hold, error)
-	// Drop 共享连接已经不能再开通道时丢掉池里的这条（sshx.Pool.Drop）。
-	// 终端还占着引用时，只关文件通道不会让下次重新拨号。nil 表示不丢。
-	Drop func(sessionID string)
 	// InstallScript 远端修复脚本的内容来源，可注入；nil 用内嵌的 install-sftp.sh。
 	InstallScript func() (string, error)
 	// OnTransfer 传输进度事件（TS 里推到 IPC.sftpTransfer）。
@@ -152,12 +149,10 @@ func (s *Service) run(sessionID string, op func(conn *liveConn) error) error {
 		return present(err)
 	}
 	if err := op(conn); err != nil {
-		if isDeadChannel(err) || sharedConnDead(err) {
+		if isDeadChannel(err) {
 			s.Close(sessionID)
-		}
-		// 只在 SSH 本身断了时丢掉池里的连接。单次列目录超时还留着，终端不用跟着断。
-		if sharedConnDead(err) {
-			s.dropShared(sessionID)
+			// 只关真断了的那一条。还能回心跳就留着，终端不用跟着断。
+			go closeIfDead(conn.hold.Conn)
 		}
 		return present(err)
 	}
@@ -186,9 +181,8 @@ func (s *Service) sftpOf(sessionID string) (*liveConn, error) {
 	if err == nil {
 		return conn, nil
 	}
-	// 开通道时连接已经断了，或 12 秒没回应。别在这条上再跑安装脚本，丢掉后下次重新拨。
-	if armGaveUp(err) {
-		s.dropShared(sessionID)
+	// 连接已经断了，别在这条上再跑安装脚本，下次重新拨。
+	if errors.Is(err, errConnDead) {
 		return nil, present(err)
 	}
 	if s.hasRoute(sessionID) || !isMissingSftp(err) {
@@ -295,7 +289,11 @@ func (s *Service) armSftp(sessionID string, isolated bool) (*liveConn, error) {
 		return sftp.NewClient(hold.Conn.Client, sftp.UseConcurrentWrites(true))
 	}, 12*time.Second, "SFTP 子系统没有响应")
 	if err != nil {
+		dead := closeIfDead(hold.Conn)
 		hold.Release()
+		if dead {
+			return nil, fmt.Errorf("%w: %w", errConnDead, err)
+		}
 		return nil, err
 	}
 	return &liveConn{client: client, hold: hold}, nil
@@ -409,12 +407,6 @@ func (s *Service) decide(sessionID string) (routeKind, error) {
 	}
 }
 
-func (s *Service) dropShared(sessionID string) {
-	if s.opts.Drop != nil {
-		s.opts.Drop(sessionID)
-	}
-}
-
 func (s *Service) dropEntry(sessionID string, entry *connEntry) {
 	s.mu.Lock()
 	if s.conns[sessionID] == entry {
@@ -491,25 +483,26 @@ func withTimeout[T any](fn func() (T, error), d time.Duration, message string) (
 var (
 	missingSftpRe = regexp.MustCompile(`(?i)exit code 127|establishing SFTP|sftp subsystem|sftp-server|subsystem request failed|没有响应|子系统超时`)
 	deadChannelRe = regexp.MustCompile(`(?i)没有响应|超时|timed out|Not connected|通道已关闭|connection.*(closed|lost)|channel.*closed`)
-	// connDeadRe 整条 SSH 已经不能再开通道。通道被拒绝、缺子系统不算，那条连接还活着。
-	connDeadRe = regexp.MustCompile(`(?i)unexpected packet|connection reset|use of closed network connection|broken pipe|ssh: disconnect`)
 )
 
-// armGaveUp 共享连接上开 SFTP 子系统没有打开：连接已断，或 12 秒没有回应。
-func armGaveUp(err error) bool {
-	return err != nil && (err.Error() == "SFTP 子系统没有响应" || sharedConnDead(err))
-}
+// errConnDead 开 SFTP 时发现底层 SSH 已经断了。
+var errConnDead = errors.New("SSH 连接已断开")
 
-// sharedConnDead 底层 SSH 断了。列目录自己的「SFTP 没有响应」是这一次超时，不算。
-func sharedConnDead(err error) bool {
-	if err == nil {
+// closeIfDead 发一次心跳确认这条 SSH 还活着没有，发不出去就关掉它。
+// 关的是出错的这一条：池里已经换上的新连接不受影响，旧的在 Wait 返回后自己出池。
+// 心跳迟迟不回不算断，交给 sshx 的保活去判。
+func closeIfDead(conn *sshx.Conn) bool {
+	if conn == nil || conn.Client == nil {
 		return false
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.ErrClosedPipe) {
-		return true
+	dead, _ := withTimeout(func() (bool, error) {
+		_, _, err := conn.Client.SendRequest("keepalive@openssh.com", true, nil)
+		return err != nil, nil
+	}, 5*time.Second, "")
+	if dead {
+		conn.Close()
 	}
-	msg := err.Error()
-	return msg == "EOF" || strings.HasSuffix(msg, ": EOF") || connDeadRe.MatchString(msg)
+	return dead
 }
 
 // isMissingSftp 对应 TS isMissingSftp：像是对端没开 SFTP 子系统。

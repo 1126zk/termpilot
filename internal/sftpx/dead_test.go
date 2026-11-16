@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
-	"io"
 	"net"
 	"testing"
 
@@ -13,62 +12,72 @@ import (
 	"termpilot/internal/sshx"
 )
 
-func TestArmGaveUp(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{errors.New("ssh: unexpected packet in response to channel open: <nil>"), true},
-		{errors.New("SFTP 子系统没有响应"), true},
-		{io.EOF, true},
-		{errors.New("read tcp 127.0.0.1:1->127.0.0.1:2: use of closed network connection"), true},
-		{errors.New("ssh: subsystem request failed"), false},
-		{errors.New("ssh: rejected: administratively prohibited"), false},
-		{errors.New("SFTP 没有响应"), false},
-		{nil, false},
-	}
-	for _, tc := range cases {
-		if got := armGaveUp(tc.err); got != tc.want {
-			t.Errorf("armGaveUp(%v) = %v, want %v", tc.err, got, tc.want)
-		}
-	}
-}
-
-func TestDeadSharedConnDropsPool(t *testing.T) {
+func TestDeadSharedConnClosesThatConn(t *testing.T) {
 	client := sshClientServerClosesOnChannel(t)
-	var dropped []string
 	svc := New(Options{
 		Acquire: func(string) (*sshx.Hold, error) {
 			return &sshx.Hold{Conn: &sshx.Conn{Client: client}}, nil
 		},
-		Drop: func(id string) { dropped = append(dropped, id) },
-		OnInstall: func(InstallEvent) {
+		InstallScript: func() (string, error) {
 			t.Error("连接已经断了，不该再跑安装")
+			return "", errors.New("skip")
 		},
 	})
 	if _, _, err := svc.List("s1", "/"); err == nil {
 		t.Fatal("应该失败")
 	}
-	if len(dropped) != 1 || dropped[0] != "s1" {
-		t.Fatalf("应该丢掉池里的连接，得到 %v", dropped)
+	if !connClosed(client) {
+		t.Fatal("断了的连接应该被关掉")
 	}
 }
 
-func TestRejectedChannelKeepsPool(t *testing.T) {
+func TestRejectedChannelKeepsConn(t *testing.T) {
 	client := sshClientServerRejectsChannels(t)
-	dropped := false
 	svc := New(Options{
 		Acquire: func(string) (*sshx.Hold, error) {
 			return &sshx.Hold{Conn: &sshx.Conn{Client: client}}, nil
 		},
-		Drop: func(string) { dropped = true },
+		InstallScript: func() (string, error) { return "", errors.New("skip") },
 	})
 	if _, _, err := svc.List("s1", "/"); err == nil {
 		t.Fatal("应该失败")
 	}
-	if dropped {
-		t.Fatal("通道被拒绝时连接还在，不该丢掉")
+	if connClosed(client) {
+		t.Fatal("通道被拒绝时连接还在，不该关掉")
 	}
+}
+
+// sftp-server 起不来时 NewClient 也报 EOF，但 SSH 还活着，不能把终端一起关掉。
+func TestSubsystemEOFKeepsConn(t *testing.T) {
+	client := sshClientForTest(t, func(_ net.Conn, nc ssh.NewChannel) {
+		ch, reqs, err := nc.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			for req := range reqs {
+				_ = req.Reply(true, nil)
+				_ = ch.Close()
+			}
+		}()
+	})
+	svc := New(Options{
+		Acquire: func(string) (*sshx.Hold, error) {
+			return &sshx.Hold{Conn: &sshx.Conn{Client: client}}, nil
+		},
+		InstallScript: func() (string, error) { return "", errors.New("skip") },
+	})
+	if _, _, err := svc.List("s1", "/"); err == nil {
+		t.Fatal("应该失败")
+	}
+	if connClosed(client) {
+		t.Fatal("子系统退出不代表 SSH 断了，不该关连接")
+	}
+}
+
+func connClosed(client *ssh.Client) bool {
+	_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+	return err != nil
 }
 
 func sshClientServerClosesOnChannel(t *testing.T) *ssh.Client {
