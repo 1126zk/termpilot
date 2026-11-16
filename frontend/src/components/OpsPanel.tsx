@@ -1645,7 +1645,7 @@ function WebSection(props: { sessionId: string; active: boolean }) {
         </div>
         {info && !info.dockerAvailable ? (
           <div className="py-8 text-center text-sm text-muted-foreground">这台服务器没有安装 Docker</div>
-        ) : info && svc && !svc.state ? (
+        ) : !info ? null : svc && !svc.state ? (
           <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
             <p>还没有安装 {webTab}</p>
             <Button size="sm" disabled={webInstalling} onClick={install}>
