@@ -549,6 +549,21 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
 
   refreshRef.current = refresh
 
+  const seenDone = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    if (seenDone.current === null) {
+      seenDone.current = new Set(transfers.filter((item) => item.done).map((item) => item.id))
+      return
+    }
+    let uploaded = false
+    for (const item of transfers) {
+      if (!item.done || item.error || seenDone.current.has(item.id)) continue
+      seenDone.current.add(item.id)
+      if (item.direction === 'up') uploaded = true
+    }
+    if (uploaded) void refreshRef.current()
+  }, [transfers])
+
   const dragLocalOut = (path: string) => {
     if (dragging.current) return
     dragging.current = true
@@ -893,6 +908,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                     <span className="min-w-0 shrink-0 text-destructive" title={t.error}>
                       {t.error}
                     </span>
+                  ) : t.done ? (
+                    <span className="shrink-0 text-primary">完成</span>
                   ) : (
                     <span className="shrink-0">{percent}%</span>
                   )}
@@ -910,7 +927,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                 </div>
                 <div className="h-0.5 rounded-full bg-foreground/10">
                   <div
-                    className={`h-full rounded-full ${t.error ? 'bg-destructive' : 'bg-foreground/40'}`}
+                    className={`h-full rounded-full ${t.error ? 'bg-destructive' : t.done ? 'bg-primary' : 'bg-foreground/40'}`}
                     style={{ width: `${percent}%` }}
                   />
                 </div>
