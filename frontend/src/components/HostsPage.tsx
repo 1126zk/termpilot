@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import { agentOnboardPrompt, copyAgentPrompt } from '../agentPrompt'
 import { hostKeyOf } from '../../../shared/host-key'
 import { OsIcon, osIconProps } from './OsIcon'
-import { capturePoints, gridNeighborSwap, startPointerDrag, useFlipMove, type FlipPoint } from './flip'
+import { capturePoints, gridNeighborSwap, useFlipMove, type FlipPoint } from './flip'
 import type { SessionConfig } from '../../../shared/types'
 
 /** 主机页：没有终端标签时的主页。卡片网格列出全部连接，点开即连。 */
@@ -139,50 +139,58 @@ function HostGrid(props: {
   }, [props.sessions, dragId])
 
   const startDrag = (event: ReactPointerEvent, id: string) => {
-    if (!props.sortable) return
+    if (!props.sortable || event.button !== 0) return
     pointer.current = { x: event.clientX, y: event.clientY }
-    const track = (ev: PointerEvent) => {
-      pointer.current = { x: ev.clientX, y: ev.clientY }
+    const originX = event.clientX
+    const originY = event.clientY
+    let active = false
+    const endListen = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
-    window.addEventListener('pointermove', track)
-    const stopTrack = () => {
-      window.removeEventListener('pointermove', track)
-      window.removeEventListener('pointerup', stopTrack)
-      window.removeEventListener('pointercancel', stopTrack)
-    }
-    window.addEventListener('pointerup', stopTrack)
-    window.addEventListener('pointercancel', stopTrack)
-    startPointerDrag({
-      event,
-      axis: 'both',
-      onActivate: () => {
-        const grid = gridRef.current
-        const el = grid?.querySelector<HTMLElement>(`[data-host-id="${id}"]`)
-        dragStart.current = {
-          x: event.clientX,
-          y: event.clientY,
-          layoutX: el?.offsetLeft ?? 0,
-          layoutY: el?.offsetTop ?? 0
-        }
-        setDragId(id)
-        setDragOffset({ x: 0, y: 0 })
-      },
-      onMove: () => {
-        const next = dropOrder(id)
-        if (next && gridRef.current) {
-          capturePoints(gridRef.current, 'data-host-id', prev.current)
-          props.onReorder(next)
-        }
-        follow(id)
-      },
-      onEnd: () => {
-        suppressClick.current = true
-        prev.current.clear()
-        setDragId(null)
-        setDragOffset({ x: 0, y: 0 })
-        void props.onSave()
+    const activate = () => {
+      active = true
+      const el = gridRef.current?.querySelector<HTMLElement>(`[data-host-id="${id}"]`)
+      dragStart.current = {
+        x: pointer.current.x,
+        y: pointer.current.y,
+        layoutX: el?.offsetLeft ?? 0,
+        layoutY: el?.offsetTop ?? 0
       }
-    })
+      setDragId(id)
+      setDragOffset({ x: 0, y: 0 })
+    }
+    const timer = window.setTimeout(activate, 400)
+    const onMove = (ev: PointerEvent) => {
+      pointer.current = { x: ev.clientX, y: ev.clientY }
+      if (!active) {
+        if (Math.hypot(ev.clientX - originX, ev.clientY - originY) > 8) {
+          window.clearTimeout(timer)
+          endListen()
+        }
+        return
+      }
+      const next = dropOrder(id)
+      if (next && gridRef.current) {
+        capturePoints(gridRef.current, 'data-host-id', prev.current)
+        props.onReorder(next)
+      }
+      follow(id)
+    }
+    const onUp = () => {
+      window.clearTimeout(timer)
+      endListen()
+      if (!active) return
+      suppressClick.current = true
+      prev.current.clear()
+      setDragId(null)
+      setDragOffset({ x: 0, y: 0 })
+      void props.onSave()
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   return (
@@ -191,7 +199,6 @@ function HostGrid(props: {
         <HostCard
           key={session.id}
           session={session}
-          draggable={props.sortable}
           dragging={dragId === session.id}
           offset={dragId === session.id ? dragOffset : { x: 0, y: 0 }}
           suppressClick={suppressClick}
@@ -204,7 +211,6 @@ function HostGrid(props: {
 
 function HostCard(props: {
   session: SessionConfig
-  draggable: boolean
   dragging: boolean
   offset: { x: number; y: number }
   suppressClick: { current: boolean }
@@ -261,9 +267,8 @@ function HostCard(props: {
           <div
             role="button"
             className={cn(
-              'group flex w-full min-w-0 items-center gap-3 rounded-lg bg-muted-foreground/10 px-4 py-3.5 text-left transition-colors hover:bg-muted-foreground/15',
-              props.draggable ? 'cursor-grab' : 'cursor-pointer',
-              props.dragging && 'relative z-10 cursor-grabbing shadow-lg ring-1 ring-foreground/30',
+              'group flex w-full min-w-0 cursor-default items-center gap-3 rounded-lg bg-muted-foreground/10 px-4 py-3.5 text-left transition-colors hover:bg-muted-foreground/15',
+              props.dragging && 'relative z-10 cursor-pointer shadow-lg ring-1 ring-foreground/30',
               editing?.action === 'edit' && editing.session.id === session.id && 'ring-2 ring-primary/50'
             )}
             style={props.dragging ? { transform: `translate(${props.offset.x}px, ${props.offset.y}px)` } : undefined}
