@@ -128,6 +128,7 @@ func NewApp() *App {
 	a.sftp = sftpx.New(sftpx.Options{
 		Acquire:         a.acquire,
 		AcquireIsolated: a.acquireIsolated,
+		Drop:            a.pool.Drop,
 		OnTransfer:      func(ev sftpx.TransferEvent) { a.emit("sftp:transfer", ev) },
 		OnInstall:       func(ev sftpx.InstallEvent) { a.emit("sftp:install", ev) },
 	})
