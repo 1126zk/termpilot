@@ -44,6 +44,7 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"session:detect-os":               a.hSessionDetectOs,
 		"session:metrics":                 a.hSessionMetrics,
 		"session:server-info":             a.hSessionServerInfo,
+		"session:speed":                   a.hSessionSpeed,
 		"session:kill-proc":               a.hSessionKillProc,
 		"session:docker":                  a.hSessionDocker,
 		"session:docker-action":           a.hSessionDockerAction,

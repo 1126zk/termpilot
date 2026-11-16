@@ -24,6 +24,8 @@ import type {
   SessionInput,
   ServerInfo,
   ServerMetrics,
+  SpeedReport,
+  SpeedTick,
   SshKeyFile,
   SshKeyImport,
   SshKeyInstall,
@@ -83,6 +85,11 @@ const api = {
     detectOs: (id: string) => invoke<OsInfo>(IPC.sessionDetectOs, [id]),
     metrics: (id: string) => invoke<ServerMetrics>(IPC.sessionMetrics, [id]),
     serverInfo: (id: string) => invoke<ServerInfo>(IPC.sessionServerInfo, [id]),
+    speed: (id: string, kind: 'link' | 'egress') => invoke<SpeedReport>(IPC.sessionSpeed, [id, kind]),
+    onSpeedProgress: (id: string, cb: (tick: SpeedTick) => void) =>
+      on<SpeedTick>(IPC.sessionSpeedProgress, (tick) => {
+        if (tick.id === id) cb(tick)
+      }),
     killProc: (id: string, pid: number) => invoke<void>(IPC.sessionKillProc, [id, pid]),
     docker: (id: string, sudoPassword = '') =>
       invoke<DockerInfo>(IPC.sessionDocker, sudoPassword ? [id, sudoPassword] : [id]),

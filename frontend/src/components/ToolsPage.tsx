@@ -3,10 +3,12 @@ import { cn } from '@/lib/utils'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { PasswordGenerator } from './tools/PasswordGenerator'
 import { PreviewViewer } from './tools/PreviewViewer'
+import { SpeedTool } from './tools/SpeedTool'
 import { SshKeyTool } from './tools/SshKeyTool'
 import { TodoTool } from './tools/TodoTool'
 
 const ORDER_KEY = 'termpilot.toolOrder'
+const LAST_KEY = 'termpilot.toolLast'
 const DEFAULT_TOOL = 'todo'
 
 export interface ToolProps {
@@ -28,6 +30,7 @@ const tools: ToolDef[] = [
   { id: 'todo', name: '待办', component: TodoTool },
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
   { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
+  { id: 'speed', name: '测速', component: SpeedTool },
   { id: 'preview', name: '预览', component: PreviewViewer }
 ]
 
@@ -49,10 +52,20 @@ function readOrder(): string[] {
   }
 }
 
-/** 工具页：一次只显示一个工具。打开时先看到待办。标签可拖拽排序。 */
+function readLast(): string {
+  try {
+    const id = localStorage.getItem(LAST_KEY)
+    if (id && tools.some((tool) => tool.id === id)) return id
+  } catch {
+    // 读不到就当没打开过
+  }
+  return DEFAULT_TOOL
+}
+
+/** 工具页：一次只显示一个工具。没打开过先看到待办，打开过回到上次的工具。标签可拖拽排序。 */
 export function ToolsPage() {
   const [order, setOrder] = useState<string[]>(readOrder)
-  const [activeId, setActiveId] = useState(DEFAULT_TOOL)
+  const [activeId, setActiveId] = useState(readLast)
   const [fullDiagram, setFullDiagram] = useState(false)
   const orderRef = useRef(order)
   const listRef = useRef<HTMLDivElement>(null)
@@ -147,7 +160,7 @@ export function ToolsPage() {
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', fullDiagram ? 'overflow-hidden' : 'overflow-y-auto')}>
-      <div className={cn('flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'gap-3 px-6 py-5')}>
+      <div className={cn('flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'gap-6 px-6 py-5')}>
         {!fullDiagram && (
           <div
             ref={listRef}
@@ -176,6 +189,7 @@ export function ToolsPage() {
                       return
                     }
                     setActiveId(id)
+                    localStorage.setItem(LAST_KEY, id)
                   }}
                 >
                   {tool.name}

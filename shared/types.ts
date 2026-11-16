@@ -130,6 +130,29 @@ export interface ServerInfo {
   wanIp: string
 }
 
+/** 一次测速。没有测到的速率或丢包是负数。route 只在服务器到外网时有：cn / intl。 */
+export interface SpeedTick {
+  id: string
+  phase: 'probe' | 'down' | 'up'
+  ratio: number
+  downBps: number
+  upBps: number
+}
+
+export interface SpeedReport {
+  kind: 'link' | 'egress'
+  route?: 'cn' | 'intl'
+  latencyMs: number
+  jitterMs: number
+  downBps: number
+  upBps: number
+  lossPct: number
+  /** 测完的时间，毫秒 */
+  at?: number
+  from?: string
+  to?: string
+}
+
 /** 一次 Docker 采集，与 Go 端 sshx.DockerInfo 对应。available 为假表示没装 docker。 */
 export interface DockerInfo {
   available: boolean

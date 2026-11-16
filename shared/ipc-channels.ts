@@ -115,6 +115,8 @@ export const IPC = {
   sessionDetectOs: 'session:detect-os',
   sessionMetrics: 'session:metrics',
   sessionServerInfo: 'session:server-info',
+  sessionSpeed: 'session:speed',
+  sessionSpeedProgress: 'session:speed-progress',
   sessionKillProc: 'session:kill-proc',
   sessionDocker: 'session:docker',
   sessionDockerAction: 'session:docker-action',
