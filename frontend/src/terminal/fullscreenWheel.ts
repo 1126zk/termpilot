@@ -10,11 +10,29 @@ import type { Terminal } from '@xterm/xterm'
  * 左键滚动条不变。按住 Shift 不拦截，留给终端自己选文字。
  */
 export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => void {
+  // 全屏程序退出后，关闭跟踪的序列可能晚到或没到。这期间继续上报会把 35;…M 打进 shell，
+  // 并且每动一下都要等一轮网络，所以先在本地停掉。
+  let quiet = false
+  let wasAlt = term.buffer.active.type === 'alternate'
+  const owns = () => !quiet && programOwnsMouse(term)
+
+  let wheelFrame = 0
+  let wheelPending: { delta: number; cell: { col: number; row: number }; alt: boolean } | null = null
+  const flushWheel = () => {
+    wheelFrame = 0
+    const item = wheelPending
+    wheelPending = null
+    if (!item || !owns()) return
+    term.input(sgrWheelReport(item.delta, item.cell, item.alt))
+  }
   const onWheel = (ev: WheelEvent) => {
-    if (ev.deltaY === 0 || !programOwnsMouse(term)) return
+    if (ev.deltaY === 0 || !owns()) return
     ev.preventDefault()
     ev.stopPropagation()
-    term.input(sgrWheelReport(ev.deltaY, cellOf(host, term, ev), ev.altKey))
+    // 一帧只留最新一格。触控板一次会连发很多格，每格都等 Pi 重画就会卡。
+    wheelPending = { delta: ev.deltaY, cell: cellOf(host, term, ev), alt: ev.altKey }
+    if (wheelFrame) return
+    wheelFrame = requestAnimationFrame(flushWheel)
   }
   host.addEventListener('wheel', onWheel, { capture: true, passive: false })
 
@@ -23,6 +41,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   let lastCol = 0
   let lastRow = 0
   let frame = 0
+  let moveTimer = 0
   let pending: { action: 'move' | 'drag'; cell: { col: number; row: number }; alt: boolean; ctrl: boolean } | null = null
   let scrolling = false
   let scrollId = -1
@@ -45,9 +64,11 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   const flush = () => {
     if (frame) cancelAnimationFrame(frame)
     frame = 0
+    if (moveTimer) window.clearTimeout(moveTimer)
+    moveTimer = 0
     const item = pending
     pending = null
-    if (!item) return
+    if (!item || !owns()) return
     emit(item.action, item.cell, item.alt, item.ctrl)
   }
 
@@ -55,8 +76,16 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     const cell = cellOf(host, term, ev)
     if (cell.col === lastCol && cell.row === lastRow && pending === null) return
     pending = { action, cell, alt: ev.altKey, ctrl: ev.ctrlKey }
-    if (frame) return
-    frame = requestAnimationFrame(flush)
+    if (action === 'drag') {
+      if (moveTimer) window.clearTimeout(moveTimer)
+      moveTimer = 0
+      if (frame) return
+      frame = requestAnimationFrame(flush)
+      return
+    }
+    // 悬停只用来点亮滑块，不必每帧都走一趟网络。
+    if (frame || moveTimer) return
+    moveTimer = window.setTimeout(flush, 48)
   }
 
   const stopDrag = () => {
@@ -68,7 +97,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
 
   const onMove = (ev: PointerEvent) => {
     if (!dragging || ev.pointerId !== pointerId) return
-    if (!programOwnsMouse(term)) {
+    if (!owns()) {
       release(ev)
       return
     }
@@ -86,7 +115,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
       /* 指针已经不在捕获里 */
     }
     flush()
-    emit('up', cellOf(host, term, ev), ev.altKey, ev.ctrlKey)
+    if (owns()) emit('up', cellOf(host, term, ev), ev.altKey, ev.ctrlKey)
   }
 
   const onUp = (ev: PointerEvent) => release(ev)
@@ -110,7 +139,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   const scrollTick = () => {
     scrollFrame = 0
     if (!scrolling) return
-    const owns = programOwnsMouse(term)
+    const still = owns()
     const cellH = cellHeight(term)
     const dead = Math.max(10, cellH * 0.75)
     const dy = scrollY - anchorY
@@ -120,11 +149,12 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
       const perSec = Math.min(180, 20 + cells * 32)
       carry += perSec / 60
       const count = Math.min(8, Math.floor(carry))
-      carry -= count
-      if (owns) {
-        for (let i = 0; i < count; i += 1) term.input(sgrWheelReport(dy, scrollCell, scrollAlt))
-      } else if (count > 0) {
-        term.scrollLines(dy > 0 ? count : -count)
+      const send = still ? Math.min(2, count) : count
+      carry -= send
+      if (still) {
+        for (let i = 0; i < send; i += 1) term.input(sgrWheelReport(dy, scrollCell, scrollAlt))
+      } else if (send > 0) {
+        term.scrollLines(dy > 0 ? send : -send)
       }
     } else {
       carry = 0
@@ -180,7 +210,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
       scrollFrame = requestAnimationFrame(scrollTick)
       return
     }
-    if (ev.button !== 0 || scrolling || ev.shiftKey || !programOwnsMouse(term)) return
+    if (ev.button !== 0 || scrolling || ev.shiftKey || !owns()) return
     ev.preventDefault()
     ev.stopPropagation()
     if (frame) cancelAnimationFrame(frame)
@@ -200,18 +230,18 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     window.addEventListener('pointercancel', onUp, true)
   }
   const onHover = (ev: PointerEvent) => {
-    if (dragging || scrolling || ev.buttons !== 0 || ev.shiftKey || !programOwnsMouse(term)) return
+    if (dragging || scrolling || ev.buttons !== 0 || ev.shiftKey || !owns()) return
     schedule('move', ev)
   }
   const onLeave = () => {
-    if (dragging || scrolling || !programOwnsMouse(term)) return
+    if (dragging || scrolling || !owns()) return
     if (frame) cancelAnimationFrame(frame)
     frame = 0
     pending = null
     emit('move', { col: 1, row: 1 }, false, false)
   }
   const onMouseMove = (ev: MouseEvent) => {
-    if (ev.shiftKey || !programOwnsMouse(term)) return
+    if (ev.shiftKey || !owns()) return
     ev.preventDefault()
     ev.stopPropagation()
   }
@@ -226,7 +256,53 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   host.addEventListener('pointerleave', onLeave, true)
   host.addEventListener('mousemove', onMouseMove, true)
 
-  const syncOwner = () => host.classList.toggle('term-app-mouse', programOwnsMouse(term))
+  const handBack = () => {
+    quiet = true
+    if (frame) cancelAnimationFrame(frame)
+    frame = 0
+    if (moveTimer) window.clearTimeout(moveTimer)
+    moveTimer = 0
+    pending = null
+    if (wheelFrame) cancelAnimationFrame(wheelFrame)
+    wheelFrame = 0
+    wheelPending = null
+    if (dragging) {
+      try {
+        host.releasePointerCapture(pointerId)
+      } catch {
+        /* 指针已经不在捕获里 */
+      }
+      stopDrag()
+    }
+    if (scrolling) {
+      try {
+        host.releasePointerCapture(scrollId)
+      } catch {
+        /* 指针已经不在捕获里 */
+      }
+      stopScroll()
+    }
+    term.clearSelection()
+    if (term.modes.mouseTrackingMode !== 'none') {
+      // 只改本地模式，不写进 PTY。
+      term.write('\x1b[?9;1000;1002;1003;1006;1016l')
+    } else {
+      quiet = false
+    }
+  }
+
+  const syncOwner = () => {
+    const nowAlt = term.buffer.active.type === 'alternate'
+    if (wasAlt && !nowAlt) {
+      wasAlt = false
+      handBack()
+    } else {
+      wasAlt = nowAlt
+    }
+    // 跟踪已经关掉，或程序又进了备用屏幕，都恢复正常上报。
+    if (quiet && (nowAlt || term.modes.mouseTrackingMode === 'none')) quiet = false
+    host.classList.toggle('term-app-mouse', owns())
+  }
   syncOwner()
   const parsed = term.onWriteParsed(syncOwner)
 
@@ -242,8 +318,13 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     host.removeEventListener('mousemove', onMouseMove, true)
     if (frame) cancelAnimationFrame(frame)
     frame = 0
+    if (moveTimer) window.clearTimeout(moveTimer)
+    moveTimer = 0
     pending = null
-    if (dragging) term.input(sgrPointerReport('up', { col: lastCol, row: lastRow }, false, false))
+    if (wheelFrame) cancelAnimationFrame(wheelFrame)
+    wheelFrame = 0
+    wheelPending = null
+    if (dragging && owns()) term.input(sgrPointerReport('up', { col: lastCol, row: lastRow }, false, false))
     stopDrag()
   }
 }
