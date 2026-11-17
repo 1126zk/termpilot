@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { CircleHelp, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
+import { CircleHelp, Copy, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
 import type { CronEntry, DockerInfo, PortInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -1750,9 +1750,30 @@ function WebSection(props: { sessionId: string; active: boolean }) {
               ) : (
                 sites.map((s) => (
                   <div key={s.name} className="flex items-center gap-2 py-1 text-sm">
-                    <span className="w-44 shrink-0 truncate">
-                      {webTab === 'caddy' ? s.addr : `${s.domain}:${s.port}`}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="min-w-0 flex-1 cursor-default truncate">
+                          {webTab === 'caddy' ? s.addr : `${s.domain}:${s.port}`}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" align="start" sideOffset={4} className="w-max max-w-none whitespace-nowrap">
+                        {webTab === 'caddy' ? s.addr : `${s.domain}:${s.port}`}
+                        <button
+                          type="button"
+                          title="复制站点地址"
+                          className="ml-1 shrink-0 opacity-70 hover:opacity-100"
+                          onClick={() => {
+                            const text = webTab === 'caddy' ? s.addr : `${s.domain}:${s.port}`
+                            void navigator.clipboard
+                              .writeText(text)
+                              .then(() => setNotice('站点地址已复制'))
+                              .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
+                          }}
+                        >
+                          <Copy className="size-3.5" />
+                        </button>
+                      </TooltipContent>
+                    </Tooltip>
                     <span className="min-w-0 flex-1 truncate text-muted-foreground">
                       {s.kind}
                       {s.target ? ' → ' : ''}
