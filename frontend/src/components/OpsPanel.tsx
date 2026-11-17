@@ -60,8 +60,8 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   // 静态身份（主机名/系统/内核/IP）走 store 缓存：同一会话 10 分钟内只采一次
   const loadServerInfo = useAppStore((s) => s.loadServerInfo)
   const serverInfo = useAppStore((s) => (sessionId ? s.serverInfoBySession[sessionId]?.info : undefined))
-  // 终端是主角，吃剩余空间。左栏默认 520，最窄 440，再窄内容改排版，不再被旁边挤掉。
-  const [leftWidth, setLeftWidth] = useState(520)
+  // 终端是主角，吃剩余空间。左栏默认 440，最窄也是 440。
+  const [leftWidth, setLeftWidth] = useState(440)
   const containerRef = useRef<HTMLDivElement>(null)
   const setNotice = useAppStore((s) => s.setNotice)
   // 两个榜各先显示 5 个，可展开到 10 个
@@ -153,8 +153,8 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
         className="@container flex min-h-0 min-w-[440px] max-w-full shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
         style={{ width: leftWidth, maxWidth: '100%' }}
       >
-        {/* 收到最窄：一行两个、共三行。拉到 520 以上恢复三列两行。 */}
-        <div className="grid min-w-0 grid-cols-2 items-baseline gap-x-4 gap-y-0.5 text-sm @[480px]:grid-cols-[minmax(0,max-content)_minmax(0,max-content)_minmax(0,max-content)]">
+        {/* 主机信息固定一行两个、共三行。 */}
+        <div className="grid min-w-0 grid-cols-2 items-baseline gap-x-4 gap-y-0.5 text-sm">
           <InfoItem label="主机名" value={serverInfo?.hostname ?? '—'} truncate />
           <InfoItem label="系统" value={serverInfo?.osPretty ?? '—'} truncate />
           <InfoItem label="内核" value={serverInfo?.kernel ?? '—'} truncate />
@@ -168,7 +168,7 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
         </div>
         {error && <p className="text-sm text-destructive">采集失败：{error}</p>}
 
-        <div className="grid grid-cols-3 justify-items-center gap-x-2 gap-y-3 px-1 @[480px]:w-max @[480px]:grid-cols-[repeat(5,max-content)] @[480px]:justify-items-start @[480px]:gap-6">
+        <div className="grid w-max grid-cols-[repeat(5,max-content)] justify-items-start gap-6 px-1">
           <Ring label="CPU" percent={metrics?.cpuPercent ?? 0} center={metrics ? `${metrics.cpuPercent.toFixed(0)}%` : '—'}>
             {metrics ? (
               <>
@@ -3057,20 +3057,19 @@ function Ring(props: { label: string; percent: number; center: string; children:
   )
 }
 
-/** 字节/秒 → 放得进圆环那么宽的速度文本；long 为真时给悬浮说明用的完整写法 */
+/** 字节/秒 → 简短速度文本；long 为真时显示完整单位。 */
 function formatRate(bps: number, long = false): string {
   if (bps >= 1024 ** 2) return long ? `${(bps / 1024 ** 2).toFixed(2)} MB/s` : `${(bps / 1024 ** 2).toFixed(1)}M`
   if (bps >= 1024) return long ? `${(bps / 1024).toFixed(1)} KB/s` : `${(bps / 1024).toFixed(0)}K`
   return long ? `${Math.round(bps)} B/s` : `${Math.round(bps)}B`
 }
 
-/** 网速块：和圆环同尺寸同悬浮说明，但网速没有上限，不画百分比，直接写上下行 */
 function NetTile(props: { metrics: ServerMetrics | null }) {
   const m = props.metrics
   return (
     <div className="group relative">
       <div className="flex flex-col items-center gap-1 py-1">
-        <div className="flex size-16 flex-col items-center justify-center rounded-full border-[6px] border-accent text-xs font-semibold tabular-nums">
+        <div className="flex size-16 flex-col items-center justify-center text-xs font-semibold tabular-nums">
           {m ? (
             <>
               <span>↑{formatRate(m.netTxBps)}</span>
