@@ -128,6 +128,7 @@ interface AppState {
   sideTerms: SideTerm[]
   /** 已打开运维面板的终端标签，互不影响。 */
   opsPanelTermIds: string[]
+  opsPanelWidth: number
 
   /** 会话编辑弹窗。host 表示在这台机器下再加一条连接 */
   editing:
@@ -214,6 +215,7 @@ interface AppState {
 
   toggleRightPanel: () => void
   toggleOpsPanel: (termId: string) => void
+  setOpsPanelWidth: (width: number) => void
   setRightPanelPane: (pane: RightPanelPane) => void
   /** readOnly 不传时沿用已打开标签的模式，新标签默认查看 */
   openRemoteEditor: (
@@ -461,6 +463,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sideTerms: [],
   rightPanelOpen: false,
   opsPanelTermIds: [],
+  opsPanelWidth: 440,
   hostsOpen: false,
   toolsOpen: false,
   rightPanelPane: 'files',
@@ -976,7 +979,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       },
       editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, secondaryView),
-      opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== parentId),
       hostsOpen: false,
       toolsOpen: false,
       settingsOpen: false,
@@ -1202,6 +1204,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(splitOn ? {} : { editorKeyByTerm: withoutKey(get().editorKeyByTerm, termId) })
     })
   },
+
+  setOpsPanelWidth: (opsPanelWidth) => set({ opsPanelWidth }),
 
   toggleHostsOpen: () =>
     get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, toolsOpen: false, settingsOpen: false }),

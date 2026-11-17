@@ -60,8 +60,9 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
   // 静态身份（主机名/系统/内核/IP）走 store 缓存：同一会话 10 分钟内只采一次
   const loadServerInfo = useAppStore((s) => s.loadServerInfo)
   const serverInfo = useAppStore((s) => (sessionId ? s.serverInfoBySession[sessionId]?.info : undefined))
-  // 终端是主角，吃剩余空间。左栏默认 440，最窄也是 440。
-  const [leftWidth, setLeftWidth] = useState(440)
+  // 终端是主角，吃剩余空间。左栏默认 440，最窄也是 440；宽度同步给外层分栏。
+  const leftWidth = useAppStore((s) => s.opsPanelWidth)
+  const setLeftWidth = useAppStore((s) => s.setOpsPanelWidth)
   const containerRef = useRef<HTMLDivElement>(null)
   const setNotice = useAppStore((s) => s.setNotice)
   // 两个榜各先显示 5 个，可展开到 10 个
