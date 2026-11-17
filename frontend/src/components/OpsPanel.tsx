@@ -47,7 +47,7 @@ function formatUptime(sec: number): string {
 }
 
 /** 运维面板：在共享 SSH 连接上轮询采集，只支持 Linux。 */
-export function OpsPanel(props: { termId: string; active: boolean }) {
+export function OpsPanel(props: { termId: string; active: boolean; showTerminal?: boolean }) {
   const tabs = useAppStore((s) => s.tabs)
   const activeTab = tabs.find((t) => t.id === props.termId)
   const sessionId = activeTab?.sessionId ?? null
@@ -112,7 +112,10 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
     e.preventDefault()
     const startX = e.clientX
     const startWidth = leftWidth
-    const room = containerRef.current?.clientWidth ?? 1440
+    const room =
+      props.showTerminal === false
+        ? (containerRef.current?.parentElement?.parentElement?.clientWidth ?? 1440)
+        : (containerRef.current?.clientWidth ?? 1440)
     const maxLeft = Math.max(440, room - 240)
     const onMove = (ev: PointerEvent) => {
       setLeftWidth(Math.min(maxLeft, Math.max(440, startWidth + (ev.clientX - startX))))
@@ -151,8 +154,11 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
     <div ref={containerRef} className="flex min-h-0 flex-1">
       {/* 左栏是给人读的信息，允许选中复制；右栏终端的选择归 xterm 管 */}
       <div
-        className="@container flex min-h-0 min-w-[440px] max-w-full shrink-0 flex-col gap-4 overflow-hidden p-4 select-text"
-        style={{ width: leftWidth, maxWidth: '100%' }}
+        className={cn(
+          '@container flex min-h-0 max-w-full shrink-0 flex-col gap-4 overflow-hidden p-4 select-text',
+          props.showTerminal === false ? 'min-w-0' : 'min-w-[440px]'
+        )}
+        style={{ width: props.showTerminal === false ? leftWidth - 4 : leftWidth, maxWidth: '100%' }}
       >
         {/* 主机信息固定一行两个、共三行。 */}
         <div className="grid min-w-0 grid-cols-2 items-baseline gap-x-4 gap-y-0.5 text-sm">
@@ -288,10 +294,14 @@ export function OpsPanel(props: { termId: string; active: boolean }) {
         className="w-1 shrink-0 cursor-col-resize bg-border transition-colors select-none hover:bg-primary/40 active:bg-primary/60"
         onPointerDown={startDrag}
       />
-      {/* 右侧命令区：复用当前标签的主终端，可见视图接管同一个 xterm，Shell 和滚动缓冲不丢 */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TerminalView termId={panelTermId} active={props.active} />
-      </div>
+      {props.showTerminal !== false && (
+        <>
+          {/* 右侧命令区：复用当前标签的主终端，可见视图接管同一个 xterm，Shell 和滚动缓冲不丢 */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <TerminalView termId={panelTermId} active={props.active} />
+          </div>
+        </>
+      )}
     </div>
   )
 }

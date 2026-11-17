@@ -196,19 +196,24 @@ export default function App() {
   const opsAreas: Record<string, PaneArea> = {}
   const termAreas: Record<string, PaneArea> = {}
   for (const pane of panes) {
-    if (pane.inner || pane.file) continue
+    if (pane.file) continue
+    if (pane.inner) {
+      if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId)) opsAreas[pane.termId] = 'o'
+      continue
+    }
     if (pane.area === 'a' && opsPanelTermIds.includes(pane.termId)) {
       opsAreas[pane.termId] = pane.area
     } else termAreas[pane.termId] = pane.area
   }
   const splitOpsWidth = split?.dir === 'right' && split.primaryTab && opsAreas[split.primaryTab] ? opsPanelWidth : 0
+  const innerOpsWidth = Object.values(opsAreas).includes('o') ? opsPanelWidth : 0
 
   return (
     <TooltipProvider>
       <div className="flex h-svh min-h-0 flex-col">
         <TabBar />
         <div className="flex min-h-0 flex-1">
-          <div ref={gridRef} className="grid min-h-0 min-w-0 flex-1 overflow-hidden" style={paneGrid(split, bars, splitOpsWidth)}>
+          <div ref={gridRef} className="grid min-h-0 min-w-0 flex-1 overflow-hidden" style={paneGrid(split, bars, splitOpsWidth, innerOpsWidth)}>
             {panes.map((pane) =>
               pane.files.length > 0 || pane.inner ? (
                 <div
@@ -279,14 +284,14 @@ export default function App() {
   )
 }
 
-type PaneArea = 'a' | 'b'
+type PaneArea = 'a' | 'b' | 'o'
 
 /** 一栏的格子：竖向排内容，宽高都允许缩到比内容小 */
 const paneCell = 'flex min-h-0 min-w-0 flex-col'
 
 /**
  * 内容区网格。两栏 a / b 中间夹分隔线 d；文件标签栏 abar / bbar 在对应那一栏上方。
- * 左右分屏两栏共用行，没有文件标签栏的那一栏占满两行，不留空条。
+ * 标签内分栏的运维信息 o 独立跨两行；没有文件标签栏的终端那一栏占满两行，不留空条。
  */
 function splitTracks(ratio: number, offset: number): { a: string; b: string } {
   if (offset <= 0) return { a: `minmax(0, ${ratio}fr)`, b: `minmax(0, ${1 - ratio}fr)` }
@@ -296,9 +301,13 @@ function splitTracks(ratio: number, offset: number): { a: string; b: string } {
   }
 }
 
-function paneGrid(split: SplitState | null, bars: PaneArea[], opsWidth = 0): CSSProperties {
+function paneGrid(split: SplitState | null, bars: PaneArea[], opsWidth = 0, innerOpsWidth = 0): CSSProperties {
   if (!split) {
-    return { gridTemplateAreas: '"abar" "a"', gridTemplateRows: 'auto minmax(0, 1fr)', gridTemplateColumns: 'minmax(0, 1fr)' }
+    return {
+      gridTemplateAreas: innerOpsWidth > 0 ? '"o abar" "o a"' : '"abar" "a"',
+      gridTemplateRows: 'auto minmax(0, 1fr)',
+      gridTemplateColumns: innerOpsWidth > 0 ? `${innerOpsWidth}px minmax(0, 1fr)` : 'minmax(0, 1fr)'
+    }
   }
   const { a, b } = splitTracks(split.ratio, opsWidth)
   if (split.dir === 'down') {
@@ -354,9 +363,8 @@ function SplitDivider(props: {
 function OpsPanels(props: { areas: Record<string, PaneArea> }) {
   const tabs = useAppStore((s) => s.tabs)
   const openIds = useAppStore((s) => s.opsPanelTermIds)
-  const sessionSplit = useAppStore((s) => s.sessionSplit)
   const focusPane = useAppStore((s) => s.focusPane)
-  const openTabs = tabs.filter((tab) => openIds.includes(tab.id) && !sessionSplit[tab.id])
+  const openTabs = tabs.filter((tab) => openIds.includes(tab.id))
   return (
     <>
       {openTabs.map((tab) => {
@@ -368,7 +376,7 @@ function OpsPanels(props: { areas: Record<string, PaneArea> }) {
             style={area ? { gridArea: area } : undefined}
             onPointerDownCapture={() => focusPane(tab.id)}
           >
-            <OpsPanel termId={tab.id} active={!!area} />
+            <OpsPanel termId={tab.id} active={!!area} showTerminal={area !== 'o'} />
           </div>
         )
       })}
@@ -381,16 +389,13 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
   const editorTabs = useAppStore((s) => s.editorTabs)
   const focusSessionSide = useAppStore((s) => s.focusSessionSide)
   const setSessionSplitRatio = useAppStore((s) => s.setSessionSplitRatio)
-  const opsOpen = useAppStore((s) => s.opsPanelTermIds.includes(props.parentId))
-  const opsPanelWidth = useAppStore((s) => s.opsPanelWidth)
   const gridRef = useRef<HTMLDivElement>(null)
   const rightEmpty = props.pane.secondary.length === 0
   const leftFile = editorTabs.find((tab) => tab.key === props.pane.primaryView) ?? null
   const rightFile = rightEmpty ? null : (editorTabs.find((tab) => tab.key === props.pane.secondaryView) ?? null)
   const leftTerm = termIdFromView(props.pane.primaryView)
   const rightTerm = rightEmpty ? null : termIdFromView(props.pane.secondaryView)
-  const opsOffset = opsOpen && props.pane.dir === 'right' ? opsPanelWidth : 0
-  const { a: primary, b: secondary } = splitTracks(props.pane.ratio, opsOffset)
+  const { a: primary, b: secondary } = splitTracks(props.pane.ratio, 0)
   const style: CSSProperties =
     props.pane.dir === 'down'
       ? { gridTemplateAreas: '"p" "d" "s"', gridTemplateRows: `${primary} 4px ${secondary}`, gridTemplateColumns: 'minmax(0, 1fr)' }
@@ -401,9 +406,7 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
       style={rightEmpty ? undefined : { gridArea: which === 'primary' ? 'p' : 's' }}
       onPointerDownCapture={() => focusSessionSide(props.parentId, which)}
     >
-      {which === 'primary' && opsOpen ? (
-        <OpsPanel termId={props.parentId} active />
-      ) : file ? (
+      {file ? (
         <RemoteEditor key={file.key} tab={file} />
       ) : termId ? (
         <TerminalView termId={termId} active={props.pane.focus === which} />
@@ -418,7 +421,6 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
         dir={props.pane.dir}
         gridRef={gridRef}
         onRatio={(ratio) => setSessionSplitRatio(props.parentId, ratio)}
-        offset={opsOffset}
       />
       {side('secondary', rightFile, rightTerm)}
     </div>
