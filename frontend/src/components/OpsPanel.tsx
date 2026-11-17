@@ -858,13 +858,6 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
   }
 
   const info = cached?.info ?? null
-  if (info && !info.available) {
-    return (
-      <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
-        <DockerInstallSection sessionId={props.sessionId} />
-      </div>
-    )
-  }
 
   // docker 服务操作：启动直接跑；停止/重启/卸载两步确认（会动到所有容器/整个引擎）
   const dockerOpLabels: Record<string, string> = { start: '启动', stop: '停止', restart: '重启', uninstall: '卸载' }
@@ -915,6 +908,23 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
       return []
     }
   })()
+  const [mirrorOrder, setMirrorOrder] = useState(daemonMirrors)
+  const mirrorDrag = useDragOrder('y', 'data-daemon-mirror', mirrorOrder, setMirrorOrder, (next) => {
+    if (next.join() !== daemonMirrors.join()) setMirrors(next)
+  })
+  useEffect(() => {
+    if (!mirrorDrag.dragKey) setMirrorOrder(daemonMirrors)
+    // 后台刷新配置时同步；拖动过程中不覆盖正在调整的顺序
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [info?.daemonJson])
+
+  if (info && !info.available) {
+    return (
+      <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
+        <DockerInstallSection sessionId={props.sessionId} />
+      </div>
+    )
+  }
 
   const setMirrors = (next: string[]) => {
     let obj: Record<string, unknown>
@@ -1231,26 +1241,41 @@ function DockerSection(props: { sessionId: string; active: boolean }) {
         ) : (
           info && <p className="py-2 text-center text-sm text-muted-foreground">没有 /etc/docker/daemon.json</p>
         )}
-        {/* 镜像加速：列出 registry-mirrors，可增删；没有 daemon.json 时第一次添加会创建文件 */}
+        {/* 镜像加速：列出 registry-mirrors，可增删排序；没有 daemon.json 时第一次添加会创建文件 */}
         {info && (
           <div className="mt-2 border-t border-border/50 pt-2">
             <p className="mb-1 text-sm text-muted-foreground">镜像加速（registry-mirrors，改完热生效，不用重启）</p>
-            {daemonMirrors.length === 0 ? (
+            {mirrorOrder.length === 0 ? (
               <p className="py-0.5 text-sm text-muted-foreground">还没有镜像源</p>
             ) : (
-              daemonMirrors.map((m) => (
-                <div key={m} className="flex items-center gap-2 py-0.5 text-sm">
-                  <span className="min-w-0 flex-1 truncate font-mono">{m}</span>
-                  <button
-                    type="button"
-                    disabled={mirrorBusy}
-                    className="shrink-0 rounded px-1 text-xs text-muted-foreground/60 hover:text-destructive disabled:opacity-40"
-                    onClick={() => setMirrors(daemonMirrors.filter((x) => x !== m))}
+              <div ref={mirrorDrag.stripRef} className="relative">
+                {mirrorOrder.map((m) => (
+                  <div
+                    key={m}
+                    data-daemon-mirror={m}
+                    className={cn(
+                      'flex cursor-grab items-center gap-2 py-0.5 text-sm active:cursor-grabbing',
+                      mirrorDrag.dragKey === m && 'relative z-10 bg-accent'
+                    )}
+                    style={mirrorDrag.dragKey === m ? { transform: `translateY(${mirrorDrag.dragOffset}px)` } : undefined}
+                    onPointerDown={(event) => {
+                      if (mirrorBusy) return
+                      if (event.button === 0) event.preventDefault()
+                      mirrorDrag.startDrag(event, m)
+                    }}
                   >
-                    删除
-                  </button>
-                </div>
-              ))
+                    <span className="min-w-0 flex-1 truncate font-mono">{m}</span>
+                    <button
+                      type="button"
+                      disabled={mirrorBusy}
+                      className="shrink-0 rounded px-1 text-xs text-muted-foreground/60 hover:text-destructive disabled:opacity-40"
+                      onClick={() => setMirrors(mirrorOrder.filter((x) => x !== m))}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
             <div className="mt-1 flex items-center gap-1.5">
               <Input
@@ -2625,7 +2650,13 @@ function loadCustomCats(): CustomCat[] {
 /** 拖拽排序通用钩子（手册页签横向 / 目录条目竖向）：状态机 + 被拖项跟手 + FLIP 让位，
     手感和网站页页签一致（共用 ./flip 公共件）。ids 是当前顺序（需稳定引用，用 useMemo 供），
     产生新顺序时调 onReorder（持久化由调用方做）。容器支持滚动（换算时补 scrollTop）。 */
-function useDragOrder(axis: 'x' | 'y', attr: string, ids: string[], onReorder: (next: string[]) => void) {
+function useDragOrder(
+  axis: 'x' | 'y',
+  attr: string,
+  ids: string[],
+  onReorder: (next: string[]) => void,
+  onDrop?: (next: string[]) => void
+) {
   const stripRef = useRef<HTMLDivElement>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dragOffset, setDragOffset] = useState(0)
@@ -2712,6 +2743,7 @@ function useDragOrder(axis: 'x' | 'y', attr: string, ids: string[], onReorder: (
       },
       onEnd: () => {
         suppressClick.current = true
+        onDrop?.(idsRef.current)
         prevPos.current.clear()
         setDragKey(null)
         setDragOffset(0)
