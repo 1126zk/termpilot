@@ -21,7 +21,8 @@ const empty = (): McpSettingsInput => ({
   enabled: false,
   port: MCP_DEFAULT_PORT,
   token: '',
-  confirmDangerous: true
+  confirmDangerous: true,
+  showTerminalMenu: true
 })
 
 /** 设置：左侧栏目，右侧是当前项。 */
@@ -62,7 +63,8 @@ export function SettingsPage() {
       enabled: mcp.enabled,
       port: mcp.port,
       token: mcp.token,
-      confirmDangerous: mcp.confirmDangerous
+      confirmDangerous: mcp.confirmDangerous,
+      showTerminalMenu: mcp.showTerminalMenu
     })
   }, [open, mcp])
 
@@ -173,6 +175,12 @@ export function SettingsPage() {
                       onCheckedChange={(confirmDangerous) => setForm((f) => ({ ...f, confirmDangerous }))}
                     />
                   </Row>
+                  <Row title="终端右键菜单" detail="显示 MCP 端口映射和临时 Agent 提示词。">
+                    <Switch
+                      checked={form.showTerminalMenu}
+                      onCheckedChange={(showTerminalMenu) => setForm((f) => ({ ...f, showTerminalMenu }))}
+                    />
+                  </Row>
                 </Card>
 
                 <Card>
@@ -254,7 +262,7 @@ export function SettingsPage() {
                 <div className="max-h-[28rem] overflow-auto rounded-xl border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed select-text">
                   {audit.length === 0 && <p className="text-muted-foreground">还没有记录</p>}
                   {audit.map((row, index) => (
-                    <p key={`${row.at}-${index}`} className={row.ok ? '' : 'text-destructive'}>
+                    <p key={`${row.at}-${index}`} className={cn('whitespace-nowrap', !row.ok && 'text-destructive')}>
                       {new Date(row.at).toLocaleString()} {row.ok ? '成功' : '失败'} {row.tool}
                       {row.detail ? ` ${row.detail}` : ''}
                     </p>
@@ -269,7 +277,7 @@ export function SettingsPage() {
                 <div className="max-h-[28rem] overflow-auto rounded-xl border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed select-text">
                   {connLog.length === 0 && <p className="text-muted-foreground">还没有记录</p>}
                   {connLog.map((row, index) => (
-                    <p key={`${row.at}-${index}`}>
+                    <p key={`${row.at}-${index}`} className="whitespace-nowrap">
                       {new Date(row.at).toLocaleString()}
                       {row.name ? ` ${row.name}` : ''} {row.termId} {row.summary}
                       {row.detail ? ` ${row.detail}` : ''}

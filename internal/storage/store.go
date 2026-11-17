@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS mcp_config (
   enabled INTEGER NOT NULL DEFAULT 0,
   port INTEGER NOT NULL DEFAULT 3927,
   token_encrypted TEXT,
-  confirm_dangerous INTEGER NOT NULL DEFAULT 1
+  confirm_dangerous INTEGER NOT NULL DEFAULT 1,
+  show_terminal_menu INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS appearance (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -147,6 +148,10 @@ func Open(dir string, cipher Cipher) (*Store, error) {
 	if err := ensureColumn(db, "sessions", "sort_order", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("添加 sort_order 列失败: %w", err)
+	}
+	if err := ensureColumn(db, "mcp_config", "show_terminal_menu", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("添加 show_terminal_menu 列失败: %w", err)
 	}
 	for _, column := range []string{"jump_host", "jump_port", "jump_username", "jump_secret_encrypted"} {
 		if err := dropColumnIfExists(db, "sessions", column); err != nil {
@@ -821,11 +826,11 @@ func (s *Store) GetMcpSettings() (*McpSettings, error) {
 	); err != nil {
 		return nil, err
 	}
-	var enabled, port, confirm int64
+	var enabled, port, confirm, showMenu int64
 	var tokenEncrypted sql.NullString
 	err := s.db.QueryRow(
-		"SELECT enabled, port, token_encrypted, confirm_dangerous FROM mcp_config WHERE id = 1",
-	).Scan(&enabled, &port, &tokenEncrypted, &confirm)
+		"SELECT enabled, port, token_encrypted, confirm_dangerous, show_terminal_menu FROM mcp_config WHERE id = 1",
+	).Scan(&enabled, &port, &tokenEncrypted, &confirm, &showMenu)
 	if err != nil {
 		return nil, errors.New("MCP 配置不存在")
 	}
@@ -852,6 +857,7 @@ func (s *Store) GetMcpSettings() (*McpSettings, error) {
 		Port:             int(port),
 		Token:            token,
 		ConfirmDangerous: confirm == 1,
+		ShowTerminalMenu: showMenu == 1,
 	}
 	if s.onMcpSettings != nil {
 		if err := s.onMcpSettings(settings); err != nil {
@@ -879,9 +885,9 @@ func (s *Store) SaveMcpSettings(input *McpSettingsInput) (*McpSettings, error) {
 	}
 	if _, err := s.db.Exec(
 		`UPDATE mcp_config
-		 SET enabled = ?, port = ?, token_encrypted = ?, confirm_dangerous = ?
+		 SET enabled = ?, port = ?, token_encrypted = ?, confirm_dangerous = ?, show_terminal_menu = ?
 		 WHERE id = 1`,
-		boolInt(input.Enabled), input.Port, nullStringArg(enc), boolInt(input.ConfirmDangerous),
+		boolInt(input.Enabled), input.Port, nullStringArg(enc), boolInt(input.ConfirmDangerous), boolInt(input.ShowTerminalMenu),
 	); err != nil {
 		return nil, err
 	}

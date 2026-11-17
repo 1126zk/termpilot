@@ -574,7 +574,7 @@ func TestMcpSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Enabled || got.Port != MCPDefaultPort || got.Host != MCPHost || !got.ConfirmDangerous {
+	if got.Enabled || got.Port != MCPDefaultPort || got.Host != MCPHost || !got.ConfirmDangerous || !got.ShowTerminalMenu {
 		t.Fatalf("默认 MCP 配置不对: %+v", got)
 	}
 	if len(got.Token) != 32 {
@@ -602,7 +602,7 @@ func TestMcpSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !saved.Enabled || saved.Port != 4000 || saved.Token != newToken || saved.ConfirmDangerous {
+	if !saved.Enabled || saved.Port != 4000 || saved.Token != newToken || saved.ConfirmDangerous || saved.ShowTerminalMenu {
 		t.Fatalf("保存结果不对: %+v", saved)
 	}
 

@@ -127,6 +127,7 @@ type McpSettings struct {
 	Port             int    `json:"port"`
 	Token            string `json:"token"`
 	ConfirmDangerous bool   `json:"confirmDangerous"`
+	ShowTerminalMenu bool   `json:"showTerminalMenu"`
 }
 
 // McpSettingsInput MCP 设置输入。
@@ -135,6 +136,7 @@ type McpSettingsInput struct {
 	Port             int    `json:"port"`
 	Token            string `json:"token"`
 	ConfirmDangerous bool   `json:"confirmDangerous"`
+	ShowTerminalMenu bool   `json:"showTerminalMenu"`
 }
 
 // McpAuditEntry 一条 MCP 工具调用审计。

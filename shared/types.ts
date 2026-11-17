@@ -378,6 +378,7 @@ export interface McpSettings {
   token: string
   /** 危险操作先弹窗，等人确认后再执行 */
   confirmDangerous: boolean
+  showTerminalMenu: boolean
 }
 
 /** 本机 mcp.json 与 SKILL.md 的全文，给端口映射后的临时提示词用。 */
@@ -496,6 +497,7 @@ export interface McpSettingsInput {
   port: number
   token: string
   confirmDangerous: boolean
+  showTerminalMenu: boolean
 }
 
 /** 终端配色。统一主题里引用这里的 id，和主题 id 一一对应。 */

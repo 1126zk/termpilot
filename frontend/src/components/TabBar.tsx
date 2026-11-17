@@ -183,6 +183,7 @@ export function TabBar() {
   const renameTab = useAppStore((s) => s.renameTab)
   const setNotice = useAppStore((s) => s.setNotice)
   const mcp = useAppStore((s) => s.mcp)
+  const mcpRuntime = useAppStore((s) => s.mcpRuntime)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   // 这项自己开过的 MCP 映射。设置里改了端口后，再映射会先停掉上一个端口。
   const mcpForwardRef = useRef(new Map<string, ForwardRule>())
@@ -735,7 +736,7 @@ export function TabBar() {
                     })}
                   </>
                 ) : null}
-                {session && connected ? (
+                {session && connected && mcp?.showTerminalMenu && mcpRuntime.running ? (
                   <>
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => void toggleMcpForward(session.id)}>
