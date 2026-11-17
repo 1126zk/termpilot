@@ -185,6 +185,7 @@ export function TerminalView(props: { termId: string; active: boolean }) {
           </ContextMenuItem>
           <ContextMenuItem onClick={() => capture('viewport')}>截取当前画面</ContextMenuItem>
           <ContextMenuItem onClick={() => capture('scrollback')}>截取滚动缓冲</ContextMenuItem>
+          <ContextMenuItem onClick={() => reconnectTab(props.termId, true)}>重新打开终端</ContextMenuItem>
           <ContextMenuItem onClick={() => void paste()}>
             粘贴
             <ContextMenuShortcut>{window.api.platform === 'darwin' ? '⌘V' : 'Ctrl+V'}</ContextMenuShortcut>

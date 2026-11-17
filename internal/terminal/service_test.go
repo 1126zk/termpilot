@@ -268,6 +268,33 @@ func TestResize(t *testing.T) {
 	}
 }
 
+func TestCreateForceReleasesOnlyCurrentTerm(t *testing.T) {
+	svc, _, _ := newTestService()
+	old := &fakeChannel{}
+	other := &fakeChannel{}
+	entry := addFakeTerm(svc, "term-1", KindSSH, old)
+	otherEntry := addFakeTerm(svc, "term-2", KindSSH, other)
+
+	svc.Create(CreateOptions{TermID: "term-1", Kind: KindSSH, SessionID: "conn-1", Force: true})
+	if !old.closed {
+		t.Fatal("强制重开应关闭当前旧通道")
+	}
+	if entry.ch != nil {
+		t.Fatal("当前旧通道应已释放")
+	}
+	if entry.liveGen <= 1 {
+		t.Fatal("强制重开应使旧一代退出事件失效")
+	}
+	if other.closed || otherEntry.ch != other {
+		t.Fatal("其他终端不应受影响")
+	}
+
+	svc.Create(CreateOptions{TermID: "term-2", Kind: KindSSH, SessionID: "conn-1"})
+	if other.closed || otherEntry.ch != other {
+		t.Fatal("普通 Create 遇到活动终端仍应直接返回")
+	}
+}
+
 func TestReconnectGuards(t *testing.T) {
 	svc, _, _ := newTestService()
 	if err := svc.Reconnect("term-x"); err == nil {

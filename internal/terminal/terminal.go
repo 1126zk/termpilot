@@ -115,16 +115,22 @@ func NewService(sessions SessionStore, history HistoryStore, emitter Emitter, po
 	}
 }
 
-// Create 对应 TS create。已经连着或正在连接时直接返回。
+// Create 对应 TS create。默认在已经连着或正在连接时直接返回；Force 先关闭当前终端自己的旧通道。
 // 连接过程是同步的（拨号最长等到握手超时），结果通过状态事件下发。
 func (s *Service) Create(opts CreateOptions) {
 	s.mu.Lock()
 	existing := s.terms[opts.TermID]
-	busy := existing != nil && (existing.ch != nil ||
+	busy := !opts.Force && existing != nil && (existing.ch != nil ||
 		(s.lastStatus[opts.TermID].TermID != "" && s.lastStatus[opts.TermID].Status == StatusConnecting))
+	if opts.Force && existing != nil {
+		existing.liveGen++
+	}
 	s.mu.Unlock()
 	if busy {
 		return
+	}
+	if opts.Force {
+		s.releaseLive(existing)
 	}
 	if opts.Kind == KindLocal {
 		s.createLocal(opts)

@@ -315,6 +315,7 @@ export interface TermCreateOptions {
   cwd?: string
   cols: number
   rows: number
+  force?: boolean
 }
 
 /** 终端标题或备注变了（main → renderer） */

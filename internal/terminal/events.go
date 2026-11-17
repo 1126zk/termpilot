@@ -34,9 +34,10 @@ type CreateOptions struct {
 	// kind = local 时的壳类型，缺省 powershell。
 	Shell string `json:"shell,omitempty"`
 	// 本机终端的起始目录。空则用用户主目录。
-	Cwd  string `json:"cwd,omitempty"`
-	Cols int    `json:"cols"`
-	Rows int    `json:"rows"`
+	Cwd   string `json:"cwd,omitempty"`
+	Cols  int    `json:"cols"`
+	Rows  int    `json:"rows"`
+	Force bool   `json:"force,omitempty"`
 }
 
 // MetaEvent 终端标题或备注变了（对应 TS TermMetaEvent）。

@@ -35,7 +35,8 @@ function relaunchTerm(
   kind: 'ssh' | 'local',
   sessionId: string | undefined,
   title: string,
-  shell: LocalShell | undefined
+  shell: LocalShell | undefined,
+  force: boolean
 ): void {
   terminalPool.releaseProgram(termId, '', () => {
     if (kind === 'local') {
@@ -48,6 +49,7 @@ function relaunchTerm(
       sessionId,
       title,
       shell: kind === 'local' ? shell : undefined,
+      force,
       ...(terminalPool.size(termId) ?? { cols: 80, rows: 24 })
     })
   })
@@ -174,7 +176,7 @@ interface AppState {
   /** 资源管理器右键：用 + 菜单里排第一的本机终端，打开这个目录 */
   openAtDir: (dir: string) => Promise<void>
   closeTab: (tabId: string) => void
-  reconnectTab: (tabId: string) => void
+  reconnectTab: (tabId: string, force?: boolean) => void
   renameTab: (tabId: string, title: string) => void
   setActiveTab: (tabId: string) => void
   /** 标签栏拖动排序：按 id 数组重排 tabs（不在数组里的保持相对顺序排在后面）。
@@ -803,24 +805,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     window.api.term.label(tabId, { title: name })
   },
 
-  reconnectTab: (tabId) => {
+  reconnectTab: (tabId, force = false) => {
     const side = get().sideTerms.find((item) => item.id === tabId)
     if (side) {
       const parent = get().tabs.find((item) => item.id === side.parentId)
       const status = get().termState[tabId]?.status
-      if (!parent || status === 'connected' || status === 'connecting') return
-      relaunchTerm(side.id, parent.kind, parent.sessionId ?? undefined, side.title, parent.shell)
+      if (!parent || (!force && (status === 'connected' || status === 'connecting'))) return
+      relaunchTerm(side.id, parent.kind, parent.sessionId ?? undefined, side.title, parent.shell, force)
       return
     }
     const tab = get().tabs.find((item) => item.id === tabId)
     if (!tab) return
     const status = get().termState[tabId]?.status
-    if (status === 'connected' || status === 'connecting') return
+    if (!force && (status === 'connected' || status === 'connecting')) return
     set({
       ...withTabs(get, get().tabs, tabId),
       editorKeyByTerm: withoutKey(get().editorKeyByTerm, tabId)
     })
-    relaunchTerm(tab.id, tab.kind, tab.sessionId ?? undefined, tab.title, tab.shell)
+    relaunchTerm(tab.id, tab.kind, tab.sessionId ?? undefined, tab.title, tab.shell, force)
   },
 
   closeTab: (tabId) => {
