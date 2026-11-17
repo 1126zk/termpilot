@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { PasswordGenerator } from './tools/PasswordGenerator'
 import { PreviewViewer } from './tools/PreviewViewer'
-import { SpeedTool } from './tools/SpeedTool'
+import { NetworkTool } from './tools/NetworkTool'
 import { SshKeyTool } from './tools/SshKeyTool'
 import { TodoTool } from './tools/TodoTool'
 
@@ -30,7 +30,7 @@ const tools: ToolDef[] = [
   { id: 'todo', name: '待办', component: TodoTool },
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
   { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
-  { id: 'speed', name: '测速', component: SpeedTool },
+  { id: 'speed', name: '网络状态', component: NetworkTool },
   { id: 'preview', name: '预览', component: PreviewViewer }
 ]
 

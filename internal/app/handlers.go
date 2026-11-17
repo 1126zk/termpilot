@@ -138,22 +138,16 @@ func (a *App) hSessionServerInfo(args []interface{}) (interface{}, error) {
 	return a.exec.CollectServerInfo(id)
 }
 
-func (a *App) hSessionSpeed(args []interface{}) (interface{}, error) {
+func (a *App) hSessionNetwork(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {
 		return nil, err
 	}
-	kind, err := argStr(args, 1)
-	if err != nil {
-		return nil, err
-	}
-	return a.exec.MeasureSpeed(id, kind, func(tick sshx.SpeedTick) {
-		a.emit("session:speed-progress", map[string]interface{}{
-			"id":      id,
-			"phase":   tick.Phase,
-			"ratio":   tick.Ratio,
-			"downBps": tick.DownBps,
-			"upBps":   tick.UpBps,
+	return a.exec.MeasureNetwork(id, func(tick sshx.NetworkTick) {
+		a.emit("session:network-progress", map[string]interface{}{
+			"id":     id,
+			"ratio":  tick.Ratio,
+			"report": tick.Report,
 		})
 	})
 }
