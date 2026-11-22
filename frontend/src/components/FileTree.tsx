@@ -398,7 +398,7 @@ export function FileTree(props: {
   const unsupported = !local && error === NO_SFTP
 
   const commitRename = async (raw: string) => {
-    if (!renaming) return
+    if (!fs || !renaming) return
     const name = raw.trim()
     if (!name || name.includes('/') || name.includes('\\')) {
       setRenameError('名称不能为空，也不能包含斜杠')
@@ -424,7 +424,7 @@ export function FileTree(props: {
 
   const remove = async () => {
     const item = removing
-    if (!item || removeInFlight.current) return
+    if (!fs || !item || removeInFlight.current) return
     removeInFlight.current = true
     setRemoveBusy(true)
     setRemoveError('')
@@ -441,6 +441,7 @@ export function FileTree(props: {
   }
 
   const uploadFilesInto = async (dir: string) => {
+    if (!fs) return
     setBusy(true)
     try {
       await fs.upload(dir)
@@ -453,6 +454,7 @@ export function FileTree(props: {
   }
 
   const uploadDirInto = async (dir: string) => {
+    if (!fs) return
     setBusy(true)
     try {
       await fs.uploadDir(dir)
@@ -560,6 +562,7 @@ export function FileTree(props: {
       return
     }
     void (async () => {
+      if (!fs) return
       setBusy(true)
       try {
         await fs.uploadPaths(dir, paths)
@@ -573,6 +576,7 @@ export function FileTree(props: {
   }
 
   const download = async (item: RemoteFile) => {
+    if (!fs) return
     try {
       await fs.download(item)
     } catch (e) {
@@ -581,6 +585,7 @@ export function FileTree(props: {
   }
 
   const downloadDir = async (item: RemoteFile) => {
+    if (!fs) return
     try {
       await fs.downloadDir(item)
     } catch (e) {
@@ -604,6 +609,7 @@ export function FileTree(props: {
   }
 
   const mkdir = async (raw: string) => {
+    if (!fs) return
     const name = raw.trim()
     if (!name || name.includes('/') || name.includes('\\')) {
       setFolderError('名称不能为空，也不能包含斜杠')
