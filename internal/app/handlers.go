@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -717,6 +718,98 @@ func (a *App) hSftpSavePaste(args []interface{}) (interface{}, error) {
 	return a.sftp.SavePaste(sessionID, name, data)
 }
 
+func (a *App) hSftpArchive(args []interface{}) (interface{}, error) {
+	sessionID, dir, err := twoStrings(args)
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := sftpx.TarGzCommand(dir)
+	if err != nil {
+		return nil, err
+	}
+	dest, err := sftpx.TarGzDest(dir)
+	if err != nil {
+		return nil, err
+	}
+	id := sftpx.NewTransferID()
+	archiveName := pathBase(dest)
+	cancel := make(chan struct{})
+	var once sync.Once
+	a.sftp.ArmCancel(id, func() { once.Do(func() { close(cancel) }) })
+	defer a.sftp.DisarmCancel(id)
+
+	var mu sync.Mutex
+	var total, bytes int64
+	var lastEmit time.Time
+	emit := func(done bool, errText string) {
+		transferred := bytes
+		if done && errText == "" && total > 0 {
+			transferred = total
+		}
+		a.emit("sftp:transfer", sftpx.TransferEvent{
+			ID: id, SessionID: sessionID, Direction: "pack", Name: archiveName,
+			Transferred: transferred, Total: total, Done: done, Error: errText,
+		})
+	}
+	emit(false, "")
+
+	res, err := a.exec.Exec(sessionID, sshx.ExecOptions{
+		Command:   cmd,
+		TimeoutMs: 10 * 60 * 1000,
+		Cancel:    cancel,
+		OnLine: func(line string) {
+			gotTotal, tick, kind, ok := sftpx.ParseArchiveLine(line)
+			if !ok {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if kind == "total" {
+				total = gotTotal
+			} else {
+				bytes = tick * sftpx.ArchiveTickBytes
+				if total > 1 && bytes >= total {
+					bytes = total - 1
+				}
+			}
+			if kind == "tick" && time.Since(lastEmit) < 200*time.Millisecond {
+				return
+			}
+			lastEmit = time.Now()
+			emit(false, "")
+		},
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if err != nil {
+		emit(true, err.Error())
+		return nil, err
+	}
+	if res.Canceled {
+		emit(true, "已取消")
+		return nil, errors.New("已取消")
+	}
+	if res.TimedOut {
+		emit(true, "压缩超时")
+		return nil, errors.New("压缩超时")
+	}
+	if res.ExitCode == nil || *res.ExitCode != 0 {
+		msg := sftpx.ArchiveFailText(res.Stderr, res.Stdout)
+		emit(true, msg)
+		return nil, errors.New(msg)
+	}
+	emit(true, "")
+	return nil, nil
+}
+
+func pathBase(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
 func (a *App) hSftpTransferCancel(args []interface{}) (interface{}, error) {
 	id, err := argStr(args, 0)
 	if err != nil {
@@ -750,6 +843,14 @@ func (a *App) hLocalMkdir(args []interface{}) (interface{}, error) {
 		return nil, err
 	}
 	return nil, a.local.Mkdir(dir, name)
+}
+
+func (a *App) hLocalArchive(args []interface{}) (interface{}, error) {
+	dir, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return nil, a.local.Archive(dir)
 }
 
 func (a *App) hLocalRemove(args []interface{}) (interface{}, error) {

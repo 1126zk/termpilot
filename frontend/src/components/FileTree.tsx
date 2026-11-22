@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Download, Eye, EyeOff, FilePenLine, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowUp, Download, Eye, EyeOff, FileArchive, FilePenLine, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -29,6 +29,7 @@ type FsBackend = {
   uploadPaths: (dir: string, paths: string[]) => Promise<number>
   download: (file: RemoteFile) => Promise<boolean>
   downloadDir: (file: RemoteFile) => Promise<boolean>
+  archive: (dir: string) => Promise<void>
 }
 
 /**
@@ -115,7 +116,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
       uploadDir: (dir) => sftp.uploadDir(id, dir),
       uploadPaths: (dir, paths) => sftp.uploadPaths(id, dir, paths),
       download: (file) => sftp.download(id, file),
-      downloadDir: (file) => sftp.downloadDir(id, file)
+      downloadDir: (file) => sftp.downloadDir(id, file),
+      archive: (dir) => sftp.archive(id, dir)
     }
   }, [local, sessionId])
 
@@ -531,6 +533,21 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     }
   }
 
+  const archiveDir = async (path: string) => {
+    if (!fs || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await fs.archive(path)
+      const parent = parentDir(path)
+      if (parent && (parent === root || open[parent])) await listInto(parent)
+    } catch (e) {
+      setError(sftpMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const mkdir = async (raw: string) => {
     const name = raw.trim()
     if (!name || name.includes('/') || name.includes('\\')) {
@@ -685,6 +702,9 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
             <ContextMenuItem onClick={() => downloadDir({ name: rootName, path: root, kind: 'dir', size: 0, mtime: 0 })}>
               <Download /> 下载
             </ContextMenuItem>
+            <ContextMenuItem onClick={() => void archiveDir(root)}>
+              <FileArchive /> 压缩
+            </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
       )
@@ -782,6 +802,11 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
           {item.kind === 'dir' && (
             <ContextMenuItem onClick={() => downloadDir(item)}>
               <Download /> 下载
+            </ContextMenuItem>
+          )}
+          {item.kind === 'dir' && (
+            <ContextMenuItem onClick={() => void archiveDir(item.path)}>
+              <FileArchive /> 压缩
             </ContextMenuItem>
           )}
           <ContextMenuItem onClick={() => panelMenu.openFromMenu(() => setRemoving(item))}>
@@ -922,8 +947,10 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                 <div className="flex items-start gap-1.5">
                   {t.direction === 'up' ? (
                     <Upload className="mt-0.5 size-3 shrink-0" />
-                  ) : (
+                  ) : t.direction === 'down' ? (
                     <Download className="mt-0.5 size-3 shrink-0" />
+                  ) : (
+                    <FileArchive className="mt-0.5 size-3 shrink-0" />
                   )}
                   <span className="min-w-0 flex-1 break-all">{t.name}</span>
                   {t.error ? (

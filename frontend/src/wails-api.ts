@@ -197,6 +197,7 @@ const api = {
     /** 粘贴的图片写到服务器 ~/.termpilot/paste，返回绝对路径 */
     savePaste: (sessionId: string, name: string, base64: string) =>
       invoke<string>(IPC.sftpSavePaste, [sessionId, name, base64]),
+    archive: (sessionId: string, dir: string) => invoke(IPC.sftpArchive, [sessionId, dir]),
     onInstall: (cb: (event: SftpInstallEvent) => void) => on(IPC.sftpInstall, cb),
     onTransfer: (cb: (event: SftpTransferEvent) => void) => on(IPC.sftpTransfer, cb)
   },
@@ -219,7 +220,8 @@ const api = {
     /** 整张图片的 base64 */
     readImage: (path: string) => invoke<string>(IPC.localfsReadImage, [path]),
     write: (path: string, text: string) => invoke(IPC.localfsWrite, [path, text]),
-    resolveWsl: (path: string) => invoke<string>(IPC.localfsWslResolve, [path])
+    resolveWsl: (path: string) => invoke<string>(IPC.localfsWslResolve, [path]),
+    archive: (dir: string) => invoke(IPC.localfsArchive, [dir])
   },
   appearance: {
     get: () => invoke<Appearance>(IPC.appearanceGet, []),

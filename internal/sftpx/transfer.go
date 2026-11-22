@@ -524,6 +524,15 @@ func (s *Service) registerTransfer(id string, cancel func()) {
 	s.mu.Unlock()
 }
 
+// ArmCancel 让传输条上的取消按钮能停掉压缩这类不走 SFTP 读写的任务。
+func (s *Service) ArmCancel(id string, cancel func()) { s.registerTransfer(id, cancel) }
+
+// DisarmCancel 任务结束后摘掉取消入口。
+func (s *Service) DisarmCancel(id string) { s.unregisterTransfer(id) }
+
+// NewTransferID 一条进度的 id。
+func NewTransferID() string { return randomID() }
+
 func (s *Service) unregisterTransfer(id string) {
 	s.mu.Lock()
 	delete(s.active, id)

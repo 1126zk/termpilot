@@ -47,6 +47,8 @@ export const IPC = {
   sftpTransfer: 'sftp:transfer',
   /** renderer → main，取消一条进行中的传输 */
   sftpTransferCancel: 'sftp:transfer-cancel',
+  /** 把远端目录打成旁边的同名 tar.gz */
+  sftpArchive: 'sftp:archive',
 
   snippetList: 'snippet:list',
   snippetCreate: 'snippet:create',
@@ -112,6 +114,7 @@ export const IPC = {
   localfsReadImage: 'localfs:read-image',
   localfsWrite: 'localfs:write',
   localfsWslResolve: 'localfs:wsl-resolve',
+  localfsArchive: 'localfs:archive',
   sessionDetectOs: 'session:detect-os',
   sessionMetrics: 'session:metrics',
   sessionServerInfo: 'session:server-info',

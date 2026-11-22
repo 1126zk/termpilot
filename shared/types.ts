@@ -359,7 +359,7 @@ export interface SftpInstallEvent {
 export interface SftpTransferEvent {
   id: string
   sessionId: string
-  direction: 'up' | 'down'
+  direction: 'up' | 'down' | 'pack'
   name: string
   transferred: number
   total: number

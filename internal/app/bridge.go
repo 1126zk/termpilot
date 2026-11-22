@@ -97,6 +97,7 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"sftp:write":           a.hSftpWrite,
 		"sftp:save-paste":      a.hSftpSavePaste,
 		"sftp:transfer-cancel": a.hSftpTransferCancel,
+		"sftp:archive":         a.hSftpArchive,
 
 		// 本机文件
 		"localfs:list":         a.hLocalList,
@@ -114,6 +115,7 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"localfs:read-image":   a.hLocalReadImage,
 		"localfs:write":        a.hLocalWrite,
 		"localfs:wsl-resolve":  a.hLocalWSLResolve,
+		"localfs:archive":      a.hLocalArchive,
 
 		// 片段 / 历史
 		"snippet:list":   func(_ []interface{}) (interface{}, error) { return a.store.ListSnippets() },
