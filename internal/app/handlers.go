@@ -665,6 +665,42 @@ func (a *App) hSftpDownloadDir(args []interface{}) (interface{}, error) {
 	return true, nil
 }
 
+func (a *App) hSftpRelay(args []interface{}) (interface{}, error) {
+	fromID, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	fromPath, err := argStr(args, 1)
+	if err != nil {
+		return nil, err
+	}
+	toID, err := argStr(args, 2)
+	if err != nil {
+		return nil, err
+	}
+	toDir, err := argStr(args, 3)
+	if err != nil {
+		return nil, err
+	}
+	mode := ""
+	if len(args) > 4 && args[4] != nil {
+		switch v := args[4].(type) {
+		case string:
+			mode = v
+		case bool:
+			if v {
+				mode = "overwrite"
+			}
+		default:
+			return nil, fmt.Errorf("第 5 个参数类型不对")
+		}
+	}
+	if mode != "" && mode != "skip" && mode != "overwrite" {
+		return nil, fmt.Errorf("第 5 个参数类型不对")
+	}
+	return nil, a.sftp.Relay(fromID, fromPath, toID, toDir, mode)
+}
+
 func (a *App) hSftpRead(args []interface{}) (interface{}, error) {
 	sessionID, path, err := twoStrings(args)
 	if err != nil {

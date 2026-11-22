@@ -24,8 +24,9 @@ type RemoteFile struct {
 
 // 传输方向，对应 TS SftpTransferEvent.direction。
 const (
-	DirectionUp   = "up"
-	DirectionDown = "down"
+	DirectionUp    = "up"
+	DirectionDown  = "down"
+	DirectionRelay = "relay"
 )
 
 // TransferEvent 上传/下载进度，对应 TS SftpTransferEvent。

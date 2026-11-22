@@ -1177,7 +1177,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const transfers = index < 0 ? [...list, event] : list.map((item, i) => (i === index ? event : item))
     set({ transfersBySession: { ...get().transfersBySession, [event.sessionId]: transfers } })
     if (event.done && !event.error) {
-      get().setNotice(`${event.direction === 'up' ? '已上传' : event.direction === 'down' ? '已下载' : '已压缩'} ${event.name}`)
+      get().setNotice(
+        `${event.direction === 'up' ? '已上传' : event.direction === 'down' ? '已下载' : event.direction === 'relay' ? '已传输' : '已压缩'} ${event.name}`
+      )
       setTimeout(() => get().dismissSftpTransfer(event.sessionId, event.id), 10000)
     }
   },

@@ -79,7 +79,8 @@ func translateSSH(message string) string {
 		return "对方拒绝了这个通道"
 	case strings.Contains(lower, "permission denied"):
 		return "没有权限"
-	case strings.Contains(lower, "no such file"):
+	case strings.Contains(lower, "no such file"),
+		strings.Contains(lower, "file does not exist"):
 		return "文件不存在"
 	case sftpFailure(message):
 		return "远程操作失败"

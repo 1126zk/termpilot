@@ -49,6 +49,8 @@ export const IPC = {
   sftpTransferCancel: 'sftp:transfer-cancel',
   /** 把远端目录打成旁边的同名 tar.gz */
   sftpArchive: 'sftp:archive',
+  /** 一台机器的文件经本机复制到另一台 */
+  sftpRelay: 'sftp:relay',
 
   snippetList: 'snippet:list',
   snippetCreate: 'snippet:create',

@@ -98,6 +98,7 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"sftp:save-paste":      a.hSftpSavePaste,
 		"sftp:transfer-cancel": a.hSftpTransferCancel,
 		"sftp:archive":         a.hSftpArchive,
+		"sftp:relay":           a.hSftpRelay,
 
 		// 本机文件
 		"localfs:list":         a.hLocalList,

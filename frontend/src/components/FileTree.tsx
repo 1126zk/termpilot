@@ -39,7 +39,14 @@ type FsBackend = {
  * 当前看得到的树每 3 秒静默重读已展开的目录；自己在树上操作时会让开。
  * 条目特别多的目录不参与这轮重读。列表只挂视口里的行。
  */
-export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: boolean }) {
+export function FileTree(props: {
+  tab: Tab | null
+  active?: boolean
+  detached?: boolean
+  /** 互传页切走后树还挂着。再次露出时后台刷新，不把已有列表清成「正在连接」。 */
+  shown?: boolean
+  onForeignDrop?: (from: { path: string; tree: string }, dir: string) => void
+}) {
   const tab = props.tab
   const local = tab?.kind === 'local'
   const sessionId = local ? null : tab?.sessionId ?? null
@@ -173,9 +180,9 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
     setDraft(null)
     setMaking(false)
     setRenaming(null)
-    if (props.detached || !backendKey) return
+    if (!backendKey) return
     void loadRoot('.')
-  }, [backendKey, loadRoot, props.detached])
+  }, [backendKey, loadRoot])
 
   const listInto = useCallback(
     async (path: string) => {
@@ -336,6 +343,53 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
       }),
     [entries, rootOpen, open, cache, loading, showHidden, busy, error, root]
   )
+
+  // 切走时树不卸。再次露出来先留着原来的目录，后台对一下，失败也不把列表清掉。
+  const resumeListed = useRef(false)
+  useEffect(() => {
+    if (!props.detached) return
+    if (!props.shown) {
+      resumeListed.current = true
+      return
+    }
+    if (!resumeListed.current) return
+    resumeListed.current = false
+    const cur = pollState.current
+    if (!cur.fs || cur.busy || cur.making || cur.renaming || cur.removing) return
+    if (cur.entries.length === 0 && cur.root === '.') return
+    const token = ++listingGen.current
+    const rootAtStart = cur.root
+    void (async () => {
+      try {
+        const res = await cur.fs!.list(rootAtStart)
+        if (listingGen.current !== token || pollState.current.root !== rootAtStart) return
+        const listed = orderEntries(res.entries)
+        if (res.path !== pollState.current.root) setRoot(res.path)
+        if (!sameFiles(pollState.current.entries, listed)) setEntries(listed)
+        const paths = Object.keys(cur.open).filter((p) => cur.open[p] && p !== rootAtStart && p !== res.path)
+        if (paths.length === 0) return
+        const next: Record<string, DirListing> = {}
+        await Promise.all(
+          paths.map(async (p) => {
+            try {
+              const child = await cur.fs!.list(p)
+              next[p] = { entries: orderEntries(child.entries) }
+            } catch (e) {
+              next[p] = { entries: [], error: sftpMessage(e) }
+            }
+          })
+        )
+        if (listingGen.current !== token) return
+        setCache((prev) => {
+          const merged = { ...prev }
+          for (const p of paths) merged[p] = next[p]
+          return merged
+        })
+      } catch {
+        // 留着现在的列表
+      }
+    })()
+  }, [props.detached, props.shown])
 
   if (!fs && !props.detached) {
     return <Hint text="打开一个终端窗口，这里显示那台机器的文件。" />
@@ -567,7 +621,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
   }
 
   const refresh = async () => {
-    if (props.detached || !fs) return
+    if (!fs) return
     const token = ++listingGen.current
     setBusy(true)
     setError('')
@@ -609,7 +663,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
     for (const item of transfers) {
       if (!item.done || item.error || seenDone.current.has(item.id)) continue
       seenDone.current.add(item.id)
-      if (item.direction === 'up') uploaded = true
+      if (item.direction === 'up' || item.direction === 'relay') uploaded = true
     }
     if (uploaded) void refreshRef.current()
   }, [transfers])
@@ -848,7 +902,10 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
         try {
           const item = JSON.parse(raw) as { path: string; local?: boolean; tree?: string }
           if (!item.path) return
-          if (item.tree && item.tree !== treeId) return
+          if (item.tree && item.tree !== treeId) {
+            props.onForeignDrop?.({ path: item.path, tree: item.tree }, dir)
+            return
+          }
           if (local) {
             if (item.local) void moveLocalInto(dir, [item.path])
             return
@@ -863,7 +920,6 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
         <input
           className="h-8 min-w-0 flex-1 rounded bg-foreground/5 px-2 text-sm outline-none focus:bg-foreground/10"
           value={draft ?? (root === '.' ? '' : displayRoot)}
-          placeholder={local && tab?.shell !== 'wsl' ? 'C:\\Users\\...' : '/root 或 /home'}
           title={root === '.' ? '' : displayRoot}
           spellCheck={false}
           onFocus={() => setDraft(root === '.' ? '' : displayRoot)}
@@ -934,7 +990,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
       ) : (
         <>
           {!local && busy && entries.length === 0 && !error && (
-            <Hint text="正在通过当前 SSH 连接准备 SFTP，不会另开端口。" />
+            <Hint text={props.detached ? '正在连接' : '正在通过当前 SSH 连接准备 SFTP，不会另开端口。'} />
           )}
           {error && <p className="px-3 pb-1 text-[11px] text-destructive">{error}</p>}
           {!(busy && entries.length === 0 && root === '.') && !(error && entries.length === 0 && root === '.') && (
@@ -942,9 +998,9 @@ export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: 
           )}
         </>
       )}
-      {transfers.length > 0 && (
+      {!props.detached && transfers.some((item) => item.direction !== 'relay') && (
         <div className="shrink-0 border-t px-3 py-1">
-          {transfers.map((t) => {
+          {transfers.filter((item) => item.direction !== 'relay').map((t) => {
             const percent = t.done && !t.error ? 100 : t.total > 0 ? Math.min(100, Math.round((t.transferred / t.total) * 100)) : 0
             return (
               <div key={t.id} className="grid gap-0.5 py-0.5 text-xs text-muted-foreground">

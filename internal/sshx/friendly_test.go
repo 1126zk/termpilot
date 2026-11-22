@@ -34,6 +34,7 @@ func TestFriendlyError(t *testing.T) {
 		"read tcp 1.2.3.4:1->5.6.7.8:22: EOF": "对方关闭了连接",
 		`sftp: "Permission denied" (SSH_FX_PERMISSION_DENIED)`: "没有权限",
 		`sftp: "No such file" (SSH_FX_NO_SUCH_FILE)`:           "文件不存在",
+		"file does not exist":                                  "文件不存在",
 		`sftp: "Failure" (SSH_FX_FAILURE)`:                     "远程操作失败",
 		"跳板连接失败: ssh: handshake failed: EOF":                   "跳板连接失败: 握手中断：已经连上，但对方在登录完成前关闭了连接",
 		"跳板无法转到目标机: dial tcp 1.2.3.4:22: connect: connection refused（shell 回退也失败: ssh: handshake failed: EOF）": "跳板无法转到目标机: 连接被拒绝：目标端口没有开放（shell 回退也失败: 握手中断：已经连上，但对方在登录完成前关闭了连接）",

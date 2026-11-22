@@ -67,7 +67,7 @@ function readLast(): string {
 }
 
 /** 工具页：一次只显示一个工具。没打开过先看到待办，打开过回到上次的工具。标签可拖拽排序。 */
-export function ToolsPage() {
+export function ToolsPage(props: { visible?: boolean }) {
   const [order, setOrder] = useState<string[]>(readOrder)
   const [activeId, setActiveId] = useState(readLast)
   const [fullDiagram, setFullDiagram] = useState(false)
@@ -224,12 +224,17 @@ export function ToolsPage() {
             fullDiagram ? 'min-h-0 flex-1' : active.wide ? 'mx-auto min-h-0 max-w-6xl flex-1' : 'mx-auto max-w-3xl'
           )}
         >
-          <ActiveTool
-            solo
-            onFullDiagram={(full) => {
-              setFullDiagram(full)
-            }}
-          />
+          {active.id !== 'transfer' && (
+            <ActiveTool
+              solo
+              onFullDiagram={(full) => {
+                setFullDiagram(full)
+              }}
+            />
+          )}
+          <div className={active.id === 'transfer' ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
+            <TransferTool shown={props.visible !== false && active.id === 'transfer'} />
+          </div>
         </div>
       </div>
     </div>

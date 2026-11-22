@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"sync"
 	"time"
@@ -527,6 +528,9 @@ func isDeadChannel(err error) bool {
 
 // noSuchFile 对应 TS noSuchFile（codeOf(err) === 2，SSH_FX_NO_SUCH_FILE）。
 func noSuchFile(err error) bool {
+	if os.IsNotExist(err) {
+		return true
+	}
 	var se *sftp.StatusError
 	if errors.As(err, &se) {
 		return se.Code == 2

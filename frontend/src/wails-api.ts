@@ -198,6 +198,8 @@ const api = {
     savePaste: (sessionId: string, name: string, base64: string) =>
       invoke<string>(IPC.sftpSavePaste, [sessionId, name, base64]),
     archive: (sessionId: string, dir: string) => invoke(IPC.sftpArchive, [sessionId, dir]),
+    relay: (fromId: string, fromPath: string, toId: string, toDir: string, mode?: 'skip' | 'overwrite') =>
+      invoke(IPC.sftpRelay, mode ? [fromId, fromPath, toId, toDir, mode] : [fromId, fromPath, toId, toDir]),
     onInstall: (cb: (event: SftpInstallEvent) => void) => on(IPC.sftpInstall, cb),
     onTransfer: (cb: (event: SftpTransferEvent) => void) => on(IPC.sftpTransfer, cb)
   },

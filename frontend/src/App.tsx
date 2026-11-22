@@ -169,6 +169,8 @@ export default function App() {
   const opsPanelWidth = useAppStore((s) => s.opsPanelWidth)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const toolsOpen = useAppStore((s) => s.toolsOpen)
+  const [holdTools, setHoldTools] = useState(false)
+  if (toolsOpen && !holdTools) setHoldTools(true)
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   // 文件标签跟着终端页走，切到主机页、工具页、设置页时收起
@@ -232,15 +234,16 @@ export default function App() {
               parked={Object.keys(sessionSplit)}
             />
             {split && onTerminalPage && <SplitDivider dir={split.dir} gridRef={gridRef} offset={splitOpsWidth} />}
+            {holdTools && (
+              <div className={toolsOpen ? paneCell : 'hidden'} style={toolsOpen ? { gridArea: '1 / 1 / -1 / -1' } : undefined}>
+                <ToolsPage visible={toolsOpen} />
+              </div>
+            )}
             {settingsOpen ? (
               <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
                 <SettingsPage />
               </div>
-            ) : toolsOpen ? (
-              <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
-                <ToolsPage />
-              </div>
-            ) : hostsOpen || !activeTab ? (
+            ) : !toolsOpen && (hostsOpen || !activeTab) ? (
               <div className={paneCell} style={{ gridArea: '1 / 1 / -1 / -1' }}>
                 <HostsPage />
               </div>
