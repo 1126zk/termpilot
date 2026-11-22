@@ -39,7 +39,7 @@ type FsBackend = {
  * 当前看得到的树每 3 秒静默重读已展开的目录；自己在树上操作时会让开。
  * 条目特别多的目录不参与这轮重读。列表只挂视口里的行。
  */
-export function FileTree(props: { tab: Tab | null; active?: boolean }) {
+export function FileTree(props: { tab: Tab | null; active?: boolean; detached?: boolean }) {
   const tab = props.tab
   const local = tab?.kind === 'local'
   const sessionId = local ? null : tab?.sessionId ?? null
@@ -83,6 +83,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
 
   // 编辑器/预览收不下的文件不开废标签页，点击时就地提示。图片走预览，上限另算
   const openFile = (item: RemoteFile, pin: boolean, readOnly?: boolean) => {
+    if (props.detached) return
     if (isImage(item.name)) {
       if (item.size > 20 * 1024 * 1024) {
         setNotice('图片超过 20MB，不在预览里打开')
@@ -172,9 +173,9 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     setDraft(null)
     setMaking(false)
     setRenaming(null)
-    if (!backendKey) return
+    if (props.detached || !backendKey) return
     void loadRoot('.')
-  }, [backendKey, loadRoot])
+  }, [backendKey, loadRoot, props.detached])
 
   const listInto = useCallback(
     async (path: string) => {
@@ -336,7 +337,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     [entries, rootOpen, open, cache, loading, showHidden, busy, error, root]
   )
 
-  if (!fs) {
+  if (!fs && !props.detached) {
     return <Hint text="打开一个终端窗口，这里显示那台机器的文件。" />
   }
 
@@ -566,6 +567,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   }
 
   const refresh = async () => {
+    if (props.detached || !fs) return
     const token = ++listingGen.current
     setBusy(true)
     setError('')
@@ -668,7 +670,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                   dragLocalOut(root)
                   return
                 }
-                e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local: false }))
+                e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: root, local: false, tree: treeId }))
                 e.dataTransfer.effectAllowed = 'copyMove'
               }}
               onContextMenu={() => setSelected(root)}
@@ -732,7 +734,7 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
                 dragLocalOut(item.path)
                 return
               }
-              e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local: false }))
+              e.dataTransfer.setData(TREE_PATH_MIME, JSON.stringify({ path: item.path, local: false, tree: treeId }))
               e.dataTransfer.effectAllowed = 'copyMove'
             }}
             onContextMenu={() => setSelected(item.path)}
@@ -844,8 +846,9 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
         e.preventDefault()
         e.dataTransfer.dropEffect = 'move'
         try {
-          const item = JSON.parse(raw) as { path: string; local?: boolean }
+          const item = JSON.parse(raw) as { path: string; local?: boolean; tree?: string }
           if (!item.path) return
+          if (item.tree && item.tree !== treeId) return
           if (local) {
             if (item.local) void moveLocalInto(dir, [item.path])
             return
@@ -888,31 +891,32 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
         >
           <ArrowUp />
         </Button>
-        {/* 文件树跳到当前终端所在的目录：从屏幕提示符解析，认不出就提示 */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          title="同步到终端当前目录"
-          disabled={busy || !tab}
-          onClick={() => {
-            void (async () => {
-              if (!tab) return
-              try {
-                const dir = await window.api.term.cwd(tab.id)
-                if (!dir) {
-                  setNotice('识别不到终端当前目录')
-                  return
+        {!props.detached && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="同步到终端当前目录"
+            disabled={busy || !tab}
+            onClick={() => {
+              void (async () => {
+                if (!tab) return
+                try {
+                  const dir = await window.api.term.cwd(tab.id)
+                  if (!dir) {
+                    setNotice('识别不到终端当前目录')
+                    return
+                  }
+                  setDraft(null)
+                  await loadRoot(dir)
+                } catch {
+                  setNotice('识别不到终端当前目录，重启应用后再试')
                 }
-                setDraft(null)
-                await loadRoot(dir)
-              } catch {
-                setNotice('识别不到终端当前目录，重启应用后再试')
-              }
-            })()
-          }}
-        >
-          <FolderSync />
-        </Button>
+              })()
+            }}
+          >
+            <FolderSync />
+          </Button>
+        )}
         <Button variant="ghost" size="icon-sm" title="刷新" disabled={busy} onClick={() => void refresh()}>
           <RefreshCw />
         </Button>

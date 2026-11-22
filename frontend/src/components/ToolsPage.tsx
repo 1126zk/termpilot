@@ -6,6 +6,7 @@ import { PreviewViewer } from './tools/PreviewViewer'
 import { NetworkTool } from './tools/NetworkTool'
 import { SshKeyTool } from './tools/SshKeyTool'
 import { TodoTool } from './tools/TodoTool'
+import { TransferTool } from './tools/TransferTool'
 
 const ORDER_KEY = 'termpilot.toolOrder'
 const LAST_KEY = 'termpilot.toolLast'
@@ -24,6 +25,8 @@ interface ToolDef {
   id: string
   name: string
   component: ComponentType<ToolProps>
+  /** 分栏工具用更宽的内容区，标签栏宽度不变 */
+  wide?: boolean
 }
 
 const tools: ToolDef[] = [
@@ -31,7 +34,8 @@ const tools: ToolDef[] = [
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
   { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
   { id: 'speed', name: '网络状态', component: NetworkTool },
-  { id: 'preview', name: '预览', component: PreviewViewer }
+  { id: 'preview', name: '预览', component: PreviewViewer },
+  { id: 'transfer', name: '互传', component: TransferTool, wide: true }
 ]
 
 function readOrder(): string[] {
@@ -159,12 +163,28 @@ export function ToolsPage() {
   const ActiveTool = active.component
 
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col', fullDiagram ? 'overflow-hidden' : 'overflow-y-auto')}>
-      <div className={cn('flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'gap-6 px-6 py-5')}>
+    <div
+      className={cn(
+        'flex min-h-0 flex-1 flex-col',
+        fullDiagram || active.wide ? 'overflow-hidden' : 'overflow-y-auto'
+      )}
+    >
+      <div
+        className={cn(
+          'flex w-full flex-col',
+          fullDiagram || active.wide ? 'min-h-0 flex-1' : '',
+          !fullDiagram && 'gap-6 px-6 py-5'
+        )}
+      >
         {!fullDiagram && (
           <div
             ref={listRef}
-            className="relative mx-auto flex w-full max-w-3xl flex-nowrap items-center gap-1.5 overflow-x-auto"
+            className="relative mx-auto flex w-full max-w-3xl flex-nowrap items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            onWheel={(e) => {
+              const el = listRef.current
+              if (!el || el.scrollWidth <= el.clientWidth) return
+              el.scrollLeft += e.deltaY + e.deltaX
+            }}
           >
             {order.map((id) => {
               const tool = tools.find((item) => item.id === id)
@@ -198,7 +218,12 @@ export function ToolsPage() {
             })}
           </div>
         )}
-        <div className={cn('flex w-full flex-col', fullDiagram ? 'min-h-0 flex-1' : 'mx-auto max-w-3xl')}>
+        <div
+          className={cn(
+            'flex w-full flex-col',
+            fullDiagram ? 'min-h-0 flex-1' : active.wide ? 'mx-auto min-h-0 max-w-6xl flex-1' : 'mx-auto max-w-3xl'
+          )}
+        >
           <ActiveTool
             solo
             onFullDiagram={(full) => {
