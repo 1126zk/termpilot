@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Check, Copy, KeyRound, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -27,10 +27,28 @@ export function SshKeyTool() {
   const [placed, setPlaced] = useState<PlacedKey | null>(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [keyCopied, setKeyCopied] = useState(false)
+  const keyBoxRef = useRef<HTMLDivElement>(null)
+  const keyRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (sessionId && !sessions.some((s) => s.id === sessionId)) setSessionId('')
   }, [sessions, sessionId])
+
+  useLayoutEffect(() => {
+    const el = keyRef.current
+    const fit = () => {
+      if (!el) return
+      el.style.height = 'auto'
+      el.style.height = `${el.scrollHeight}px`
+    }
+    fit()
+    const box = keyBoxRef.current
+    if (!box) return
+    const observer = new ResizeObserver(fit)
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [publicKey, fileKey])
 
   const fail = (e: unknown) => setNotice(errText(e))
 
@@ -69,7 +87,6 @@ export function SshKeyTool() {
   }
 
   const keysToWrite = () => {
-    if (fileKey && publicKey.trim() === fileKey.name) return [fileKey.publicKey]
     const pasted = publicKey.trim()
     return pasted ? [pasted] : []
   }
@@ -98,7 +115,7 @@ export function SshKeyTool() {
       const file = (await window.api.sshkey.readPublicFile()) as SshKeyFile | null
       if (!file) return
       setFileKey(file)
-      setPublicKey(file.name)
+      setPublicKey(file.publicKey)
     } catch (e) {
       fail(e)
     } finally {
@@ -112,6 +129,15 @@ export function SshKeyTool() {
     setCopied(true)
     setNotice('公钥已复制')
     window.setTimeout(() => setCopied(false), 1500)
+  }
+
+  const copyPublic = async () => {
+    const text = publicKey.trim()
+    if (!text) return
+    await navigator.clipboard.writeText(text)
+    setKeyCopied(true)
+    setNotice('公钥已复制')
+    window.setTimeout(() => setKeyCopied(false), 1500)
   }
 
   return (
@@ -135,19 +161,45 @@ export function SshKeyTool() {
         </div>
       )}
       <div className="flex flex-col gap-2">
-        <textarea
-          value={publicKey}
-          spellCheck={false}
-          rows={3}
-          placeholder="粘贴公钥，例如 ssh-ed25519 AAAA…"
-          disabled={busy}
-          onChange={(e) => {
-            const value = e.target.value
-            setPublicKey(value)
-            if (fileKey && value.trim() !== fileKey.name) setFileKey(null)
-          }}
-          className="min-h-16 w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring disabled:opacity-50"
-        />
+        <div ref={keyBoxRef} className="relative min-h-16 rounded-lg border border-input focus-within:border-ring">
+          {fileKey ? (
+            <textarea
+              ref={keyRef}
+              value={publicKey}
+              spellCheck={false}
+              rows={1}
+              disabled={busy}
+              onChange={(e) => {
+                const value = e.target.value
+                setPublicKey(value)
+                if (value.trim() !== fileKey.publicKey) setFileKey(null)
+              }}
+              className="w-full resize-none overflow-hidden break-all bg-transparent pt-2 pr-9 pb-0 pl-2.5 font-mono text-xs leading-5 text-foreground outline-none disabled:opacity-50"
+            />
+          ) : (
+            <textarea
+              value={publicKey}
+              spellCheck={false}
+              rows={3}
+              placeholder="粘贴公钥，例如 ssh-ed25519 AAAA…"
+              disabled={busy}
+              onChange={(e) => setPublicKey(e.target.value)}
+              className="min-h-16 w-full resize-y bg-transparent py-2 pr-9 pl-2.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
+            />
+          )}
+          {fileKey && <p className="px-2.5 pt-1 font-mono text-xs break-all text-primary/50">{fileKey.name}</p>}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title="复制公钥"
+            disabled={busy || !publicKey.trim()}
+            onClick={() => void copyPublic()}
+            className="absolute top-1 right-1 size-7 text-muted-foreground hover:text-foreground"
+          >
+            {keyCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          </Button>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" className="h-8 gap-1.5" disabled={busy} onClick={() => void generate()}>
             <KeyRound className="size-3.5" />
