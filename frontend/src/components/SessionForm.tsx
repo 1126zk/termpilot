@@ -3,10 +3,13 @@ import {
   ArrowDown,
   ArrowRightToLine,
   ArrowUp,
+  Check,
+  Copy,
   Eye,
   EyeOff,
   Globe,
   KeyRound,
+  Lock,
   Plus,
   Tag,
   User,
@@ -92,6 +95,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
   const [forwards, setForwards] = useState<ForwardDraft[]>([])
   const [jumps, setJumps] = useState<JumpDraft[]>([])
   const [showSecret, setShowSecret] = useState(false)
+  const [secretCopied, setSecretCopied] = useState(false)
   const nextJumpID = useRef(1)
   /** 用户改过才自动保存。初始化填充（含 revealSecret 回填）不算脏 */
   const dirty = useRef(false)
@@ -155,6 +159,13 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editKey])
+
+  // 点过显示之后，主机信息一收起就藏回去。表单在收起动画里还挂着，不能留着明文
+  useEffect(() => {
+    if (liveEditing) return
+    setShowSecret(false)
+    setJumps((list) => (list.some((jump) => jump.showSecret) ? list.map((jump) => ({ ...jump, showSecret: false })) : list))
+  }, [liveEditing])
 
   const set = <K extends keyof ReturnType<typeof empty>>(k: K, v: ReturnType<typeof empty>[K]) => {
     dirty.current = true
@@ -238,7 +249,7 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
       host,
       port,
       username,
-      secret: form.useKey ? '' : form.secret ? form.secret : undefined,
+      secret: form.useKey || !form.secret ? undefined : form.secret,
       useKey: form.useKey,
       jumps: nextJumps,
       sshOptions: creating ? null : undefined,
@@ -329,37 +340,57 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
           />
           <div className="relative">
             <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
-              <KeyRound />
+              <Lock />
             </span>
             <Input
-              className="h-10 pr-16 pl-8"
-              type={showSecret ? 'text' : 'password'}
-              value={form.secret}
+              className={cn('h-10 pl-8', form.useKey ? 'pr-9' : 'pr-24')}
+              type={showSecret && liveEditing ? 'text' : 'password'}
+              value={form.useKey ? '' : form.secret}
               placeholder="密码"
               disabled={form.useKey}
               onChange={(e) => set('secret', e.target.value)}
             />
+            {!form.useKey && (
+              <button
+                type="button"
+                title="复制密码"
+                disabled={!form.secret}
+                className="absolute top-1/2 right-14.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                onClick={() => {
+                  const text = form.secret
+                  if (!text) return
+                  void navigator.clipboard.writeText(text).then(() => {
+                    setSecretCopied(true)
+                    window.setTimeout(() => setSecretCopied(false), 1500)
+                  })
+                }}
+              >
+                {secretCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              </button>
+            )}
+            {!form.useKey && (
+              <button
+                type="button"
+                title={showSecret && liveEditing ? '隐藏密码' : '显示密码'}
+                className="absolute top-1/2 right-8 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+                onClick={() => setShowSecret((v) => !v)}
+              >
+                {showSecret && liveEditing ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            )}
             <button
               type="button"
               title={form.useKey ? '改用密码' : '用密钥登录'}
               className={cn(
-                'absolute top-1/2 right-8 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground',
+                'absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground',
                 form.useKey && 'text-primary hover:text-primary'
               )}
               onClick={() => {
                 dirty.current = true
-                setForm((f) => ({ ...f, useKey: !f.useKey, secret: f.useKey ? f.secret : '' }))
+                setForm((f) => ({ ...f, useKey: !f.useKey }))
               }}
             >
               <KeyRound className="size-4" />
-            </button>
-            <button
-              type="button"
-              title={showSecret ? '隐藏密码' : '显示密码'}
-              className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
-              onClick={() => setShowSecret((v) => !v)}
-            >
-              {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </button>
           </div>
 
@@ -492,22 +523,22 @@ export function SessionFormPanel(props: { frozen?: EditingState }) {
                 />
                 <div className="relative">
                   <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
-                    <KeyRound />
+                    <Lock />
                   </span>
                   <Input
                     className="h-10 pr-9 pl-8"
-                    type={jump.showSecret ? 'text' : 'password'}
+                    type={jump.showSecret && liveEditing ? 'text' : 'password'}
                     value={jump.secret}
                     placeholder={jump.hasSecret ? '留空则不修改' : '跳板密码'}
                     onChange={(e) => setJump(jump.id, { secret: e.target.value })}
                   />
                   <button
                     type="button"
-                    title={jump.showSecret ? '隐藏密码' : '显示密码'}
+                    title={jump.showSecret && liveEditing ? '隐藏密码' : '显示密码'}
                     className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
                     onClick={() => setJump(jump.id, { showSecret: !jump.showSecret }, false)}
                   >
-                    {jump.showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    {jump.showSecret && liveEditing ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   </button>
                 </div>
               </div>
