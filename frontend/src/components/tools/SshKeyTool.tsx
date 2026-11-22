@@ -174,7 +174,7 @@ export function SshKeyTool() {
                 setPublicKey(value)
                 if (value.trim() !== fileKey.publicKey) setFileKey(null)
               }}
-              className="w-full resize-none overflow-hidden break-all bg-transparent pt-2 pr-9 pb-0 pl-2.5 font-mono text-xs leading-5 text-foreground outline-none disabled:opacity-50"
+              className="w-full resize-none overflow-hidden break-all bg-transparent py-2 pr-9 pl-2.5 font-mono text-xs leading-5 text-foreground outline-none disabled:opacity-50"
             />
           ) : (
             <textarea
@@ -187,7 +187,6 @@ export function SshKeyTool() {
               className="min-h-16 w-full resize-y bg-transparent py-2 pr-9 pl-2.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
             />
           )}
-          {fileKey && <p className="px-2.5 pt-1 font-mono text-xs break-all text-primary/50">{fileKey.name}</p>}
           <Button
             type="button"
             variant="ghost"
