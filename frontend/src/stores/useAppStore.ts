@@ -1208,15 +1208,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   setOpsPanelWidth: (opsPanelWidth) => set({ opsPanelWidth }),
 
   toggleHostsOpen: () =>
-    get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, toolsOpen: false, settingsOpen: false }),
+    get().hostsOpen ? set({ hostsOpen: false }) : set({ hostsOpen: true, toolsOpen: false, settingsOpen: false, rightPanelOpen: false, editing: null }),
   setHostsOpen: (open) => {
-    set(open ? { hostsOpen: true, toolsOpen: false, settingsOpen: false, rightPanelOpen: false } : { hostsOpen: false })
+    // 从别的页面切进来才收主机表单；已经在主机页时再点标签，不关掉正在看的表单
+    const enter = open && !get().hostsOpen
+    set(open ? { hostsOpen: true, toolsOpen: false, settingsOpen: false, rightPanelOpen: false, ...(enter ? { editing: null } : {}) } : { hostsOpen: false })
     if (open) void get().loadSessions()
   },
   toggleToolsOpen: () =>
-    get().toolsOpen ? set({ toolsOpen: false }) : set({ toolsOpen: true, hostsOpen: false, settingsOpen: false }),
+    get().toolsOpen ? set({ toolsOpen: false }) : set({ toolsOpen: true, hostsOpen: false, settingsOpen: false, rightPanelOpen: false, editing: null }),
   setToolsOpen: (open) => {
-    set(open ? { toolsOpen: true, hostsOpen: false, settingsOpen: false, rightPanelOpen: false } : { toolsOpen: false })
+    const enter = open && !get().toolsOpen
+    set(open ? { toolsOpen: true, hostsOpen: false, settingsOpen: false, rightPanelOpen: false, ...(enter ? { editing: null } : {}) } : { toolsOpen: false })
   },
   setRightPanelPane: (pane) => set({ rightPanelPane: pane }),
   openRemoteEditor: (termId, sessionId, file, pin = false, readOnly) => {
