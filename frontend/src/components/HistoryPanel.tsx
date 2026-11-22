@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Play, Search, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { PanelConfirm } from './PanelDialog'
 import { sendToActiveTerminal } from './SnippetsPanel'
 import { useAppStore } from '../stores/useAppStore'
 import type { HistoryEntry } from '../../../shared/types'
@@ -11,6 +14,7 @@ export function HistorySection() {
   const activeTabId = useAppStore((s) => s.activeTabId)
   const [items, setItems] = useState<HistoryEntry[]>([])
   const [kw, setKw] = useState('')
+  const [clearing, setClearing] = useState(false)
 
   const load = useCallback(async () => {
     if (!activeTabId) {
@@ -35,7 +39,8 @@ export function HistorySection() {
   )
 
   const clear = async () => {
-    if (!activeTabId || !confirm('清空当前窗口的历史指令？')) return
+    if (!activeTabId) return
+    setClearing(false)
     await window.api.history.clear(activeTabId)
     setItems([])
   }
@@ -56,7 +61,7 @@ export function HistorySection() {
             className="min-w-0 flex-1 bg-transparent text-sm text-primary outline-none placeholder:text-muted-foreground"
           />
         </label>
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-sm" disabled={items.length === 0} onClick={() => void clear()}>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-sm" disabled={items.length === 0} onClick={() => setClearing(true)}>
           清空
         </Button>
       </div>
@@ -65,16 +70,22 @@ export function HistorySection() {
           {items.length === 0 ? '在终端里跑过的命令会记在这里' : '没有匹配的历史指令'}
         </p>
       ) : (
-        <div className="grid gap-0.5 px-1 pb-2">
+        <div className="grid min-w-0 gap-0.5 px-1 pb-2">
           {filtered.map((item) => (
             <div
               key={item.id}
               role="button"
-              title="点击填入当前终端，自己按回车执行"
-              className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 font-mono text-sm break-all text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+              className="group flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 font-mono text-sm text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
               onClick={() => sendToActiveTerminal(item.command, false)}
             >
-              <span className="min-w-0 flex-1 truncate">{item.command}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="min-w-0 flex-1 truncate">{item.command}</span>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-sm whitespace-pre-wrap break-all text-left font-mono">
+                  {item.command}
+                </TooltipContent>
+              </Tooltip>
               <button
                 type="button"
                 title="填入终端（自己回车执行）"
@@ -101,6 +112,18 @@ export function HistorySection() {
           ))}
         </div>
       )}
+      {clearing &&
+        createPortal(
+          <PanelConfirm
+            open
+            title="清空历史指令"
+            message="清空当前窗口的历史指令？"
+            confirmText="清空"
+            onClose={() => setClearing(false)}
+            onConfirm={() => void clear()}
+          />,
+          document.querySelector('[data-right-panel]') ?? document.body
+        )}
     </section>
   )
 }

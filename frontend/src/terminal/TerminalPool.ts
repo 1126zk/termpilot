@@ -149,7 +149,7 @@ class TerminalPool {
       host,
       disposeData,
       disposeLinks,
-      disposeScrollHint: bindScrollHint(host, term),
+      disposeScrollHint: composeDispose(bindScrollHint(host, term), bindPinHorizontal(host)),
       disposeMouse,
       settled: false
     }
@@ -174,7 +174,7 @@ class TerminalPool {
       if (e.host.parentElement === el) {
         this.fit(termId)
         focus()
-        e.host.scrollLeft = 0
+        pinHorizontal(e.host)
       }
     })
     window.setTimeout(focus, 0)
@@ -200,7 +200,7 @@ class TerminalPool {
       }
       this.clearGlyphAtlas()
       this.fit(termId)
-      entry.host.scrollLeft = 0
+      pinHorizontal(entry.host)
     }
     void loadFonts(this.font.family, this.font.size).then(() => {
       requestAnimationFrame(run)
@@ -232,6 +232,7 @@ class TerminalPool {
     } catch {
       /* 容器不可见（0 尺寸）时 fit 会抛错，忽略 */
     }
+    pinHorizontal(e.host)
   }
 
   /** 向终端写入文本（用于打印连接错误等本地提示）。done 在这段文本解析完之后调用。 */
@@ -461,6 +462,31 @@ class TerminalPool {
       // WebGL 不可用时 xterm 自动回退 Canvas 渲染器
     }
   }
+}
+
+function composeDispose(...stops: Array<() => void>): () => void {
+  return () => {
+    for (const stop of stops) stop()
+  }
+}
+
+/** 组字条、隐藏输入框超出右边界时，浏览器会把终端横向滚走，左边整段就被裁掉。 */
+const XTERM_SCROLLERS = '.xterm, .xterm-viewport, .xterm-screen, .xterm-scrollable-element'
+
+function pinHorizontal(host: HTMLElement): void {
+  if (host.scrollLeft) host.scrollLeft = 0
+  host.querySelectorAll<HTMLElement>(XTERM_SCROLLERS).forEach((el) => {
+    if (el.scrollLeft) el.scrollLeft = 0
+  })
+}
+
+function bindPinHorizontal(host: HTMLElement): () => void {
+  const onScroll = (event: Event) => {
+    const el = event.target
+    if (el instanceof HTMLElement && el.scrollLeft) el.scrollLeft = 0
+  }
+  host.addEventListener('scroll', onScroll, true)
+  return () => host.removeEventListener('scroll', onScroll, true)
 }
 
 /**

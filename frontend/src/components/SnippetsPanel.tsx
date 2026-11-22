@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, Play, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { PanelConfirm } from './PanelDialog'
 import { termIdFromView, useAppStore } from '../stores/useAppStore'
 import { terminalPool } from '../terminal/TerminalPool'
 import type { Snippet } from '../../../shared/types'
@@ -30,6 +33,7 @@ export function SnippetsSection() {
   const [snippets, setSnippets] = useState<Snippet[]>([])
   const [command, setCommand] = useState('')
   const [error, setError] = useState('')
+  const [pending, setPending] = useState<Snippet | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -63,9 +67,11 @@ export function SnippetsSection() {
     }
   }
 
-  const remove = async (snippet: Snippet) => {
-    if (!confirm(`删除片段「${snippet.command.split('\n')[0]}」？`)) return
-    await window.api.snippets.remove(snippet.id)
+  const remove = async () => {
+    if (!pending) return
+    const id = pending.id
+    setPending(null)
+    await window.api.snippets.remove(id)
     await load()
   }
 
@@ -96,18 +102,24 @@ export function SnippetsSection() {
       {snippets.length === 0 ? (
         <p className="px-3 py-4 text-center text-sm leading-5 text-muted-foreground">把常用命令存成片段，一键复用</p>
       ) : (
-        <div className="grid gap-0.5 px-1 pb-2">
+        <div className="grid min-w-0 gap-0.5 px-1 pb-2">
           {snippets.map((snippet) => (
             <div
               key={snippet.id}
               role="button"
-              title={snippet.command}
-              className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
+              className="group flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
               onClick={() => sendToActiveTerminal(snippet.command, false)}
             >
-              <span className="min-w-0 flex-1 truncate font-mono text-sm">
-                {snippet.command.split('\n')[0]}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                    {snippet.command.split('\n')[0]}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-sm whitespace-pre-wrap break-all text-left font-mono">
+                  {snippet.command}
+                </TooltipContent>
+              </Tooltip>
               <button
                 type="button"
                 title="填入终端（自己回车执行）"
@@ -136,7 +148,7 @@ export function SnippetsSection() {
                 className="invisible flex size-6 shrink-0 items-center justify-center rounded bg-muted-foreground/10 text-muted-foreground hover:text-primary group-hover:visible"
                 onClick={(e) => {
                   e.stopPropagation()
-                  void remove(snippet)
+                  setPending(snippet)
                 }}
               >
                 <Trash2 className="size-4" />
@@ -145,6 +157,17 @@ export function SnippetsSection() {
           ))}
         </div>
       )}
+      {pending &&
+        createPortal(
+          <PanelConfirm
+            open
+            title="删除片段"
+            message={`删除 ${pending.command.split('\n')[0]}？删除后无法恢复。`}
+            onClose={() => setPending(null)}
+            onConfirm={() => void remove()}
+          />,
+          document.querySelector('[data-right-panel]') ?? document.body
+        )}
     </section>
   )
 }
