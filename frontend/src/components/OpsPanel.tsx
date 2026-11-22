@@ -1523,6 +1523,7 @@ function WebSection(props: { sessionId: string; active: boolean }) {
   const info = cached?.info ?? null
   const svc = info?.[webTab]
   const certs = info?.certs ?? {}
+  const caddyCerts = info?.caddyCerts ?? {}
   const file = webTab === 'nginx' ? '~/.termpilot/nginx/conf.d/*.conf' : '~/.termpilot/caddy/Caddyfile + sites/*.caddy'
   const sites = svc ? parseSites(svc.files, webTab) : []
   // 反代目标的候选：host 网络下写 127.0.0.1:宿主机发布端口，只列发布了端口的容器
@@ -1597,6 +1598,20 @@ function WebSection(props: { sessionId: string; active: boolean }) {
       })
       .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
       .finally(() => setSslBusy(null))
+  }
+
+  const [reloadBusy, setReloadBusy] = useState<string | null>(null)
+  const reloadSite = (d: string) => {
+    setReloadBusy(d)
+    setNotice(`正在重载 ${d}…`, true)
+    void window.api.sessions
+      .webSite(props.sessionId, 'caddy', 'reload', d)
+      .then(() => {
+        setNotice(`已重载 ${d}`)
+        loadWebInfo(props.sessionId, true)
+      })
+      .catch((e) => setNotice(connErrorText(e instanceof Error ? e.message : String(e))))
+      .finally(() => setReloadBusy(null))
   }
 
   const delSite = (siteDomain: string) => {    if (confirmDelSite !== siteDomain) {
@@ -1839,6 +1854,29 @@ function WebSection(props: { sessionId: string; active: boolean }) {
                           )}
                         </span>
                       </>
+                    )}
+                    {webTab === 'caddy' && (
+                      <span className="flex w-4 shrink-0 justify-center">
+                        {s.proto === 'https' && (
+                          <StatusDot
+                            className="shrink-0"
+                            label={caddyCerts[s.domain.toLowerCase()] ? '证书已签发' : '证书未就绪'}
+                            tone={caddyCerts[s.domain.toLowerCase()] ? 'running' : 'busy'}
+                          />
+                        )}
+                      </span>
+                    )}
+                    {webTab === 'caddy' && s.proto === 'https' && !caddyCerts[s.domain.toLowerCase()] && !/^\d{1,3}(\.\d{1,3}){3}$/.test(s.domain) && (
+                      <span className="w-10 shrink-0 text-center">
+                        <button
+                          type="button"
+                          className="rounded px-1 text-xs text-muted-foreground/60 hover:text-foreground disabled:opacity-40"
+                          disabled={reloadBusy === s.domain || svc?.state !== 'running'}
+                          onClick={() => reloadSite(s.domain)}
+                        >
+                          重载
+                        </button>
+                      </span>
                     )}
                     <span className="w-10 shrink-0 text-center">
                       <button

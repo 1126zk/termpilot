@@ -160,8 +160,10 @@ type WebInfo struct {
 	DockerAvailable bool           `json:"dockerAvailable"`
 	Nginx           WebServiceInfo `json:"nginx"`
 	Caddy           WebServiceInfo `json:"caddy"`
-	// Certs nginx 各域名证书的剩余有效天数（certbot 签的）；caddy 自动续不跟踪。负数 = 已过期。
+	// Certs nginx 各域名证书的剩余有效天数。负数 = 已过期。
 	Certs map[string]int `json:"certs"`
+	// CaddyCerts 已经有证书文件的主机名（自动签发在 data 里，手传的在 ssl/certs 里）。没有记录 = 还没签上。
+	CaddyCerts map[string]bool `json:"caddyCerts"`
 }
 
 // WebServiceInfo 一个网站服务。State 是容器状态（running/exited 等），空串 = 还没装；

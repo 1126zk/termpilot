@@ -31,11 +31,26 @@ docker inspect -f '{{.State.Status}}' caddy 2>/dev/null
 echo '#TP-CADDY-CONF#'
 f="$HOME/.termpilot/caddy/Caddyfile"; [ -f "$f" ] && echo "#TP-FILE:$f" && cat "$f"
 for f in "$HOME"/.termpilot/caddy/sites/*.caddy; do [ -f "$f" ] && echo "#TP-FILE:$f" && cat "$f"; done
+echo '#TP-CADDY-CERTS#'
+certroot="$HOME/.termpilot/caddy/data/caddy/certificates"
+if [ -d "$certroot" ]; then
+  find "$certroot" -mindepth 3 -maxdepth 3 -type f -name '*.crt' 2>/dev/null | while IFS= read -r f; do
+    basename "$(dirname "$f")"
+  done
+fi
+ssldir="$HOME/.termpilot/caddy/ssl/certs"
+if [ -d "$ssldir" ]; then
+  for c in "$ssldir"/*/fullchain.pem; do
+    [ -f "$c" ] || continue
+    basename "$(dirname "$c")"
+  done
+fi
 echo '#TP-END#'
 `
 
 // CollectWeb 采一次网站服务（容器化 nginx/caddy）的状态和配置，只在面板网站页激活时调用。
-// Certs：nginx ssl 目录下各证书域名的剩余有效天数（openssl 读到期日换算），caddy 自动续不跟踪。
+// Certs：nginx ssl 目录下各证书域名的剩余有效天数（openssl 读到期日换算）。
+// CaddyCerts：caddy 数据目录和手传证书目录里已经有证书文件的主机名。
 func (s *ExecService) CollectWeb(sessionID string) (*WebInfo, error) {
 	res, err := s.Exec(sessionID, ExecOptions{Command: webScript, TimeoutMs: 10000})
 	if err != nil {
@@ -63,8 +78,22 @@ func (s *ExecService) CollectWeb(sessionID string) (*WebInfo, error) {
 			State: strings.TrimSpace(sec["CADDY-STATE"]),
 			Files: parseWebConfFiles(sec["CADDY-CONF"]),
 		},
-		Certs: certs,
+		Certs:      certs,
+		CaddyCerts: parseCaddyCertHosts(sec["CADDY-CERTS"]),
 	}, nil
+}
+
+// parseCaddyCertHosts 把采集到的主机名收成集合。空行和带路径的噪音丢掉，名字统一小写。
+func parseCaddyCertHosts(out string) map[string]bool {
+	hosts := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.ToLower(strings.TrimSpace(line))
+		if line == "" || strings.ContainsAny(line, "/ \t") {
+			continue
+		}
+		hosts[line] = true
+	}
+	return hosts
 }
 
 // parseWebConfFiles 把采集输出按 #TP-FILE:<路径> 标记切成逐文件的（路径, 原文）列表。
@@ -226,6 +255,26 @@ var (
 	webPortRe   = regexp.MustCompile(`^[0-9]{1,5}$`)
 )
 
+// caddyCertReloadScript 清掉这个域名没签成的证书目录和申请锁，已经有 crt 的不动，然后热加载。
+// 配置没变时 caddy reload 也会重新加载，还没有证书的域名会再申请一次。
+func caddyCertReloadScript(domain string) string {
+	return fmt.Sprintf(`
+dom=%q
+base="$HOME/.termpilot/caddy/data/caddy"
+if [ -d "$base/certificates" ]; then
+  find "$base/certificates" -mindepth 2 -maxdepth 2 -type d -name "$dom" | while IFS= read -r d; do
+    set -- "$d"/*.crt
+    [ -e "$1" ] || rm -rf "$d"
+  done
+fi
+if [ -d "$base/locks" ]; then
+  find "$base/locks" -maxdepth 1 -type f -name "issue_cert_*_${dom}.lock" -exec rm -f {} +
+fi
+[ "$(docker inspect -f '{{.State.Status}}' caddy 2>/dev/null)" = "running" ] || { echo "caddy 没在运行，先启动容器" >&2; exit 1; }
+docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+`, domain)
+}
+
 // WebSite 增删网站站点，service 只认 nginx/caddy。站点地址按 caddy 写法：
 // [http(s)://]名字[:端口]——http:// 是明确的纯 HTTP，https:// 等同裸写（自动 HTTPS）。
 // nginx 站点在 conf.d/<域名>.conf，caddy 在 sites/<域名>.caddy；同名文件已存在直接报错
@@ -277,6 +326,11 @@ func (s *ExecService) WebSite(sessionID, service, action, domain, port, siteType
 
 	var script string
 	switch action {
+	case "reload":
+		if service != "caddy" || scheme == "http" || webIPv4Re.MatchString(domain) {
+			return fmt.Errorf("这个站点不用重载证书")
+		}
+		script = caddyCertReloadScript(domain)
 	case "add":
 		var body, prepare string
 		switch {
@@ -361,7 +415,11 @@ fi
 		return err
 	}
 	if res.ExitCode != nil && *res.ExitCode != 0 {
-		return fmt.Errorf("%s 站点失败（退出码 %d）：%s", action, *res.ExitCode, strings.TrimSpace(res.Stderr))
+		detail := strings.TrimSpace(res.Stderr)
+		if action == "reload" {
+			return fmt.Errorf("重载失败（退出码 %d）：%s", *res.ExitCode, detail)
+		}
+		return fmt.Errorf("%s 站点失败（退出码 %d）：%s", action, *res.ExitCode, detail)
 	}
 	return nil
 }
