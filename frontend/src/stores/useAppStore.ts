@@ -38,11 +38,7 @@ function relaunchTerm(
   shell: LocalShell | undefined,
   force: boolean
 ): void {
-  terminalPool.releaseProgram(termId, '', () => {
-    if (kind === 'local') {
-      terminalPool.clear(termId)
-      window.api.term.bindView(termId)
-    }
+  const open = () => {
     window.api.term.create({
       termId,
       kind,
@@ -52,6 +48,20 @@ function relaunchTerm(
       force,
       ...(terminalPool.size(termId) ?? { cols: 80, rows: 24 })
     })
+  }
+  terminalPool.releaseProgram(termId, '', () => {
+    if (kind === 'local') {
+      terminalPool.clear(termId)
+      window.api.term.bindView(termId)
+      open()
+      return
+    }
+    // 新会话的输出接在旧光标后面。光标还停在提示符末尾时先换行，已经在行首就不动。
+    if (terminalPool.atLineStart(termId)) {
+      open()
+      return
+    }
+    terminalPool.write(termId, '\r\n', open)
   })
 }
 

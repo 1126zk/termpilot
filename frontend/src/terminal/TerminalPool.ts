@@ -234,9 +234,22 @@ class TerminalPool {
     }
   }
 
-  /** 向终端写入文本（用于打印连接错误等本地提示） */
-  write(termId: string, text: string): void {
-    this.entries.get(termId)?.term.write(text)
+  /** 向终端写入文本（用于打印连接错误等本地提示）。done 在这段文本解析完之后调用。 */
+  write(termId: string, text: string, done?: () => void): void {
+    const term = this.entries.get(termId)?.term
+    if (!term) {
+      done?.()
+      return
+    }
+    if (done) term.write(text, done)
+    else term.write(text)
+  }
+
+  /** 光标是否已经在行首。重开 SSH 时用来决定要不要先换行。 */
+  atLineStart(termId: string): boolean {
+    const term = this.entries.get(termId)?.term
+    if (!term) return true
+    return term.buffer.active.cursorX === 0
   }
 
   /**
