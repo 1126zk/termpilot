@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Download, Eye, EyeOff, FilePenLine, FolderInput, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowUp, Download, Eye, EyeOff, FilePenLine, FolderPlus, FolderSync, FolderUp, Home, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -68,6 +68,8 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
   const dropRef = useRef<(dir: string, paths: string[]) => void>(() => undefined)
   // 自己发起的列目录把代数加一，进行中的自动刷新结果作废，避免盖掉更新的列表
   const listingGen = useRef(0)
+  // 单击展开；同一行很快再点一次是双击，取消展开，交给双击进入目录
+  const dirClick = useRef<{ path: string; timer: number } | null>(null)
   const seenActive = useRef(false)
   const dragging = useRef(false)
   const refreshRef = useRef<() => Promise<void>>(async () => undefined)
@@ -205,6 +207,35 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
     }
     setOpen((s) => ({ ...s, [path]: true }))
     if (path !== root && !cache[path]) await listInto(path)
+  }
+
+  const clickDir = (path: string) => {
+    const pending = dirClick.current
+    if (pending?.path === path) {
+      window.clearTimeout(pending.timer)
+      dirClick.current = null
+      return
+    }
+    if (pending) {
+      window.clearTimeout(pending.timer)
+      void toggle(pending.path)
+    }
+    dirClick.current = {
+      path,
+      timer: window.setTimeout(() => {
+        dirClick.current = null
+        void toggle(path)
+      }, 220)
+    }
+  }
+
+  const openDir = (path: string) => {
+    const pending = dirClick.current
+    if (pending) {
+      window.clearTimeout(pending.timer)
+      dirClick.current = null
+    }
+    void loadRoot(path)
   }
 
   const ensureOpen = async (path: string) => {
@@ -634,11 +665,6 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent onCloseAutoFocus={panelMenu.keepFocusOnClose}>
-            {parentDir(root) && (
-              <ContextMenuItem onClick={() => void loadRoot(parentDir(root)!)}>
-                打开上级目录
-              </ContextMenuItem>
-            )}
             <ContextMenuItem
               onClick={() => {
                 panelMenu.openFromMenu(() => {
@@ -692,11 +718,12 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
             onContextMenu={() => setSelected(item.path)}
             onClick={() => {
               setSelected(item.path)
-              if (isDir) void toggle(item.path)
+              if (isDir) clickDir(item.path)
               else openFile(item, false)
             }}
             onDoubleClick={() => {
-              if (!isDir) openFile(item, true)
+              if (isDir) openDir(item.path)
+              else openFile(item, true)
             }}
           >
             <FileIcon name={item.name} kind={item.kind} open={expanded} />
@@ -704,11 +731,6 @@ export function FileTree(props: { tab: Tab | null; active?: boolean }) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={panelMenu.keepFocusOnClose}>
-          {item.kind === 'dir' && (
-            <ContextMenuItem onClick={() => void loadRoot(item.path)}>
-              <FolderInput /> 打开此目录
-            </ContextMenuItem>
-          )}
           {item.kind === 'dir' && (
             <ContextMenuItem
               onClick={() => {

@@ -25,6 +25,7 @@ func TestFriendlyError(t *testing.T) {
 		"ssh: disconnect, reason 2: Timeout, client not responding":                             "服务器保活超时",
 		"ssh: handshake failed: EOF":                               "握手中断：已经连上，但对方在登录完成前关闭了连接",
 		"Connection lost before handshake":                         "握手前连接中断",
+		"connection lost":                                          "连接已断开",
 		"ssh: pty-req failed":                                      "对方拒绝分配终端",
 		"ssh: command shell failed":                                "对方拒绝打开 shell",
 		"ssh: rejected: administratively prohibited (open failed)": "对方拒绝了这个通道",

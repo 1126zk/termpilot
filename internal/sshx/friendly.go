@@ -68,6 +68,8 @@ func translateSSH(message string) string {
 		return "握手中断：已经连上，但对方在登录完成前关闭了连接"
 	case strings.Contains(message, "Connection lost before handshake"):
 		return "握手前连接中断"
+	case strings.Contains(lower, "connection lost"):
+		return "连接已断开"
 	case strings.Contains(message, "pty-req failed"):
 		return "对方拒绝分配终端"
 	case strings.Contains(message, "command shell failed"):
