@@ -30,6 +30,7 @@ import type {
   SshKeyImport,
   SshKeyInstall,
   SshKeyPair,
+  RemotePublicKey,
   SftpInstallEvent,
   SftpTransferEvent,
   Snippet,
@@ -145,7 +146,9 @@ const api = {
     installPublic: (sessionId: string, publicKey: string) =>
       invoke<SshKeyInstall>(IPC.sshkeyInstallPublic, [sessionId, publicKey]),
     /** 只读入公钥，不写主机。用户取消选择时返回 null */
-    readPublicFile: () => invoke<SshKeyFile | null>(IPC.sshkeyReadPublicFile, [])
+    readPublicFile: () => invoke<SshKeyFile | null>(IPC.sshkeyReadPublicFile, []),
+    /** 读这台主机 ~/.ssh 里的公钥文件 */
+    listRemote: (sessionId: string) => invoke<RemotePublicKey[]>(IPC.sshkeyListRemote, [sessionId])
   },
   hosts: {
     list: () => invoke<Record<string, string>>(IPC.hostNoteList, []),

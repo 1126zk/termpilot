@@ -85,6 +85,12 @@ export interface SshKeyFile {
   publicKey: string
 }
 
+/** 某台主机 ~/.ssh 里的一把公钥。 */
+export interface RemotePublicKey {
+  name: string
+  publicKey: string
+}
+
 export type SessionStatus = 'disconnected' | 'connecting' | 'connected'
 
 export type TabKind = 'ssh' | 'local'

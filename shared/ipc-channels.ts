@@ -152,6 +152,7 @@ export const IPC = {
   sshkeyImportPrivate: 'sshkey:import-private',
   sshkeyInstallPublic: 'sshkey:install-public',
   sshkeyReadPublicFile: 'sshkey:read-public-file',
+  sshkeyListRemote: 'sshkey:list-remote',
 
   winMinimize: 'win:minimize',
   winToggleMaximize: 'win:toggle-maximize',

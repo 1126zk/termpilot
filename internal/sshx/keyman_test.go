@@ -126,6 +126,41 @@ func TestImportEncryptedAndPublic(t *testing.T) {
 	}
 }
 
+func TestParseRemotePublicKeys(t *testing.T) {
+	dir := t.TempDir()
+	pair, err := GenerateKeyPair(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := strings.Join([]string{
+		"FILE",
+		"id_ed25519.pub",
+		pair.PublicKey,
+		"FILE",
+		"../evil.pub",
+		pair.PublicKey,
+		"FILE",
+		"note.pub",
+		"not a key",
+		"FILE",
+		"id_rsa.pub",
+		pair.PublicKey + " extra-comment",
+	}, "\n")
+	got := parseRemotePublicKeys(stdout)
+	if len(got) != 2 {
+		t.Fatalf("keys = %+v", got)
+	}
+	if got[0].Name != "id_ed25519.pub" || got[0].PublicKey != pair.PublicKey {
+		t.Fatalf("first = %+v", got[0])
+	}
+	if got[1].Name != "id_rsa.pub" || !strings.HasPrefix(got[1].PublicKey, "ssh-ed25519 ") {
+		t.Fatalf("second = %+v", got[1])
+	}
+	if len(parseRemotePublicKeys("")) != 0 {
+		t.Fatal("empty should be an empty list")
+	}
+}
+
 func TestAuthorizedKeyScript(t *testing.T) {
 	dir := t.TempDir()
 	pair, err := GenerateKeyPair(dir)

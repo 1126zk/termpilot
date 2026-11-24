@@ -103,6 +103,78 @@ func ImportPrivateKey(dir, src string) (KeyImport, error) {
 	return placePrivateKey(dir, src, key)
 }
 
+// RemotePublicKey 主机 ~/.ssh 里的一把公钥文件。
+type RemotePublicKey struct {
+	Name      string `json:"name"`
+	PublicKey string `json:"publicKey"`
+}
+
+// ListRemotePublicKeys 读会话用户 ~/.ssh/*.pub。没有目录或没有公钥时返回空列表。
+func (s *ExecService) ListRemotePublicKeys(sessionID string) ([]RemotePublicKey, error) {
+	res, err := s.Exec(sessionID, ExecOptions{Command: remotePublicKeysScript(), TimeoutMs: 20000})
+	if err != nil {
+		return nil, err
+	}
+	if res.TimedOut {
+		return nil, errors.New("读取公钥超时")
+	}
+	if res.ExitCode != nil && *res.ExitCode != 0 {
+		detail := strings.TrimSpace(res.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(res.Stdout)
+		}
+		if detail == "" {
+			detail = fmt.Sprintf("退出码 %d", *res.ExitCode)
+		}
+		return nil, fmt.Errorf("读取公钥失败：%s", clipRunes(detail, 400))
+	}
+	return parseRemotePublicKeys(res.Stdout), nil
+}
+
+// remotePublicKeysScript 列出 ~/.ssh 下的公钥文件。输出是成组的三行：FILE、文件名、公钥。
+func remotePublicKeysScript() string {
+	return `if [ -z "$HOME" ]; then exit 1; fi
+d="$HOME/.ssh"
+[ -d "$d" ] || exit 0
+for f in "$d"/*.pub; do
+  [ -f "$f" ] || continue
+  n=$(basename "$f") || continue
+  line=$(head -n 1 "$f" | tr -d '\r') || continue
+  printf '%s\n' FILE
+  printf '%s\n' "$n"
+  printf '%s\n' "$line"
+done
+`
+}
+
+func parseRemotePublicKeys(stdout string) []RemotePublicKey {
+	lines := strings.Split(strings.ReplaceAll(stdout, "\r\n", "\n"), "\n")
+	var out []RemotePublicKey
+	for i := 0; i+2 < len(lines); i++ {
+		if lines[i] != "FILE" {
+			continue
+		}
+		name := strings.TrimSpace(lines[i+1])
+		raw := strings.TrimSpace(lines[i+2])
+		i += 2
+		if !safePubName.MatchString(name) {
+			continue
+		}
+		line, err := canonicalPublicKey(raw)
+		if err != nil {
+			continue
+		}
+		out = append(out, RemotePublicKey{Name: name, PublicKey: line})
+		if len(out) == 40 {
+			break
+		}
+	}
+	if out == nil {
+		out = []RemotePublicKey{}
+	}
+	return out
+}
+
 // InstallAuthorizedKey 把一把公钥追加到会话对应用户的 ~/.ssh/authorized_keys。
 // 同一把已经在里面时不再追加。
 func (s *ExecService) InstallAuthorizedKey(sessionID, publicKey string) (KeyInstall, error) {
@@ -420,6 +492,7 @@ func parseOnePublicKey(text string) (ssh.PublicKey, string, error) {
 }
 
 var safeB64 = regexp.MustCompile(`^[A-Za-z0-9+/=]+$`)
+var safePubName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.pub$`)
 
 // PublicKeyFile 选中的公钥文件，还没写到主机。
 type PublicKeyFile struct {

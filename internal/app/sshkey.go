@@ -49,6 +49,14 @@ func (a *App) hSshKeyInstallPublic(args []interface{}) (interface{}, error) {
 	return a.exec.InstallAuthorizedKey(id, pub)
 }
 
+func (a *App) hSshKeyListRemote(args []interface{}) (interface{}, error) {
+	id, err := argStr(args, 0)
+	if err != nil {
+		return nil, err
+	}
+	return a.exec.ListRemotePublicKeys(id)
+}
+
 func (a *App) hSshKeyReadPublicFile(_ []interface{}) (interface{}, error) {
 	opts := wailsRuntime.OpenDialogOptions{
 		Title: "选择公钥文件",

@@ -72,6 +72,7 @@ func (b *Bridge) buildRoutes() map[string]handler {
 		"sshkey:import-private":      a.hSshKeyImportPrivate,
 		"sshkey:install-public":      a.hSshKeyInstallPublic,
 		"sshkey:read-public-file":    a.hSshKeyReadPublicFile,
+		"sshkey:list-remote":         a.hSshKeyListRemote,
 
 		// 终端
 		"term:create":    a.hTermCreate,
