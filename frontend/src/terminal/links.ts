@@ -49,8 +49,8 @@ function linkBox(
 }
 
 /**
- * 终端里的三种链接，都是按住 Ctrl/Cmd 才有下划线、才能点：
- * - 网址：Ctrl+点击用系统浏览器打开
+ * 终端里的链接，都是按住 Ctrl/Cmd 才有下划线、才能点：
+ * - 普通网址，以及程序用 OSC 8 标出的超链接：Ctrl+点击用系统浏览器打开
  * - 图片路径：悬停弹出预览（不用按 Ctrl），Ctrl+点击用图片查看器打开
  * - 普通文件路径：Ctrl+点击进入编辑器，没有悬停预览
  */
@@ -69,6 +69,30 @@ export function bindTerminalLinks(term: Terminal, termId: string): () => void {
   window.addEventListener('keydown', updateModifier)
   window.addEventListener('keyup', updateModifier)
   window.addEventListener('blur', clearModifier)
+
+  // 没设 linkHandler 时，xterm 对 OSC 8 会 window.confirm 再 window.open。
+  // 内置 provider 不带 decorations，悬停还会一直带下划线。这里改成和普通网址一样。
+  term.options.linkHandler = {
+    activate(event, uri) {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      if (/^https?:\/\//i.test(uri)) window.runtime.BrowserOpenURL(uri)
+    }
+  }
+  const unpatchOsc = patchOscLinks(term, {
+    hover(link, event) {
+      hovered = link
+      // xterm 先回调 hover，返回后才把 decorations 换成可监听的代理。
+      // 同步改写会被丢掉，所以等当前调用栈结束再按修饰键刷一次。
+      queueMicrotask(() => {
+        if (hovered === link) updateModifier(event)
+      })
+    },
+    leave(link) {
+      if (hovered === link) hovered = null
+      clearLinkDecorations(link)
+    }
+  })
 
   const makeLink = (
     text: string,
@@ -147,9 +171,56 @@ export function bindTerminalLinks(term: Terminal, termId: string): () => void {
     }
   })
   return () => {
+    unpatchOsc()
+    term.options.linkHandler = null
     provider.dispose()
     window.removeEventListener('keydown', updateModifier)
     window.removeEventListener('keyup', updateModifier)
     window.removeEventListener('blur', clearModifier)
+  }
+}
+
+function clearLinkDecorations(link: ILink): void {
+  if (!link.decorations) return
+  link.decorations.pointerCursor = false
+  link.decorations.underline = false
+}
+
+/**
+ * OSC 8 由 xterm 构造时注册的内置 provider 提供，排在 registerLinkProvider 之前。
+ * linkHandler 管不住下划线，只能在它交出来的链接上把 decorations 改成按住修饰键才显示。
+ */
+function patchOscLinks(
+  term: Terminal,
+  hooks: {
+    hover: (link: ILink, event: MouseEvent) => void
+    leave: (link: ILink) => void
+  }
+): () => void {
+  const provider = (term as unknown as {
+    _core?: { _linkProviderService?: { linkProviders?: { provideLinks: (line: number, cb: (links: ILink[] | undefined) => void) => void }[] } }
+  })._core?._linkProviderService?.linkProviders?.[0]
+  if (!provider) return () => {}
+  const original = provider.provideLinks.bind(provider)
+  provider.provideLinks = (line, callback) => {
+    original(line, (links) => {
+      for (const link of links ?? []) {
+        link.decorations = { pointerCursor: false, underline: false }
+        const previousHover = link.hover
+        const previousLeave = link.leave
+        link.hover = (event, text) => {
+          hooks.hover(link, event)
+          previousHover?.(event, text)
+        }
+        link.leave = (event, text) => {
+          hooks.leave(link)
+          previousLeave?.(event, text)
+        }
+      }
+      callback(links)
+    })
+  }
+  return () => {
+    provider.provideLinks = original
   }
 }
