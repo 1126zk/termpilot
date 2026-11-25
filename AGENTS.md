@@ -1,9 +1,26 @@
 # AGENTS.md
 
-## 打 tag 发版前：先对齐版本号
+## 打 tag 发版
 
-`release.yml` 会校验 tag 和 `frontend/package.json` 的 version 一致，不一致三个平台全部直接挂。
-所以顺序永远是：先改 `frontend/package.json` 的 version 并提交（`chore: 版本 x.y.z。`），再打同号 tag 推上去。别打完 tag 才想起来改版本。
+版本号只有一处来源：`frontend/package.json` 的 `version`。关于页显示的版本是 `main.go` 编译时嵌这份文件，`app.go` 不写死。`wails.json` 没有版本字段。
+
+要改的只有这两个文件，改成同一个号：
+
+- `frontend/package.json` 的 `version`
+- `frontend/package-lock.json` 里两处本包 version：文件头一处，`packages[""]` 里一处
+
+锁文件里其它包碰巧同号的不要动。`npm ci` 会核对 package.json 和 lock 是否一致，漏改 lock 会在装依赖时挂。
+
+发版前在 `frontend` 跑 `npm run build`（`tsc --noEmit && vite build`）。CI 的 `wails build` 用的就是这条前端构建，类型或打包错误会让三个平台一起挂。本地不要为了发版跑 `wails build`：本机 CLI 和 go.mod 里的 Wails 版本不一致时，它会改写 `go.mod`。
+
+提交只包含上面两个 json，说明固定为 `chore: 版本 x.y.z。`。`frontend/package.json.md5`、`go.mod` 的换行噪声不要带上。
+
+顺序：
+
+1. 改版本并提交，推到 main
+2. 在这个提交上打轻量 tag `vX.Y.Z`（`v` 后面必须和 package.json 的 version 逐字相同），再推 tag
+
+`release.yml` 由 `v*.*.*` tag 触发。校验不等就在三个平台的第一步退出。先打 tag 再改版本，或 tag 打在还没有版本提交的旧提交上，都会挂。
 
 ## 构建应用前：必须先跑 prebuild
 
