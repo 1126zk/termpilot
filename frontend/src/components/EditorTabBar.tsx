@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
-import { ArrowRightToLine, ChevronLeft, ChevronRight, Columns2, Eye, FilePenLine, RefreshCw, Save, SquareTerminal, WrapText, X } from 'lucide-react'
+import { ArrowRightToLine, ChevronLeft, ChevronRight, Columns2, Eye, FilePenLine, Plus, RefreshCw, Save, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
@@ -41,11 +41,15 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   const windowSplit = useAppStore((s) => s.split)
   const sessionSplit = useAppStore((s) => s.sessionSplit)
   const sideTerms = useAppStore((s) => s.sideTerms)
+  const stripTitles = useAppStore((s) => s.stripTitles)
   const termState = useAppStore((s) => s.termState)
   const splitSessionView = useAppStore((s) => s.splitSessionView)
+  const addSessionTerm = useAppStore((s) => s.addSessionTerm)
   const cancelSessionSplit = useAppStore((s) => s.cancelSessionSplit)
   const activateSessionView = useAppStore((s) => s.activateSessionView)
   const reorderSessionStrip = useAppStore((s) => s.reorderSessionStrip)
+  const settleSessionStrip = useAppStore((s) => s.settleSessionStrip)
+  const setStripDrag = useAppStore((s) => s.setStripDrag)
   const closeSideTerm = useAppStore((s) => s.closeSideTerm)
   const reconnectTab = useAppStore((s) => s.reconnectTab)
   const pane = sessionSplit[props.termId]
@@ -69,16 +73,26 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   const pointerX = useRef(0)
   const keys = props.tabs.map((t) => t.key)
 
-  /** 标签左边缘允许落到的区间。分栏时整条都能拖，包括越过中间的竖线。 */
+  /** 标签左边缘允许落到的区间。竖线很窄，限位要让边缘能越过它的中点，否则会来回弹。 */
   const dragSpan = (strip: HTMLElement, key: string, splitting: boolean) => {
     const attr = splitting ? 'data-view-id' : 'data-file-key'
     const el = strip.querySelector<HTMLElement>(`[${attr}="${CSS.escape(key)}"]`)
     if (!el) return null
     const items = [...strip.querySelectorAll<HTMLElement>(`[${attr}]`)]
-    const first = items[0]
-    const last = items[items.length - 1]
+    const chips = items.filter((item) => item.getAttribute(attr) !== SPLIT_MARK)
+    const row = chips.length > 0 ? chips : items
+    const first = row[0]
+    const last = row[row.length - 1]
     if (!first || !last) return null
-    return { el, min: first.offsetLeft, max: last.offsetLeft + last.offsetWidth - el.offsetWidth }
+    let min = first.offsetLeft
+    let max = last.offsetLeft + last.offsetWidth - el.offsetWidth
+    const mark = strip.querySelector<HTMLElement>(`[data-view-id="${SPLIT_MARK}"]`)
+    if (mark) {
+      const mid = mark.offsetLeft + mark.offsetWidth / 2
+      min = Math.min(min, mid - 20)
+      max = Math.max(max, mid - el.offsetWidth + 20)
+    }
+    return { el, min, max }
   }
 
   /** 被拖标签跟手。 */
@@ -117,8 +131,10 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
           grab: pointer - (el?.offsetLeft ?? 0),
           size: el?.offsetWidth ?? 0
         }
+        dragLock.current = true
         setDragKey(key)
         setDragOffset(0)
+        if (splitting) setStripDrag(props.termId)
       },
       onMove: (x) => {
         pointerX.current = x
@@ -139,7 +155,19 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
                 : [primaryTerm, ...files.filter((id) => id !== primaryTerm && !right.has(id)), ...extra.filter((id) => !right.has(id)), ...current.secondary]
               const all = known.includes(primaryTerm) ? known : right.has(primaryTerm) ? [...known, primaryTerm] : [primaryTerm, ...known]
               const ids = [...all.filter((id) => !right.has(id)), SPLIT_MARK, ...all.filter((id) => right.has(id))]
-              const next = moveTo(ids, key, dropIndex(strip, 'data-view-id', 'x', start, start + dragStart.current.size, key, ids))
+              const moved = moveTo(ids, key, dropIndex(strip, 'data-view-id', 'x', start, start + dragStart.current.size, key, ids))
+              const markAt = ids.indexOf(SPLIT_MARK)
+              const from = ids.indexOf(key)
+              const to = moved?.indexOf(key) ?? -1
+              const crossed = !!moved && markAt >= 0 && (from < markAt) !== (to < markAt)
+              let next = moved
+              if (crossed && moved) {
+                const markEl = strip.querySelector<HTMLElement>(`[data-view-id="${SPLIT_MARK}"]`)
+                const mid = markEl ? markEl.offsetLeft + markEl.offsetWidth / 2 : 0
+                const ontoRight = to > markAt
+                const lead = ontoRight ? start + dragStart.current.size : start
+                if (ontoRight ? lead < mid + 16 : lead > mid - 16) next = null
+              }
               if (next) {
                 capturePositions(strip, 'data-view-id', 'x', prevLeft.current)
                 reorderSessionStrip(props.termId, next)
@@ -164,8 +192,11 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
         // 拖完会补一个 click，不能当成切换/关闭
         suppressClick.current = true
         prevLeft.current.clear()
+        dragLock.current = false
         setDragKey(null)
         setDragOffset(0)
+        if (splitting) settleSessionStrip(props.termId)
+        else setStripDrag(null)
       }
     })
   }
@@ -176,6 +207,8 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   }
 
   const toolsRef = useRef<HTMLDivElement>(null)
+  const slotRef = useRef<HTMLDivElement>(null)
+  const dragLock = useRef(false)
   const normalToolsWidth = useRef(0)
   const [overflowing, setOverflowing] = useState(false)
   const [canLeft, setCanLeft] = useState(false)
@@ -185,11 +218,17 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
 
   const measureStrip = () => {
     const el = stripRef.current
-    if (!el) return
-    const overflow = el.scrollWidth - el.clientWidth
-    setOverflowing(overflow > 1)
+    const slot = slotRef.current
+    if (!el || !slot) return
+    const row = el.firstElementChild as HTMLElement | null
+    const plus = slot.querySelector<HTMLElement>('[data-strip-plus]')
+    const gap = parseFloat(getComputedStyle(slot).columnGap || '0') || 0
+    const available = slot.clientWidth - (plus?.offsetWidth ?? 0) - (plus ? gap : 0)
+    const content = row?.scrollWidth ?? el.scrollWidth
+    const overflow = content - available
+    if (!dragLock.current) setOverflowing(overflow > 2)
     setCanLeft(el.scrollLeft > 1)
-    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1)
+    setCanRight(overflow > 2 && el.scrollLeft + el.clientWidth < content - 1)
     const tools = toolsRef.current
     if (!imageOpen || !tools) {
       setCompactTools(false)
@@ -212,6 +251,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     if (!el) return
     const observer = new ResizeObserver(measureStrip)
     observer.observe(el)
+    if (slotRef.current) observer.observe(slotRef.current)
     if (toolsRef.current) observer.observe(toolsRef.current)
     return () => observer.disconnect()
   }, [props.tabs.length, props.activeKey, compactTools, imageOpen, pane?.secondary.join(), sideTerms.length])
@@ -301,22 +341,22 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     if (windowSplit) return node
     const termId = termIdFromView(viewId)
     const down = !!termId && termId !== props.termId && (termState[termId]?.status === 'disconnected' || termState[termId]?.status === 'error')
+    const canCancel = !!pane && !!termId
+    if (!canCancel && pane) return node
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{node}</ContextMenuTrigger>
         <ContextMenuContent>
-          {pane ? (
-            <ContextMenuItem onClick={() => cancelSessionSplit(props.termId)}>
+          {canCancel && termId ? (
+            <ContextMenuItem onClick={() => cancelSessionSplit(props.termId, termId)}>
               <X />
               取消分栏
             </ContextMenuItem>
           ) : (
-            <>
-              <ContextMenuItem onClick={() => splitSessionView(props.termId, viewId, 'right')}>
-                <Columns2 />
-                分右栏
-              </ContextMenuItem>
-            </>
+            <ContextMenuItem onClick={() => splitSessionView(props.termId, viewId, 'right')}>
+              <Columns2 />
+              分右栏
+            </ContextMenuItem>
           )}
           {down && termId ? (
             <ContextMenuItem onClick={() => reconnectTab(termId)}>
@@ -410,10 +450,11 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     )
 
   const sides = sideTerms.filter((term) => term.parentId === props.termId)
+  const multi = sides.length > 0
   const chips = new Map<string, ReactNode>([
-    [primaryTerm, termChip(primaryTerm, '终端', false)],
+    [primaryTerm, termChip(primaryTerm, stripTitles[props.termId] ?? '终端', multi)],
     ...props.tabs.map((tab) => [tab.key, fileChip(tab)] as const),
-    ...sides.map((term) => [termViewId(term.id), termChip(termViewId(term.id), term.title, true)] as const)
+    ...sides.map((term) => [termViewId(term.id), termChip(termViewId(term.id), stripTitles[term.id] ?? term.title, true)] as const)
   ])
   const right = new Set(pane?.secondary ?? [])
   const fallback = [
@@ -438,26 +479,38 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
           <ChevronLeft className="size-4" strokeWidth={2} />
         </button>
       )}
-      <div
-        ref={stripRef}
-        onScroll={measureStrip}
-        onWheel={(e) => {
-          const el = stripRef.current
-          if (!el) return
-          el.scrollLeft += e.deltaY + e.deltaX
-        }}
-        className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {leftIds.map((id, index) => (
-          <Fragment key={id}>
-            {!pane && index === 1 && <span className="mx-1 h-4 w-px shrink-0 bg-border" />}
-            {chips.get(id)}
-          </Fragment>
-        ))}
-        {pane && <div data-view-id={SPLIT_MARK} className="mx-1 h-5 w-px shrink-0 bg-foreground/30" />}
-        {rightIds.map((id) => (
-          <Fragment key={id}>{chips.get(id)}</Fragment>
-        ))}
+      <div ref={slotRef} className="flex min-w-0 flex-1 items-center gap-1">
+        <div
+          ref={stripRef}
+          onScroll={measureStrip}
+          onWheel={(e) => {
+            const el = stripRef.current
+            if (!el || !overflowing) return
+            el.scrollLeft += e.deltaY + e.deltaX
+          }}
+          className={cn(
+            'strip-scroll relative min-w-0',
+            overflowing ? 'flex-1 overflow-x-auto' : 'w-max overflow-x-hidden'
+          )}
+        >
+          <div className="flex w-max items-center gap-1">
+            {leftIds.map((id, index) => (
+              <Fragment key={id}>
+                {!pane && index === 1 && <span className="mx-1 h-4 w-px shrink-0 bg-border" />}
+                {chips.get(id)}
+              </Fragment>
+            ))}
+            {pane && <div data-view-id={SPLIT_MARK} className="mx-1 h-5 w-px shrink-0 bg-foreground/30" />}
+            {rightIds.map((id) => (
+              <Fragment key={id}>{chips.get(id)}</Fragment>
+            ))}
+          </div>
+        </div>
+        {!windowSplit && (
+          <button type="button" data-strip-plus className={STRIP_BUTTON} title="新建终端" onClick={() => addSessionTerm(props.termId)}>
+            <Plus className="size-4" strokeWidth={2} />
+          </button>
+        )}
       </div>
       {overflowing && (
         <button type="button" className={STRIP_BUTTON} disabled={!canRight} title="向右" onClick={() => scrollStrip(1)}>

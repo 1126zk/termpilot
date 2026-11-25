@@ -23,3 +23,12 @@ export function writeBuffer(key: string, buffer: EditorBuffer): void {
 export function dropBuffer(key: string): void {
   buffers.delete(key)
 }
+
+/** 终端编号换了，已打开文件的缓冲跟着走，未保存的内容还在。 */
+export function moveBuffer(from: string, to: string): void {
+  if (from === to) return
+  const buffer = buffers.get(from)
+  if (!buffer) return
+  buffers.delete(from)
+  buffers.set(to, buffer)
+}

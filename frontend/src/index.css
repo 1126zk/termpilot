@@ -204,6 +204,16 @@
   background-clip: padding-box;
 }
 
+/* 标签条自己用左右箭头滚动，不露出上面那条全局滚动条。写在层外，才能压过 * 的 scrollbar-width。 */
+.strip-scroll {
+  scrollbar-width: none;
+}
+.strip-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* 终端滚动条：6px 细条，平时透明；host 上有 term-scrolling 时露出，停止滚动 3 秒后由 TerminalPool 摘掉 */
 .xterm .xterm-viewport::-webkit-scrollbar {
   width: 6px;

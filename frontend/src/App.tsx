@@ -393,7 +393,8 @@ function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
   const focusSessionSide = useAppStore((s) => s.focusSessionSide)
   const setSessionSplitRatio = useAppStore((s) => s.setSessionSplitRatio)
   const gridRef = useRef<HTMLDivElement>(null)
-  const rightEmpty = props.pane.secondary.length === 0
+  const dragging = useAppStore((s) => s.stripDragTermId === props.parentId)
+  const rightEmpty = props.pane.secondary.length === 0 && !dragging
   const leftFile = editorTabs.find((tab) => tab.key === props.pane.primaryView) ?? null
   const rightFile = rightEmpty ? null : (editorTabs.find((tab) => tab.key === props.pane.secondaryView) ?? null)
   const leftTerm = termIdFromView(props.pane.primaryView)

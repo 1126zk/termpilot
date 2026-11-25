@@ -168,7 +168,6 @@ export function TabBar() {
   const split = useAppStore((s) => s.split)
   const sessionSplit = useAppStore((s) => s.sessionSplit)
   const splitSessionView = useAppStore((s) => s.splitSessionView)
-  const cancelSessionSplit = useAppStore((s) => s.cancelSessionSplit)
   const settleSplit = useAppStore((s) => s.settleSplit)
   const hostsOpen = useAppStore((s) => s.hostsOpen)
   const toolsOpen = useAppStore((s) => s.toolsOpen)
@@ -691,15 +690,7 @@ export function TabBar() {
                     重新连接
                   </ContextMenuItem>
                 ) : null}
-                {!split && (sessionSplit[t.id] ? (
-                  <>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onClick={() => cancelSessionSplit(t.id)}>
-                      <X />
-                      取消分栏
-                    </ContextMenuItem>
-                  </>
-                ) : (
+                {!split && !sessionSplit[t.id] && (
                   <>
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => splitSessionView(t.id, termViewId(t.id), 'right')}>
@@ -707,7 +698,7 @@ export function TabBar() {
                       分右栏
                     </ContextMenuItem>
                   </>
-                ))}
+                )}
                 {session && forwardRules.length > 0 ? (
                   <>
                     <ContextMenuSeparator />
