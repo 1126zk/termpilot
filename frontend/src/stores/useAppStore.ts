@@ -200,7 +200,7 @@ interface AppState {
   splitTab: (tabId: string, dir: SplitDir) => void
   /** 右键文件条「分右栏」：当前会话内左主右辅。已有窗口分栏时不做 */
   splitSessionView: (parentId: string, viewId: string, dir: SplitDir) => void
-  /** 文件条拖动排序。ids 里带 SPLIT_MARK，主终端不在其中。辅栏空了就收起分栏 */
+  /** 文件条拖动排序。ids 里带 SPLIT_MARK。某一侧没有终端时收起分栏，终端进程保留 */
   reorderSessionStrip: (parentId: string, ids: string[]) => void
   /** 收起这个会话的内部分栏，并关掉为它另开的终端 */
   cancelSessionSplit: (parentId: string) => void
@@ -388,7 +388,10 @@ function assignSessionView(pane: SessionSplit, parentId: string, viewId: string,
     if (secondaryView === viewId) secondaryView = secondary.at(-1) ?? ''
   } else {
     secondaryView = viewId
-    if (primaryView === viewId) primaryView = termViewId(parentId)
+    if (primaryView === viewId) {
+      const left = order.filter((id) => !secondary.includes(id))
+      primaryView = left.at(-1) ?? termViewId(parentId)
+    }
   }
   if (primaryView === secondaryView) return null
   if (!secondary.length || !secondaryView) {
@@ -973,7 +976,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     if (primaryView === secondaryView) return
     const files = get().editorTabs.filter((item) => item.termId === parentId).map((item) => item.key)
-    const order = [...files.filter((id) => id !== secondaryView && id !== primaryTerm), secondaryView]
+    const order = [primaryView, ...files.filter((id) => id !== primaryView && id !== secondaryView), secondaryView]
     set({
       sideTerms,
       sessionSplit: {
@@ -1054,24 +1057,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pane = get().sessionSplit[parentId]
     const mark = ids.indexOf(SPLIT_MARK)
     if (!pane || mark < 0) return
-    const primary = termViewId(parentId)
-    const pinnedRight = pane.secondary.includes(primary)
-    const left = ids.slice(0, mark).filter((id) => id !== SPLIT_MARK && id !== primary)
-    let right = ids.slice(mark + 1).filter((id) => id !== SPLIT_MARK && id !== primary)
-    if (pinnedRight) {
-      const at = Math.min(Math.max(pane.secondary.indexOf(primary), 0), right.length)
-      right = [...right.slice(0, at), primary, ...right.slice(at)]
-    }
+    const left = ids.slice(0, mark).filter((id) => id !== SPLIT_MARK)
+    const right = ids.slice(mark + 1).filter((id) => id !== SPLIT_MARK)
     const fileKeys = [...left, ...right].filter((id) => !termIdFromView(id))
     const editorTabs = orderTermFiles(get().editorTabs, parentId, fileKeys)
-    if (!right.length) {
-      const primaryView = left.includes(pane.primaryView) || pane.primaryView === primary ? pane.primaryView : (left.at(-1) ?? primary)
+    const hasTerm = (list: string[]) => list.some((id) => termIdFromView(id))
+    if (!hasTerm(left) || !hasTerm(right)) {
+      const order = [...left, ...right]
+      const shown = pane.focus === 'secondary' ? pane.secondaryView : pane.primaryView
+      const primaryView = order.includes(shown) ? shown : (order.find((id) => termIdFromView(id)) ?? order[0] ?? termViewId(parentId))
       set({
         editorTabs,
         editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, primaryView),
         sessionSplit: {
           ...get().sessionSplit,
-          [parentId]: { ...pane, order: left, secondary: [], primaryView, secondaryView: '', focus: 'primary' }
+          [parentId]: { ...pane, order, secondary: [], primaryView, secondaryView: '', focus: 'primary' }
         }
       })
       return
@@ -1081,7 +1081,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     let focus = pane.focus
     if (right.includes(primaryView)) {
       secondaryView = primaryView
-      primaryView = left.at(-1) ?? primary
+      primaryView = left.at(-1) ?? primaryView
       if (pane.focus === 'primary') focus = 'secondary'
     } else if (left.includes(secondaryView)) {
       primaryView = secondaryView
@@ -1089,7 +1089,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (pane.focus === 'secondary') focus = 'primary'
     }
     if (!right.includes(secondaryView)) secondaryView = right.at(-1) ?? secondaryView
-    if (primaryView !== primary && !left.includes(primaryView)) primaryView = left.at(-1) ?? primary
+    if (!left.includes(primaryView)) primaryView = left.at(-1) ?? primaryView
     const shown = focus === 'secondary' ? secondaryView : primaryView
     set({
       editorTabs,
@@ -1128,16 +1128,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const secondary = pane.secondary.filter((id) => id !== view)
     const order = stripOrder(pane).filter((id) => id !== view)
-    const secondaryView = pane.secondaryView === view ? (secondary.at(-1) ?? '') : pane.secondaryView
-    const primaryView = pane.primaryView === view ? termViewId(side.parentId) : pane.primaryView
-    if (!secondary.length || !secondaryView || primaryView === secondaryView) {
-      const sessionSplit = { ...get().sessionSplit }
-      delete sessionSplit[side.parentId]
+    const left = order.filter((id) => !secondary.includes(id))
+    const right = order.filter((id) => secondary.includes(id))
+    let primaryView = pane.primaryView === view ? (left.at(-1) ?? order[0] ?? termViewId(side.parentId)) : pane.primaryView
+    let secondaryView = pane.secondaryView === view ? (right.at(-1) ?? '') : pane.secondaryView
+    const hasTerm = (list: string[]) => list.some((id) => termIdFromView(id))
+    if (!hasTerm(left) || !hasTerm(right) || !secondary.length || !secondaryView || primaryView === secondaryView) {
+      if (sideTerms.length === 0) {
+        const sessionSplit = { ...get().sessionSplit }
+        delete sessionSplit[side.parentId]
+        set({
+          sideTerms,
+          termState,
+          sessionSplit,
+          editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, side.parentId, primaryView)
+        })
+        return
+      }
+      const shown = pane.focus === 'secondary' && order.includes(secondaryView) ? secondaryView : primaryView
+      const keep = order.includes(shown) ? shown : (order.find((id) => termIdFromView(id)) ?? order[0] ?? termViewId(side.parentId))
       set({
         sideTerms,
         termState,
-        sessionSplit,
-        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, side.parentId, primaryView)
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, side.parentId, keep),
+        sessionSplit: {
+          ...get().sessionSplit,
+          [side.parentId]: { ...pane, order, secondary: [], primaryView: keep, secondaryView: '', focus: 'primary' }
+        }
       })
       return
     }

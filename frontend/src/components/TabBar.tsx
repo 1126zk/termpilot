@@ -167,8 +167,6 @@ export function TabBar() {
   const reorderTabs = useAppStore((s) => s.reorderTabs)
   const split = useAppStore((s) => s.split)
   const sessionSplit = useAppStore((s) => s.sessionSplit)
-  const sessionSplitOn = Object.keys(sessionSplit).length > 0
-  const splitTab = useAppStore((s) => s.splitTab)
   const splitSessionView = useAppStore((s) => s.splitSessionView)
   const cancelSessionSplit = useAppStore((s) => s.cancelSessionSplit)
   const settleSplit = useAppStore((s) => s.settleSplit)
@@ -693,15 +691,6 @@ export function TabBar() {
                     重新连接
                   </ContextMenuItem>
                 ) : null}
-                {!split && !sessionSplitOn && tabs.length > 1 ? (
-                  <>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onClick={() => splitTab(t.id, 'right')}>
-                      <Columns2 />
-                      分右栏
-                    </ContextMenuItem>
-                  </>
-                ) : null}
                 {!split && (sessionSplit[t.id] ? (
                   <>
                     <ContextMenuSeparator />
@@ -715,7 +704,7 @@ export function TabBar() {
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={() => splitSessionView(t.id, termViewId(t.id), 'right')}>
                       <Columns2 />
-                      标签内分右栏
+                      分右栏
                     </ContextMenuItem>
                   </>
                 ))}

@@ -69,31 +69,19 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   const pointerX = useRef(0)
   const keys = props.tabs.map((t) => t.key)
 
-  /** 标签左边缘允许落到的区间。分栏时最左只能贴着主终端，这样右边的项能拖过分隔线。 */
+  /** 标签左边缘允许落到的区间。分栏时整条都能拖，包括越过中间的竖线。 */
   const dragSpan = (strip: HTMLElement, key: string, splitting: boolean) => {
     const attr = splitting ? 'data-view-id' : 'data-file-key'
     const el = strip.querySelector<HTMLElement>(`[${attr}="${CSS.escape(key)}"]`)
     if (!el) return null
-    if (!splitting) {
-      const items = [...strip.querySelectorAll<HTMLElement>('[data-file-key]')]
-      const first = items[0]
-      const last = items[items.length - 1]
-      if (!first || !last) return null
-      return { el, min: first.offsetLeft, max: last.offsetLeft + last.offsetWidth - el.offsetWidth }
-    }
-    const primaryEl = strip.querySelector<HTMLElement>(`[data-view-id="${CSS.escape(primaryTerm)}"]`)
-    const markEl = strip.querySelector<HTMLElement>(`[data-view-id="${SPLIT_MARK}"]`)
-    const min = primaryEl ? primaryEl.offsetLeft + primaryEl.offsetWidth + 4 : 0
-    let tail = el.offsetLeft + el.offsetWidth
-    for (const item of strip.querySelectorAll<HTMLElement>('[data-view-id]')) {
-      if (item.dataset.viewId === primaryTerm) continue
-      tail = Math.max(tail, item.offsetLeft + item.offsetWidth)
-    }
-    if (markEl) tail = Math.max(tail, markEl.offsetLeft + markEl.offsetWidth + el.offsetWidth)
-    return { el, min, max: tail - el.offsetWidth }
+    const items = [...strip.querySelectorAll<HTMLElement>(`[${attr}]`)]
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (!first || !last) return null
+    return { el, min: first.offsetLeft, max: last.offsetLeft + last.offsetWidth - el.offsetWidth }
   }
 
-  /** 被拖标签跟手。分栏时主终端固定在最左边，拖动范围从它右边开始。 */
+  /** 被拖标签跟手。 */
   const followPointer = (key: string) => {
     const strip = stripRef.current
     const splitting = !!useAppStore.getState().sessionSplit[props.termId]
@@ -114,7 +102,6 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   }, [keys.join(), dragKey])
 
   const startDrag = (event: PointerEvent, key: string) => {
-    if (key === primaryTerm) return
     const splitting = !!useAppStore.getState().sessionSplit[props.termId]
     startPointerDrag({
       event,
@@ -149,9 +136,9 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
               const extra = state.sideTerms.filter((term) => term.parentId === props.termId).map((term) => termViewId(term.id))
               const known = current.order?.length
                 ? current.order
-                : [...files.filter((id) => !right.has(id)), ...extra.filter((id) => !right.has(id)), ...current.secondary]
-              const movable = known.filter((id) => id !== primaryTerm)
-              const ids = [...movable.filter((id) => !right.has(id)), SPLIT_MARK, ...current.secondary.filter((id) => id !== primaryTerm)]
+                : [primaryTerm, ...files.filter((id) => id !== primaryTerm && !right.has(id)), ...extra.filter((id) => !right.has(id)), ...current.secondary]
+              const all = known.includes(primaryTerm) ? known : right.has(primaryTerm) ? [...known, primaryTerm] : [primaryTerm, ...known]
+              const ids = [...all.filter((id) => !right.has(id)), SPLIT_MARK, ...all.filter((id) => right.has(id))]
               const next = moveTo(ids, key, dropIndex(strip, 'data-view-id', 'x', start, start + dragStart.current.size, key, ids))
               if (next) {
                 capturePositions(strip, 'data-view-id', 'x', prevLeft.current)
@@ -361,7 +348,11 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
         data-view-id={id}
         className={chipClass(id, closable ? 'pl-2.5 pr-1' : 'px-2.5')}
         style={dragKey === id ? { transform: `translateX(${dragOffset}px)` } : undefined}
-        onPointerDown={(e) => closable && startDrag(e, id)}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          if (!pane && !closable) return
+          startDrag(e, id)
+        }}
       >
         <button
           type="button"
@@ -431,10 +422,13 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     ...(pane?.secondary ?? [])
   ]
   const ordered = (pane?.order?.length ? pane.order : fallback).filter((id) => chips.has(id))
-  const leftIds = right.has(primaryTerm)
-    ? ordered.filter((id) => !right.has(id))
-    : [primaryTerm, ...ordered.filter((id) => !right.has(id) && id !== primaryTerm)]
-  const rightIds = ordered.filter((id) => right.has(id))
+  const listed = ordered.includes(primaryTerm)
+    ? ordered
+    : right.has(primaryTerm)
+      ? [...ordered, primaryTerm]
+      : [primaryTerm, ...ordered]
+  const leftIds = listed.filter((id) => !right.has(id))
+  const rightIds = listed.filter((id) => right.has(id))
 
   return (
     <>
