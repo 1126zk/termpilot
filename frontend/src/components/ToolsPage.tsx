@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { cn } from '@/lib/utils'
 import { capturePositions, dropIndex, moveTo, startPointerDrag, useFlipSlide } from './flip'
 import { PasswordGenerator } from './tools/PasswordGenerator'
+import { TotpTool } from './tools/TotpTool'
 import { PreviewViewer } from './tools/PreviewViewer'
 import { NetworkTool } from './tools/NetworkTool'
 import { SshKeyTool } from './tools/SshKeyTool'
@@ -32,6 +33,7 @@ interface ToolDef {
 const tools: ToolDef[] = [
   { id: 'todo', name: '待办', component: TodoTool },
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
+  { id: 'totp', name: '2FA', component: TotpTool },
   { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
   { id: 'speed', name: '网络状态', component: NetworkTool },
   { id: 'preview', name: '预览', component: PreviewViewer },
