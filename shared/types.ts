@@ -363,6 +363,14 @@ export interface SftpInstallEvent {
   text: string
 }
 
+/** 目录删除进度（main → renderer）。removed / total 是条目数。 */
+export interface RemoveProgressEvent {
+  sessionId: string
+  path: string
+  removed: number
+  total: number
+}
+
 /** 文件上传/下载的传输进度（main → renderer）。done 后界面留几秒再移除。 */
 export interface SftpTransferEvent {
   id: string

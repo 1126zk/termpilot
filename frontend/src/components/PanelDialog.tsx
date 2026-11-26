@@ -72,6 +72,8 @@ export function PanelConfirm(props: {
   confirmText?: string
   error?: string
   busy?: boolean
+  /** 目录删除进行中的百分比。没有总数时不传。 */
+  percent?: number
   onClose: () => void
   onConfirm: () => void
 }) {
@@ -86,6 +88,14 @@ export function PanelConfirm(props: {
     >
       <PanelCard title={props.title} onClose={close} busy={props.busy}>
         <p className="text-sm break-all text-muted-foreground">{props.message}</p>
+        {props.percent != null && (
+          <div className="grid gap-1">
+            <div className="h-1 rounded-full bg-foreground/10">
+              <div className="h-full rounded-full bg-foreground/40" style={{ width: `${props.percent}%` }} />
+            </div>
+            <p className="text-right text-xs tabular-nums text-muted-foreground">{props.percent}%</p>
+          </div>
+        )}
         {props.error ? <p className="text-xs text-destructive">{props.error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={close} disabled={props.busy}>

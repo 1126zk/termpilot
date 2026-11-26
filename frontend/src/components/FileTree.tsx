@@ -14,7 +14,7 @@ import { TREE_PATH_MIME } from '../terminal/dropPath'
 import { beginTreeMove, finishTreeMove, noteTreeMoveDrop, treeMoveActive } from '../treeMove'
 import { PanelConfirm, PanelDialog, useMenuAction } from './PanelDialog'
 import { DROP_TARGET_STYLE, dropDirAt, registerDropTree } from '../fileDrop'
-import type { RemoteFile, Tab } from '../../../shared/types'
+import type { RemoteFile, RemoveProgressEvent, Tab } from '../../../shared/types'
 import { MAX_EDIT_BYTES } from '../../../shared/file-listing'
 
 type DirListing = { entries: RemoteFile[]; error?: string }
@@ -71,6 +71,7 @@ export function FileTree(props: {
   const [removing, setRemoving] = useState<RemoteFile | null>(null)
   const [removeError, setRemoveError] = useState('')
   const [removeBusy, setRemoveBusy] = useState(false)
+  const [removeProgress, setRemoveProgress] = useState<RemoveProgressEvent | null>(null)
   const removeInFlight = useRef(false)
   const [dropDir, setDropDir] = useState<string | null>(null)
   const dropRef = useRef<(dir: string, paths: string[]) => void>(() => undefined)
@@ -422,12 +423,28 @@ export function FileTree(props: {
     }
   }
 
+  useEffect(() => {
+    setRemoveProgress(null)
+  }, [removing?.path])
+
+  useEffect(() => {
+    const item = removing
+    if (!item || item.kind !== 'dir') return
+    const apply = (event: RemoveProgressEvent) => {
+      if (event.path !== item.path) return
+      if (!local && event.sessionId !== sessionId) return
+      setRemoveProgress(event)
+    }
+    return local ? window.api.localfs.onRemoveProgress(apply) : window.api.sftp.onRemoveProgress(apply)
+  }, [removing, local, sessionId])
+
   const remove = async () => {
     const item = removing
     if (!fs || !item || removeInFlight.current) return
     removeInFlight.current = true
     setRemoveBusy(true)
     setRemoveError('')
+    setRemoveProgress(null)
     try {
       await fs.remove(item.path, item.kind)
       setRemoving(null)
@@ -1097,6 +1114,11 @@ export function FileTree(props: {
         }
         error={removeError}
         busy={removeBusy}
+        percent={
+          removing?.kind === 'dir' && removeProgress && removeProgress.total > 0
+            ? Math.min(100, Math.round((removeProgress.removed / removeProgress.total) * 100))
+            : undefined
+        }
         onClose={() => {
           setRemoving(null)
           setRemoveError('')

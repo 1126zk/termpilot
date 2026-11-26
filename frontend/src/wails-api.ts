@@ -19,6 +19,7 @@ import type {
   McpSettingsInput,
   OsInfo,
   RemoteFile,
+  RemoveProgressEvent,
   SessionConfig,
   SessionInput,
   ServerInfo,
@@ -179,6 +180,7 @@ const api = {
       invoke(IPC.sftpMkdir, [sessionId, dir, name]),
     remove: (sessionId: string, path: string, kind: RemoteFile['kind']) =>
       invoke(IPC.sftpRemove, [sessionId, path, kind]),
+    onRemoveProgress: (cb: (event: RemoveProgressEvent) => void) => on(IPC.sftpRemoveProgress, cb),
     upload: (sessionId: string, dir: string) => invoke<number>(IPC.sftpUpload, [sessionId, dir]),
     uploadDir: (sessionId: string, dir: string) =>
       invoke<number>(IPC.sftpUploadDir, [sessionId, dir]),
@@ -209,6 +211,7 @@ const api = {
     list: (dir: string) => invoke<{ path: string; entries: RemoteFile[] }>(IPC.localfsList, [dir]),
     mkdir: (dir: string, name: string) => invoke(IPC.localfsMkdir, [dir, name]),
     remove: (path: string, kind: RemoteFile['kind']) => invoke(IPC.localfsRemove, [path, kind]),
+    onRemoveProgress: (cb: (event: RemoveProgressEvent) => void) => on(IPC.localfsRemoveProgress, cb),
     rename: (from: string, to: string) => invoke(IPC.localfsRename, [from, to]),
     upload: (dir: string) => invoke<number>(IPC.localfsUpload, [dir]),
     uploadDir: (dir: string) => invoke<number>(IPC.localfsUploadDir, [dir]),

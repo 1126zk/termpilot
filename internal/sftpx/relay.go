@@ -368,7 +368,7 @@ func removeKind(conn *liveConn, p string, kind destKind) error {
 	}
 	return conn.using(normalizeRemotePath(p), func(target string) error {
 		if kind == destDir {
-			return removeDir(conn, target, 0)
+			return removeDir(conn, target, 0, nil)
 		}
 		return conn.client.Remove(target)
 	})

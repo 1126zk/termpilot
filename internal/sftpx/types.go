@@ -29,6 +29,15 @@ const (
 	DirectionRelay = "relay"
 )
 
+// RemoveProgress 目录删除进度，对应 TS RemoveProgressEvent。
+// Removed 和 Total 都是条目数：每个文件、链接，以及每一层目录。
+type RemoveProgress struct {
+	SessionID string `json:"sessionId"`
+	Path      string `json:"path"`
+	Removed   int    `json:"removed"`
+	Total     int    `json:"total"`
+}
+
 // TransferEvent 上传/下载进度，对应 TS SftpTransferEvent。
 // 文件夹传输整棵树共用一个 id，Transferred 跨文件累计。
 type TransferEvent struct {

@@ -125,6 +125,75 @@ func (s *Service) Remove(path string, kind sftpx.FileKind) error {
 	return os.Remove(target)
 }
 
+// RemoveProgress 删除。目录先数清条目再逐个删，report 在百分比变化时收到已删数和总数。
+// 单个文件不回调。路径不存在时与 Remove 一样报错。
+func (s *Service) RemoveProgress(path string, kind sftpx.FileKind, report func(removed, total int)) error {
+	target, err := s.ToNative(path)
+	if err != nil {
+		return err
+	}
+	if kind != sftpx.KindDir {
+		return os.Remove(target)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return os.RemoveAll(target)
+	}
+	total, err := countLocalDir(target)
+	if err != nil {
+		return err
+	}
+	return removeLocalDir(target, sftpx.NewRemoveReporter(total, report))
+}
+
+func countLocalDir(path string) (int, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, err
+	}
+	n := 1
+	for _, item := range entries {
+		if !item.IsDir() {
+			n++
+			continue
+		}
+		sub, err := countLocalDir(filepath.Join(path, item.Name()))
+		if err != nil {
+			return 0, err
+		}
+		n += sub
+	}
+	return n, nil
+}
+
+func removeLocalDir(path string, prog *sftpx.RemoveReporter) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, item := range entries {
+		full := filepath.Join(path, item.Name())
+		if item.IsDir() {
+			if err := removeLocalDir(full, prog); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Remove(full); err != nil {
+			return err
+		}
+		prog.Step()
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	prog.Step()
+	return nil
+}
+
 // Rename 对应 TS rename。
 func (s *Service) Rename(from, to string) error {
 	src, err := s.ToNative(from)

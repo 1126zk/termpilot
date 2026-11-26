@@ -29,6 +29,8 @@ export const IPC = {
   sftpList: 'sftp:list',
   sftpMkdir: 'sftp:mkdir',
   sftpRemove: 'sftp:remove',
+  /** main → renderer，目录删除的条目进度 */
+  sftpRemoveProgress: 'sftp:remove-progress',
   sftpUpload: 'sftp:upload',
   sftpDownload: 'sftp:download',
   sftpUploadDir: 'sftp:upload-dir',
@@ -104,6 +106,8 @@ export const IPC = {
   localfsList: 'localfs:list',
   localfsMkdir: 'localfs:mkdir',
   localfsRemove: 'localfs:remove',
+  /** main → renderer，本机目录删除的条目进度 */
+  localfsRemoveProgress: 'localfs:remove-progress',
   localfsUpload: 'localfs:upload',
   localfsUploadPaths: 'localfs:upload-paths',
   localfsMovePaths: 'localfs:move-paths',

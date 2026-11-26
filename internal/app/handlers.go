@@ -553,7 +553,17 @@ func (a *App) hSftpRemove(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, a.sftp.Remove(sessionID, path, kind)
+	if kind != sftpx.KindDir {
+		return nil, a.sftp.Remove(sessionID, path, kind)
+	}
+	return nil, a.sftp.RemoveProgress(sessionID, path, kind, func(removed, total int) {
+		a.emit("sftp:remove-progress", sftpx.RemoveProgress{
+			SessionID: sessionID,
+			Path:      path,
+			Removed:   removed,
+			Total:     total,
+		})
+	})
 }
 
 func (a *App) hSftpRename(args []interface{}) (interface{}, error) {
@@ -898,7 +908,16 @@ func (a *App) hLocalRemove(args []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, a.local.Remove(path, kind)
+	if kind != sftpx.KindDir {
+		return nil, a.local.Remove(path, kind)
+	}
+	return nil, a.local.RemoveProgress(path, kind, func(removed, total int) {
+		a.emit("localfs:remove-progress", sftpx.RemoveProgress{
+			Path:    path,
+			Removed: removed,
+			Total:   total,
+		})
+	})
 }
 
 func (a *App) hLocalRename(args []interface{}) (interface{}, error) {

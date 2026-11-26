@@ -87,12 +87,30 @@ func (s *Service) Rename(sessionID, from, to string) error {
 
 // Remove 对应 TS remove：目录整棵递归删，其余 unlink。
 func (s *Service) Remove(sessionID, path string, kind FileKind) error {
+	return s.remove(sessionID, path, kind, nil, false)
+}
+
+// RemoveProgress 删除。目录先数清条目再逐个删，report 在百分比变化时收到已删数和总数。
+// 单个文件不回调。
+func (s *Service) RemoveProgress(sessionID, path string, kind FileKind, report func(removed, total int)) error {
+	return s.remove(sessionID, path, kind, report, true)
+}
+
+func (s *Service) remove(sessionID, path string, kind FileKind, report func(removed, total int), progress bool) error {
 	return s.run(sessionID, func(conn *liveConn) error {
 		return conn.using(normalizeRemotePath(path), func(target string) error {
-			if kind == KindDir {
-				return removeDir(conn, target, 0)
+			if kind != KindDir {
+				return conn.client.Remove(target)
 			}
-			return conn.client.Remove(target)
+			var prog *RemoveReporter
+			if progress {
+				total, err := countRemoteDir(conn, target, 0)
+				if err != nil {
+					return err
+				}
+				prog = NewRemoveReporter(total, report)
+			}
+			return removeDir(conn, target, 0, prog)
 		})
 	})
 }
@@ -222,8 +240,32 @@ func readdir(client *sftp.Client, dir string) ([]RemoteFile, error) {
 	return entries, nil
 }
 
+// countRemoteDir 数出将要删除的条目，规则和 removeDir 一致。
+func countRemoteDir(conn *liveConn, path string, depth int) (int, error) {
+	if depth > 32 {
+		return 0, errors.New("目录层级过深")
+	}
+	entries, err := readdir(conn.client, path)
+	if err != nil {
+		entries = nil
+	}
+	n := 1
+	for _, item := range entries {
+		if item.Kind != KindDir {
+			n++
+			continue
+		}
+		sub, err := countRemoteDir(conn, item.Path, depth+1)
+		if err != nil {
+			return 0, err
+		}
+		n += sub
+	}
+	return n, nil
+}
+
 // removeDir 对应 TS removeDir：层级超过 32 拒绝，读目录失败按空目录处理。
-func removeDir(conn *liveConn, path string, depth int) error {
+func removeDir(conn *liveConn, path string, depth int, prog *RemoveReporter) error {
 	if depth > 32 {
 		return errors.New("目录层级过深")
 	}
@@ -233,7 +275,7 @@ func removeDir(conn *liveConn, path string, depth int) error {
 	}
 	for _, item := range entries {
 		if item.Kind == KindDir {
-			if err := removeDir(conn, item.Path, depth+1); err != nil {
+			if err := removeDir(conn, item.Path, depth+1, prog); err != nil {
 				return err
 			}
 			continue
@@ -241,8 +283,52 @@ func removeDir(conn *liveConn, path string, depth int) error {
 		if err := conn.using(item.Path, conn.client.Remove); err != nil {
 			return err
 		}
+		prog.Step()
 	}
-	return conn.client.RemoveDirectory(path)
+	if err := conn.client.RemoveDirectory(path); err != nil {
+		return err
+	}
+	prog.Step()
+	return nil
+}
+
+// RemoveReporter 按条目百分比节流删除进度。总数在开始时已知，百分比不变就不回调。
+type RemoveReporter struct {
+	total   int
+	removed int
+	sent    int
+	report  func(removed, total int)
+}
+
+// NewRemoveReporter 立刻回调一次 0，之后只在整数百分比变化时回调。
+func NewRemoveReporter(total int, report func(removed, total int)) *RemoveReporter {
+	r := &RemoveReporter{total: total, sent: -1, report: report}
+	r.flush()
+	return r
+}
+
+// Step 记上一个已删条目。
+func (r *RemoveReporter) Step() {
+	if r == nil {
+		return
+	}
+	r.removed++
+	r.flush()
+}
+
+func (r *RemoveReporter) flush() {
+	if r == nil || r.report == nil || r.total <= 0 {
+		return
+	}
+	pct := r.removed * 100 / r.total
+	if pct > 100 {
+		pct = 100
+	}
+	if pct == r.sent {
+		return
+	}
+	r.sent = pct
+	r.report(r.removed, r.total)
 }
 
 // statSize 对应 TS statSize。

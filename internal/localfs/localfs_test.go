@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -322,5 +323,76 @@ func TestCopyTo(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(dst, "pack-copy", "in", "f.txt")); err != nil || string(data) != "f" {
 		t.Fatalf("pack-copy/in/f.txt = %q, err = %v", data, err)
+	}
+}
+
+func TestRemoveProgress(t *testing.T) {
+	svc := New()
+	posix := posixTmp(t)
+	native := filepath.FromSlash(posix)
+	dir := filepath.Join(native, "corpus")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "a.txt"), "a")
+	writeFile(t, filepath.Join(dir, "sub", "b.txt"), "b")
+
+	var ticks int
+	var lastRemoved, lastTotal int
+	prevPct := -1
+	if err := svc.RemoveProgress(posix+"/corpus", sftpx.KindDir, func(removed, total int) {
+		ticks++
+		if total != 4 {
+			t.Fatalf("total = %d, want 4", total)
+		}
+		if removed < lastRemoved {
+			t.Fatalf("removed %d -> %d", lastRemoved, removed)
+		}
+		pct := removed * 100 / total
+		if pct == prevPct {
+			t.Fatalf("percent %d repeated", pct)
+		}
+		prevPct = pct
+		lastRemoved, lastTotal = removed, total
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if lastRemoved != 4 || lastTotal != 4 {
+		t.Fatalf("end %d/%d ticks %d", lastRemoved, lastTotal, ticks)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Fatalf("目录还在: %v", err)
+	}
+
+	bulk := filepath.Join(native, "bulk")
+	if err := os.Mkdir(bulk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = 150
+	for i := 0; i < n; i++ {
+		writeFile(t, filepath.Join(bulk, strconv.Itoa(i)+".txt"), "x")
+	}
+	ticks = 0
+	if err := svc.RemoveProgress(posix+"/bulk", sftpx.KindDir, func(removed, total int) {
+		ticks++
+		lastRemoved, lastTotal = removed, total
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ticks > 101 {
+		t.Fatalf("ticks = %d, want <= 101", ticks)
+	}
+	if lastRemoved != n+1 || lastTotal != n+1 {
+		t.Fatalf("bulk end %d/%d", lastRemoved, lastTotal)
+	}
+
+	writeFile(t, filepath.Join(native, "one.txt"), "x")
+	if err := svc.RemoveProgress(posix+"/one.txt", sftpx.KindFile, func(int, int) {
+		t.Fatal("单个文件不应有进度")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RemoveProgress(posix+"/missing", sftpx.KindDir, nil); err == nil {
+		t.Fatal("删不存在的目录应报错")
 	}
 }
