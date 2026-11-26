@@ -387,46 +387,50 @@ function OpsPanels(props: { areas: Record<string, PaneArea> }) {
   )
 }
 
-/** 会话内部左主右辅。文件和两个终端各自占一半，终端进程互不影响。 */
+/** 会话内部左主右辅。拖动中不收起，避免标签位置跟着变、再飞起来。松手后一侧没有内容才并成一栏。 */
 function SessionSplitPane(props: { parentId: string; pane: SessionSplit }) {
   const editorTabs = useAppStore((s) => s.editorTabs)
   const focusSessionSide = useAppStore((s) => s.focusSessionSide)
   const setSessionSplitRatio = useAppStore((s) => s.setSessionSplitRatio)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragging = useAppStore((s) => s.stripDragTermId === props.parentId)
-  const rightEmpty = props.pane.secondary.length === 0 && !dragging
-  const leftFile = editorTabs.find((tab) => tab.key === props.pane.primaryView) ?? null
-  const rightFile = rightEmpty ? null : (editorTabs.find((tab) => tab.key === props.pane.secondaryView) ?? null)
+  const fileOf = (id: string) => editorTabs.find((tab) => tab.key === id) ?? null
+  const leftFile = fileOf(props.pane.primaryView)
+  const rightFile = fileOf(props.pane.secondaryView)
   const leftTerm = termIdFromView(props.pane.primaryView)
-  const rightTerm = rightEmpty ? null : termIdFromView(props.pane.secondaryView)
+  const rightTerm = termIdFromView(props.pane.secondaryView)
+  const split = dragging || (!!(leftFile || leftTerm) && !!(rightFile || rightTerm))
   const { a: primary, b: secondary } = splitTracks(props.pane.ratio, 0)
   const style: CSSProperties =
     props.pane.dir === 'down'
       ? { gridTemplateAreas: '"p" "d" "s"', gridTemplateRows: `${primary} 4px ${secondary}`, gridTemplateColumns: 'minmax(0, 1fr)' }
       : { gridTemplateAreas: '"p d s"', gridTemplateColumns: `${primary} 4px ${secondary}`, gridTemplateRows: 'minmax(0, 1fr)' }
-  const side = (which: 'primary' | 'secondary', file: typeof leftFile, termId: string | null) => (
+  const side = (which: 'primary' | 'secondary', file: typeof leftFile, termId: string | null, solo: boolean) => (
     <div
-      className={cn(paneCell, rightEmpty && 'flex-1')}
-      style={rightEmpty ? undefined : { gridArea: which === 'primary' ? 'p' : 's' }}
+      className={cn(paneCell, solo && 'flex-1')}
+      style={solo ? undefined : { gridArea: which === 'primary' ? 'p' : 's' }}
       onPointerDownCapture={() => focusSessionSide(props.parentId, which)}
     >
       {file ? (
         <RemoteEditor key={file.key} tab={file} />
       ) : termId ? (
-        <TerminalView termId={termId} active={props.pane.focus === which} />
+        <TerminalView termId={termId} active={solo || props.pane.focus === which} />
       ) : null}
     </div>
   )
-  if (rightEmpty) return side('primary', leftFile, leftTerm)
+  if (!split) {
+    const useRight = !(leftFile || leftTerm) && !!(rightFile || rightTerm)
+    return side(useRight ? 'secondary' : 'primary', useRight ? rightFile : leftFile, useRight ? rightTerm : leftTerm, true)
+  }
   return (
     <div ref={gridRef} className="grid min-h-0 min-w-0 flex-1" style={style}>
-      {side('primary', leftFile, leftTerm)}
+      {side('primary', leftFile, leftTerm, false)}
       <SplitDivider
         dir={props.pane.dir}
         gridRef={gridRef}
         onRatio={(ratio) => setSessionSplitRatio(props.parentId, ratio)}
       />
-      {side('secondary', rightFile, rightTerm)}
+      {side('secondary', rightFile, rightTerm, false)}
     </div>
   )
 }

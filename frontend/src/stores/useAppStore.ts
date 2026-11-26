@@ -209,7 +209,7 @@ interface AppState {
   /** 文件条拖动排序。ids 里带 SPLIT_MARK。只改标签顺序，不换正在看的终端 */
   reorderSessionStrip: (parentId: string, ids: string[]) => void
   setStripDrag: (termId: string | null) => void
-  /** 拖完：某一侧没有终端时收起内容分栏，竖线留在标签条上 */
+  /** 拖完：某一侧没有标签时收起内容分栏，竖线留在标签条上 */
   settleSessionStrip: (parentId: string) => void
   /** 右键某一扇终端「取消分栏」：留下这一扇，关掉同一次分栏里的其它终端 */
   cancelSessionSplit: (parentId: string, keepTermId: string) => void
@@ -1290,12 +1290,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     const order = stripOrder(pane).filter((id) => id !== SPLIT_MARK)
     const left = order.filter((id) => !right.has(id))
     const rightIds = order.filter((id) => right.has(id))
-    const hasTerm = (list: string[]) => list.some((id) => termIdFromView(id))
-    const lastTerm = (list: string[]) => [...list].reverse().find((id) => termIdFromView(id))
-    if (!hasTerm(left) || !hasTerm(rightIds)) {
+    const pick = (ids: string[], current: string) => (ids.includes(current) ? current : (ids.at(-1) ?? ''))
+    if (!left.length && rightIds.length) {
+      const prefer = pane.focus === 'primary' && rightIds.includes(pane.primaryView) ? pane.primaryView : pane.secondaryView
+      const secondaryView = rightIds.includes(prefer) ? prefer : (rightIds.at(-1) ?? '')
+      set({
+        stripDragTermId: null,
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, secondaryView),
+        sessionSplit: {
+          ...get().sessionSplit,
+          [parentId]: {
+            ...pane,
+            order: rightIds,
+            secondary: [...rightIds],
+            primaryView: '',
+            secondaryView,
+            focus: 'secondary'
+          }
+        }
+      })
+      return
+    }
+    if (!rightIds.length) {
       const merged = [...left, ...rightIds]
       const shown = pane.focus === 'secondary' ? pane.secondaryView : pane.primaryView
-      const primaryView = merged.includes(shown) ? shown : (merged.find((id) => termIdFromView(id)) ?? merged[0] ?? termViewId(parentId))
+      const primaryView = merged.includes(shown) ? shown : (pick(merged, shown) || termViewId(parentId))
       set({
         stripDragTermId: null,
         editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, primaryView),
@@ -1306,9 +1325,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       return
     }
-    const primaryView = left.includes(pane.primaryView) ? pane.primaryView : (lastTerm(left) ?? left.at(-1) ?? pane.primaryView)
-    const secondaryView = rightIds.includes(pane.secondaryView) ? pane.secondaryView : (lastTerm(rightIds) ?? rightIds.at(-1) ?? pane.secondaryView)
-    const focus = pane.focus
+    const primaryView = pick(left, pane.primaryView)
+    const secondaryView = pick(rightIds, pane.secondaryView)
+    const focus = !secondaryView ? 'primary' : !primaryView ? 'secondary' : pane.focus
     const shown = focus === 'secondary' ? secondaryView : primaryView
     set({
       stripDragTermId: null,
@@ -1545,10 +1564,41 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pane = get().sessionSplit[termId]
     const place = (editorTabs: EditorTab[]) => {
       const opsPanelTermIds = get().opsPanelTermIds.filter((id) => id !== termId)
-      if (!pane) return { editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }, opsPanelTermIds }
       const alive = new Set(editorTabs.map((tab) => tab.key))
       const keep = (id: string) => termIdFromView(id) !== null || alive.has(id)
-      const secondary = pane.secondary.filter(keep)
+      // 窗口分栏和标签内分栏互斥，文件只能盖住这一栏
+      if (get().split) return { editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }, opsPanelTermIds }
+      const secondary = pane ? pane.secondary.filter(keep) : []
+      // 还没分栏，或内容已经并回一栏：文件进辅栏，终端留在主栏
+      if (!pane || secondary.length === 0) {
+        const primaryTerm = termViewId(termId)
+        const files = editorTabs.filter((tab) => tab.termId === termId).map((tab) => tab.key)
+        const sides = get().sideTerms.filter((term) => term.parentId === termId).map((term) => termViewId(term.id))
+        const fromPane = pane ? stripOrder(pane).filter((id) => id !== key && keep(id)) : []
+        const seed = fromPane.length
+          ? fromPane
+          : [primaryTerm, ...files.filter((id) => id !== key), ...sides.filter((id) => id !== primaryTerm)]
+        const left = seed.includes(primaryTerm) ? seed : [primaryTerm, ...seed]
+        const carried = pane?.primaryView
+        const primaryView = carried && left.includes(carried) ? carried : primaryTerm
+        const opened: SessionSplit = {
+          dir: pane?.dir ?? 'right',
+          ratio: pane?.ratio ?? 0.5,
+          order: [...left, key],
+          secondary: [key],
+          primaryView,
+          secondaryView: key,
+          focus: 'secondary'
+        }
+        return {
+          sessionSplit: {
+            ...get().sessionSplit,
+            [termId]: opened
+          },
+          editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, termId, key),
+          opsPanelTermIds
+        }
+      }
       const primaryView = keep(pane.primaryView) ? pane.primaryView : termViewId(termId)
       const secondaryView = keep(pane.secondaryView) ? pane.secondaryView : (secondary.at(-1) ?? '')
       const placed = assignSessionView({ ...pane, secondary, primaryView, secondaryView }, termId, key, pane.focus)

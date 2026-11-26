@@ -120,6 +120,8 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     startPointerDrag({
       event,
       axis: 'x',
+      // 手抖几像素仍算点击。阈值太小会把这次点击吃掉，要再点才切换
+      threshold: 8,
       onActivate: () => {
         const strip = stripRef.current
         const attr = splitting ? 'data-view-id' : 'data-file-key'
@@ -386,31 +388,36 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
       <div
         key={id}
         data-view-id={id}
-        className={chipClass(id, closable ? 'pl-2.5 pr-1' : 'px-2.5')}
+        title={closable ? title : '回到终端，已打开的文件保留'}
+        className={chipClass(id, closable ? 'cursor-pointer pl-2.5 pr-1' : 'cursor-pointer px-2.5')}
         style={dragKey === id ? { transform: `translateX(${dragOffset}px)` } : undefined}
         onPointerDown={(e) => {
           if (e.button !== 0) return
+          // 换边会拆掉原来的标签，松手那下 click 到不了，抑制会留下来吃掉下一次点击
+          suppressClick.current = false
           if (!pane && !closable) return
           startDrag(e, id)
         }}
+        onClick={() => activate(id)}
       >
-        <button
-          type="button"
-          title={closable ? title : '回到终端，已打开的文件保留'}
-          className="flex min-w-0 items-center gap-1.5"
-          onClick={() => activate(id)}
-        >
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch">
           <SquareTerminal className="size-4 shrink-0" />
           <span className="truncate">{title}</span>
           {down && <span className="size-1.5 shrink-0 rounded-full bg-destructive" />}
-        </button>
+        </span>
         {closable && (
           <button
             type="button"
             title="关闭"
             className="flex size-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-foreground/10 hover:opacity-100"
-            onClick={() => clickAllowed() && termId && closeSideTerm(termId)}
-            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (clickAllowed() && termId) closeSideTerm(termId)
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              suppressClick.current = false
+            }}
           >
             <X className="size-3.5" />
           </button>
@@ -427,22 +434,33 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
         data-view-id={tab.key}
         data-file-key={tab.key}
         title={tab.path}
-        className={chipClass(tab.key, 'pl-2.5 pr-1')}
+        className={chipClass(tab.key, 'cursor-pointer pl-2.5 pr-1')}
         style={dragKey === tab.key ? { transform: `translateX(${dragOffset}px)` } : undefined}
-        onPointerDown={(e) => startDrag(e, tab.key)}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          suppressClick.current = false
+          startDrag(e, tab.key)
+        }}
+        onClick={() => activate(tab.key)}
       >
-        <button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => activate(tab.key)}>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch">
           <FileIcon name={tab.name} kind="file" />
           <span className={cn('truncate', tab.preview && 'italic')}>{tab.name}</span>
           {tab.readOnly && <Eye className="size-3 shrink-0 opacity-70" />}
           {tab.dirty && <span className="size-2 shrink-0 rounded-full bg-current" />}
-        </button>
+        </span>
         <button
           type="button"
           title="关闭"
           className="flex size-5 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-foreground/10 hover:opacity-100"
-          onClick={() => clickAllowed() && close(tab)}
-          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (clickAllowed()) close(tab)
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            suppressClick.current = false
+          }}
         >
           <X className="size-3.5" />
         </button>
