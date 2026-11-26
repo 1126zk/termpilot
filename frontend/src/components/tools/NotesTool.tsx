@@ -745,6 +745,7 @@ export function NotesTool() {
 
   const startDrag = (event: ReactPointerEvent, id: string) => {
     if (event.target instanceof HTMLElement && event.target.closest('input, button[aria-label="删除"]')) return
+    setSelectedId(id)
     startPointerDrag({
       event,
       axis: 'y',
@@ -813,8 +814,8 @@ export function NotesTool() {
                 data-note-row
                 data-note-id={note.id}
                 className={cn(
-                  'flex h-7 items-center rounded-md pr-0.5 text-[13px] font-medium',
-                  on ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent',
+                  'flex h-8 w-full items-center rounded-md pr-0.5 text-[13px] font-medium text-muted-foreground',
+                  on ? 'bg-accent' : 'hover:bg-accent',
                   dragging && 'relative z-10'
                 )}
                 style={dragging ? { transform: `translateY(${dragOffset}px)` } : undefined}
@@ -826,7 +827,7 @@ export function NotesTool() {
                     value={draft}
                     placeholder="无标题"
                     aria-label="重命名"
-                    className="h-7 min-w-0 flex-1 px-2 text-[13px] text-foreground"
+                    className="h-8 min-w-0 flex-1 px-2 text-[13px] text-foreground"
                     onChange={(event) => setDraft(oneLine(event.target.value))}
                     onFocus={(event) => {
                       const end = event.currentTarget.value.length
@@ -851,7 +852,7 @@ export function NotesTool() {
                 ) : (
                   <button
                     type="button"
-                    className="h-7 min-w-0 flex-1 cursor-pointer truncate px-2 text-left"
+                    className="h-8 min-w-0 flex-1 cursor-pointer truncate px-2 text-left"
                     onClick={() => {
                       if (eatClick()) return
                       setSelectedId(note.id)
