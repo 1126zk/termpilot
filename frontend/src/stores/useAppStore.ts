@@ -110,7 +110,7 @@ interface AppState {
   /** 每个终端（标签）的连接状态 */
   termState: Record<string, TermState>
   tabs: Tab[]
-  /** 焦点所在的标签。分屏时是最后点过的那一栏显示的标签，文件面板、片段、历史都跟它走 */
+  /** 焦点所在的标签。分屏时是最后点过的那一栏显示的标签，文件面板和片段都跟它走 */
   activeTabId: string | null
   /** 左右或上下分屏，null 表示不分屏 */
   split: SplitState | null

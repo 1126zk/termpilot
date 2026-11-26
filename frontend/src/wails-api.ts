@@ -6,7 +6,6 @@ import type {
   CronEntry,
   DockerInfo,
   ForwardRule,
-  HistoryEntry,
   LocalShellInfo,
   ConnLogEntry,
   McpAuditEntry,
@@ -238,11 +237,6 @@ const api = {
     update: (id: string, name: string, command: string) =>
       invoke<void>(IPC.snippetUpdate, [id, name, command]),
     remove: (id: string) => invoke<void>(IPC.snippetDelete, [id])
-  },
-  history: {
-    list: (termId: string) => invoke<HistoryEntry[]>(IPC.historyList, [termId]),
-    clear: (termId: string) => invoke<void>(IPC.historyClear, [termId]),
-    onChanged: (cb: (termId: string) => void) => on(IPC.historyChanged, cb)
   },
   mcp: {
     get: () => invoke<McpSettings>(IPC.mcpGet, []),

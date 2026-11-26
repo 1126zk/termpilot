@@ -28,7 +28,7 @@ export function sendToActiveTerminal(command: string, execute = true): void {
   terminalPool.focus(termId)
 }
 
-/** 指令片段：顶部输入框直接写命令，保存即入列；每条可填入、直接执行、删除。不带滚动，和历史指令共用「命令」栏的滚动条。 */
+/** 指令片段：顶部输入框直接写命令，保存即入列；每条可填入、直接执行、删除。不带滚动，由命令栏提供滚动条。 */
 export function SnippetsSection() {
   const [snippets, setSnippets] = useState<Snippet[]>([])
   const [command, setCommand] = useState('')
@@ -99,9 +99,7 @@ export function SnippetsSection() {
         </Button>
       </div>
       {error && <p className="px-3 pb-1 text-sm text-destructive">{error}</p>}
-      {snippets.length === 0 ? (
-        <p className="px-3 py-4 text-center text-sm leading-5 text-muted-foreground">把常用命令存成片段，一键复用</p>
-      ) : (
+      {snippets.length > 0 && (
         <div className="grid min-w-0 gap-0.5 px-1 pb-2">
           {snippets.map((snippet) => (
             <div

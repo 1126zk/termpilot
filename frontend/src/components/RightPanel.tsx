@@ -5,7 +5,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore, type RightPanelPane } from '../stores/useAppStore'
 import { FileTree } from './FileTree'
 import { SnippetsSection } from './SnippetsPanel'
-import { HistorySection } from './HistoryPanel'
 import { PastePanel } from './PastePanel'
 import { ThemePanel } from './ThemePanel'
 import { SessionFormPanel } from './SessionForm'
@@ -13,7 +12,7 @@ import { SessionFormPanel } from './SessionForm'
 const panes: { id: RightPanelPane; title: string; icon: typeof Folder }[] = [
   { id: 'files', title: '文件', icon: Folder },
   { id: 'images', title: '剪贴板图片', icon: Image },
-  { id: 'commands', title: '指令片段和历史指令', icon: Braces },
+  { id: 'commands', title: '指令片段', icon: Braces },
   { id: 'theme', title: '主题', icon: Palette }
 ]
 
@@ -65,10 +64,8 @@ export function RightPanel(props: { open: boolean }) {
       {pane === 'files' && <FileTrees watching={props.open} />}
       {pane === 'images' && <PastePanel />}
       {pane === 'commands' && (
-        // 片段在上、历史在下，片段不会多，两块共用一个滚动条
         <ScrollArea className="min-h-0 flex-1">
           <SnippetsSection />
-          <HistorySection />
         </ScrollArea>
       )}
       {pane === 'theme' && <ThemePanel />}
