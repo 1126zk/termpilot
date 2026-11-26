@@ -74,6 +74,7 @@ function imageIds(html: string) {
 
 function serialize(el: HTMLElement) {
   const clone = el.cloneNode(true) as HTMLElement
+  liftNewlines(clone)
   for (const img of clone.querySelectorAll('img')) {
     const id = img.getAttribute('data-note-img')
     if (!id) {
@@ -83,10 +84,32 @@ function serialize(el: HTMLElement) {
     img.setAttribute('src', PLACEHOLDER)
     img.setAttribute('alt', '')
   }
-  const html = clone.innerHTML
   const text = (clone.textContent ?? '').replace(/\u00a0/g, ' ').trim()
-  if (!text && !clone.querySelector('img')) return ''
-  return sanitize(html)
+  if (!text && !clone.querySelector('img') && !hasLineBreaks(clone)) return ''
+  return sanitize(clone.innerHTML)
+}
+
+/** 文本节点里的换行写成 <br>，再灌回编辑器时才不会被折成一行。 */
+function liftNewlines(root: HTMLElement) {
+  const texts: Text[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node as Text)
+  for (const text of texts) {
+    if (!text.data.includes('\n')) continue
+    const parts = text.data.split('\n')
+    const frag = document.createDocumentFragment()
+    parts.forEach((part, index) => {
+      if (index > 0) frag.append(document.createElement('br'))
+      if (part) frag.append(document.createTextNode(part))
+    })
+    text.replaceWith(frag)
+  }
+}
+
+/** 只按回车、一行字都没有，这些空行也要留下。空编辑器里浏览器自带的那一个 <br> 不算。 */
+function hasLineBreaks(el: HTMLElement) {
+  const blocks = [...el.children].filter((node) => node.tagName === 'DIV' || node.tagName === 'P').length
+  return blocks > 1 || el.querySelectorAll('br').length > 1
 }
 
 function readNotes(): Note[] {
