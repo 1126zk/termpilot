@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Play, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,60 @@ export function sendToActiveTerminal(command: string, execute = true): void {
   if (!termId) return
   window.api.term.input(termId, execute ? `${command}\r` : command)
   terminalPool.focus(termId)
+}
+
+/** 首行装得下就不弹。装不下出现省略号，或者后面还有行，悬停才给出全文。 */
+function SnippetLabel(props: { command: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [truncated, setTruncated] = useState(false)
+  const [open, setOpen] = useState(false)
+  const line = props.command.split('\n')[0]
+  const rest = props.command.slice(line.length).trim() !== ''
+  const show = truncated || rest
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = () => setTruncated(lineOverflows(el))
+    check()
+    const observer = new ResizeObserver(check)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [line])
+
+  return (
+    <Tooltip open={show && open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <span ref={ref} className="min-w-0 flex-1 truncate font-mono text-sm">
+          {line}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-sm whitespace-pre-wrap break-all text-left font-mono">
+        {props.command}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+// 带省略号的弹性行，自身的 scrollWidth 会等于可见宽度，量不出被截掉的部分。
+function lineOverflows(el: HTMLElement): boolean {
+  const width = el.clientWidth
+  if (width <= 0) return false
+  const style = getComputedStyle(el)
+  const probe = document.createElement('span')
+  probe.style.position = 'fixed'
+  probe.style.left = '-9999px'
+  probe.style.whiteSpace = 'nowrap'
+  probe.style.fontFamily = style.fontFamily
+  probe.style.fontSize = style.fontSize
+  probe.style.fontWeight = style.fontWeight
+  probe.style.fontStyle = style.fontStyle
+  probe.style.letterSpacing = style.letterSpacing
+  probe.textContent = el.textContent
+  document.body.appendChild(probe)
+  const textWidth = probe.offsetWidth
+  probe.remove()
+  return textWidth > width + 1
 }
 
 /** 指令片段：顶部输入框直接写命令，保存即入列；每条可填入、直接执行、删除。不带滚动，由命令栏提供滚动条。 */
@@ -108,16 +162,7 @@ export function SnippetsSection() {
               className="group flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-2.5 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
               onClick={() => sendToActiveTerminal(snippet.command, false)}
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="min-w-0 flex-1 truncate font-mono text-sm">
-                    {snippet.command.split('\n')[0]}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-sm whitespace-pre-wrap break-all text-left font-mono">
-                  {snippet.command}
-                </TooltipContent>
-              </Tooltip>
+              <SnippetLabel command={snippet.command} />
               <button
                 type="button"
                 title="填入终端（自己回车执行）"
