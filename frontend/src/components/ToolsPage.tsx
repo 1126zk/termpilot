@@ -7,6 +7,7 @@ import { PreviewViewer } from './tools/PreviewViewer'
 import { NetworkTool } from './tools/NetworkTool'
 import { SshKeyTool } from './tools/SshKeyTool'
 import { TodoTool } from './tools/TodoTool'
+import { NotesTool } from './tools/NotesTool'
 import { TransferTool } from './tools/TransferTool'
 
 const ORDER_KEY = 'termpilot.toolOrder'
@@ -28,10 +29,13 @@ interface ToolDef {
   component: ComponentType<ToolProps>
   /** 分栏工具用更宽的内容区，标签栏宽度不变 */
   wide?: boolean
+  /** 先占满剩余高度，内容在内部滚动 */
+  fill?: boolean
 }
 
 const tools: ToolDef[] = [
   { id: 'todo', name: '待办', component: TodoTool },
+  { id: 'notes', name: '笔记', component: NotesTool, fill: true },
   { id: 'password', name: '密码生成器', component: PasswordGenerator },
   { id: 'totp', name: '2FA', component: TotpTool },
   { id: 'sshkey', name: '密钥管理', component: SshKeyTool },
@@ -50,7 +54,11 @@ function readOrder(): string[] {
     for (const tool of tools) {
       if (ordered.includes(tool.id)) continue
       if (tool.id === DEFAULT_TOOL) ordered.unshift(tool.id)
-      else ordered.push(tool.id)
+      else if (tool.id === 'notes') {
+        const at = ordered.indexOf('todo')
+        if (at >= 0) ordered.splice(at + 1, 0, tool.id)
+        else ordered.unshift(tool.id)
+      } else ordered.push(tool.id)
     }
     return ordered
   } catch {
@@ -163,18 +171,14 @@ export function ToolsPage(props: { visible?: boolean }) {
   const selected = order.includes(activeId) ? activeId : DEFAULT_TOOL
   const active = tools.find((tool) => tool.id === selected) ?? tools[0]
   const ActiveTool = active.component
+  const stretch = fullDiagram || active.wide || active.fill
 
   return (
-    <div
-      className={cn(
-        'flex min-h-0 flex-1 flex-col',
-        fullDiagram || active.wide ? 'overflow-hidden' : 'tools-scroll overflow-y-auto'
-      )}
-    >
+    <div className={cn('flex min-h-0 flex-1 flex-col', stretch ? 'overflow-hidden' : 'tools-scroll overflow-y-auto')}>
       <div
         className={cn(
           'flex w-full flex-col',
-          fullDiagram || active.wide ? 'min-h-0 flex-1' : '',
+          stretch ? 'min-h-0 flex-1' : '',
           !fullDiagram && 'gap-6 px-6 py-5'
         )}
       >
@@ -223,7 +227,13 @@ export function ToolsPage(props: { visible?: boolean }) {
         <div
           className={cn(
             'flex w-full flex-col',
-            fullDiagram ? 'min-h-0 flex-1' : active.wide ? 'mx-auto min-h-0 max-w-6xl flex-1' : 'mx-auto max-w-3xl'
+            fullDiagram
+              ? 'min-h-0 flex-1'
+              : active.wide
+                ? 'mx-auto min-h-0 max-w-6xl flex-1'
+                : active.fill
+                  ? 'min-h-0 w-full flex-1'
+                  : 'mx-auto max-w-3xl'
           )}
         >
           {active.id !== 'transfer' && (
