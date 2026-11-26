@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { CircleHelp, Copy, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
+import { Check, CircleHelp, Copy, MoreHorizontal, RefreshCw, WrapText, X } from 'lucide-react'
 import type { CronEntry, DockerInfo, PortInfo, ProcInfo, ServerMetrics, WebConfFile } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -1512,6 +1512,8 @@ function WebSection(props: { sessionId: string; active: boolean }) {
   const [confirmDelSite, setConfirmDelSite] = useState<string | null>(null)
   // 开启 HTTPS：签发中标记（按钮变「签发中…」）
   const [sslBusy, setSslBusy] = useState<string | null>(null)
+  const [copiedAddr, setCopiedAddr] = useState<string | null>(null)
+  const copiedAddrTimer = useRef<number | null>(null)
 
   useEffect(() => {
     if (!props.active) return
@@ -1792,11 +1794,18 @@ function WebSection(props: { sessionId: string; active: boolean }) {
                             const text = webTab === 'caddy' ? s.addr : `${s.domain}:${s.port}`
                             void navigator.clipboard
                               .writeText(text)
-                              .then(() => setNotice('站点地址已复制'))
+                              .then(() => {
+                                setCopiedAddr(s.name)
+                                setNotice('站点地址已复制')
+                                if (copiedAddrTimer.current != null) window.clearTimeout(copiedAddrTimer.current)
+                                copiedAddrTimer.current = window.setTimeout(() => {
+                                  setCopiedAddr((current) => (current === s.name ? null : current))
+                                }, 1200)
+                              })
                               .catch((e) => setNotice(e instanceof Error ? e.message : String(e)))
                           }}
                         >
-                          <Copy className="size-3.5" />
+                          {copiedAddr === s.name ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
                         </button>
                       </TooltipContent>
                     </Tooltip>
