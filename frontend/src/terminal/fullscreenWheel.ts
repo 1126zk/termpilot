@@ -1,13 +1,17 @@
 import type { Terminal } from '@xterm/xterm'
+import { httpLinkAt } from './links'
 
 /**
  * 全屏程序会打开备用屏幕和鼠标跟踪，让滚轮翻自己的对话、让滑块能被拖动。
  * 跟踪序列有时到不了 xterm，到了之后滚轮仍可能被视口拿走，翻到命令历史。
- * 只要处在备用屏幕，或程序已经要求鼠标跟踪，滚轮、悬停和左键拖动都改成 SGR 报告发给程序。
- * 悬停用按钮 35，Pi 据此点亮滑块；拖动每帧只报最新位置，滑块跟手。
+ * 只要处在备用屏幕，或程序已经要求鼠标跟踪，滚轮和左键拖动都改成 SGR 报告发给程序。
+ * 悬停（按钮 35）只在程序开了任意移动跟踪时发，Pi 据此点亮滑块；跟踪序列没到但还在备用屏幕时也发。
+ * 拖动每帧只报最新位置，滑块跟手。
  * 按住中键上下移动时连续翻页，离得越远翻得越快，松手即停。
  * 程序接管了鼠标就发滚轮报告；没接管（如 Kimi 的普通模式）就翻终端自己的回滚。
  * 左键滚动条不变。按住 Shift 不拦截，留给终端自己选文字。
+ * 落在网址或 OSC 8 链接上的左键不发给程序：拖动在本地选字，Ctrl+点击打开。跟踪模式保持不动，避免和选区抢这一下。
+ * 按住 Ctrl/Cmd 时不截 mousemove，xterm 才能给链接画下划线。
  */
 export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => void {
   // 全屏程序退出后，关闭跟踪的序列可能晚到或没到。这期间继续上报会把 35;…M 打进 shell，
@@ -53,6 +57,11 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   let scrollFrame = 0
   const marker = document.createElement('div')
   marker.className = 'middle-scroll-marker'
+
+  // 链接上的这一下在本地选字、打开，不走 SGR，也不改跟踪模式。
+  let linkPointer = -1
+  let linkAnchor: BufferCell | null = null
+  let linkUrl: string | null = null
 
   const emit = (action: PointerAction, cell: { col: number; row: number }, alt: boolean, ctrl: boolean) => {
     if ((action === 'move' || action === 'drag') && cell.col === lastCol && cell.row === lastRow) return
@@ -119,6 +128,44 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   }
 
   const onUp = (ev: PointerEvent) => release(ev)
+
+  const stopLink = () => {
+    if (linkPointer < 0) return
+    const id = linkPointer
+    linkPointer = -1
+    linkAnchor = null
+    linkUrl = null
+    window.removeEventListener('pointermove', onLinkMove, true)
+    window.removeEventListener('pointerup', onLinkUp, true)
+    window.removeEventListener('pointercancel', onLinkUp, true)
+    try {
+      host.releasePointerCapture(id)
+    } catch {
+      /* 指针已经不在捕获里 */
+    }
+  }
+
+  const onLinkMove = (ev: PointerEvent) => {
+    if (linkPointer < 0 || ev.pointerId !== linkPointer || !linkAnchor) return
+    ev.preventDefault()
+    ev.stopPropagation()
+    selectBetween(term, linkAnchor, bufferCell(term, cellOf(host, term, ev)))
+  }
+
+  const onLinkUp = (ev: PointerEvent) => {
+    if (linkPointer < 0 || ev.pointerId !== linkPointer || !linkAnchor) return
+    ev.preventDefault()
+    ev.stopPropagation()
+    const anchor = linkAnchor
+    const url = linkUrl
+    const here = bufferCell(term, cellOf(host, term, ev))
+    const same = here.x === anchor.x && here.y === anchor.y
+    if (!same) selectBetween(term, anchor, here)
+    stopLink()
+    if (same && url && ev.type !== 'pointercancel' && (ev.ctrlKey || ev.metaKey)) {
+      window.runtime.BrowserOpenURL(url)
+    }
+  }
 
   const hideMarker = () => {
     marker.remove()
@@ -210,7 +257,30 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
       scrollFrame = requestAnimationFrame(scrollTick)
       return
     }
-    if (ev.button !== 0 || scrolling || ev.shiftKey || !owns()) return
+    if (ev.button !== 0 || scrolling || ev.shiftKey || linkPointer >= 0 || !owns()) return
+    const anchor = bufferCell(term, cellOf(host, term, ev))
+    const url = httpLinkAt(term, anchor.x, anchor.y)
+    if (url) {
+      ev.preventDefault()
+      ev.stopPropagation()
+      if (frame) cancelAnimationFrame(frame)
+      frame = 0
+      pending = null
+      linkPointer = ev.pointerId
+      linkAnchor = anchor
+      linkUrl = url
+      term.focus()
+      term.clearSelection()
+      try {
+        host.setPointerCapture(ev.pointerId)
+      } catch {
+        /* 指针已经松开 */
+      }
+      window.addEventListener('pointermove', onLinkMove, true)
+      window.addEventListener('pointerup', onLinkUp, true)
+      window.addEventListener('pointercancel', onLinkUp, true)
+      return
+    }
     ev.preventDefault()
     ev.stopPropagation()
     if (frame) cancelAnimationFrame(frame)
@@ -230,20 +300,40 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     window.addEventListener('pointercancel', onUp, true)
   }
   const onHover = (ev: PointerEvent) => {
-    if (dragging || scrolling || ev.buttons !== 0 || ev.shiftKey || !owns()) return
+    if (dragging || scrolling || linkPointer >= 0 || ev.buttons !== 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || !owns() || !wantsHover(term)) return
     schedule('move', ev)
   }
   const onLeave = () => {
-    if (dragging || scrolling || !owns()) return
+    if (dragging || scrolling || linkPointer >= 0 || !owns() || !wantsHover(term)) return
     if (frame) cancelAnimationFrame(frame)
     frame = 0
     pending = null
     emit('move', { col: 1, row: 1 }, false, false)
   }
+  let lastMove: { x: number; y: number } | null = null
   const onMouseMove = (ev: MouseEvent) => {
-    if (ev.shiftKey || !owns()) return
+    lastMove = { x: ev.clientX, y: ev.clientY }
+    // 按住 Ctrl/Cmd 时留给 xterm 的链接悬停，否则下划线出不来。
+    if (linkPointer >= 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || !owns()) return
     ev.preventDefault()
     ev.stopPropagation()
+  }
+  const replayHover = () => {
+    if (!lastMove || !owns()) return
+    const screen = host.querySelector('.xterm-screen')
+    if (!(screen instanceof HTMLElement)) return
+    screen.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true,
+      cancelable: true,
+      clientX: lastMove.x,
+      clientY: lastMove.y,
+      ctrlKey: true,
+      metaKey: true
+    }))
+  }
+  const onModifier = (ev: KeyboardEvent) => {
+    if (ev.type !== 'keydown' || (ev.key !== 'Control' && ev.key !== 'Meta')) return
+    replayHover()
   }
   const onAuxClick = (ev: MouseEvent) => {
     if (ev.button !== 1 || ev.shiftKey) return
@@ -255,6 +345,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
   host.addEventListener('pointermove', onHover, true)
   host.addEventListener('pointerleave', onLeave, true)
   host.addEventListener('mousemove', onMouseMove, true)
+  window.addEventListener('keydown', onModifier)
 
   const handBack = () => {
     quiet = true
@@ -282,6 +373,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
       }
       stopScroll()
     }
+    stopLink()
     term.clearSelection()
     if (term.modes.mouseTrackingMode !== 'none') {
       // 只改本地模式，不写进 PTY。
@@ -316,6 +408,7 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     host.removeEventListener('pointermove', onHover, true)
     host.removeEventListener('pointerleave', onLeave, true)
     host.removeEventListener('mousemove', onMouseMove, true)
+    window.removeEventListener('keydown', onModifier)
     if (frame) cancelAnimationFrame(frame)
     frame = 0
     if (moveTimer) window.clearTimeout(moveTimer)
@@ -326,7 +419,35 @@ export function bindFullscreenWheel(host: HTMLElement, term: Terminal): () => vo
     wheelPending = null
     if (dragging && owns()) term.input(sgrPointerReport('up', { col: lastCol, row: lastRow }, false, false))
     stopDrag()
+    stopLink()
   }
+}
+
+type BufferCell = { x: number; y: number }
+
+/** cellOf 是视口里从 1 数的格子，选区和链接用缓冲区坐标。 */
+function bufferCell(term: Terminal, cell: { col: number; row: number }): BufferCell {
+  return { x: cell.col - 1, y: term.buffer.active.viewportY + cell.row - 1 }
+}
+
+/** 从按下的格子拖到当前格子。当前格是边界，和 xterm 自己选字一样不包含在内。 */
+function selectBetween(term: Terminal, a: BufferCell, b: BufferCell): void {
+  const cols = Math.max(1, term.cols)
+  const ia = a.y * cols + a.x
+  const ib = b.y * cols + b.x
+  if (ia === ib) {
+    term.clearSelection()
+    return
+  }
+  const from = ia < ib ? a : b
+  const to = ia < ib ? b : a
+  term.select(from.x, from.y, to.y * cols + to.x - (from.y * cols + from.x))
+}
+
+/** 没按键的悬停。任意移动跟踪（1003）才要；序列没到 xterm 但还在备用屏幕时，Pi 的滑块也靠它。 */
+function wantsHover(term: Terminal): boolean {
+  const mode = term.modes.mouseTrackingMode
+  return mode === 'any' || (mode === 'none' && term.buffer.active.type === 'alternate')
 }
 
 function cellHeight(term: Terminal): number {

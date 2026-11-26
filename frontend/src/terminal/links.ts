@@ -27,6 +27,75 @@ function lineCells(line: IBufferLine | undefined): { text: string; col: number[]
   return { text: text.trimEnd(), col, width }
 }
 
+interface OscCell {
+  getWidth(): number
+  hasExtendedAttrs?: () => number
+  extended?: { urlId?: number }
+}
+
+/** 程序用 OSC 8 标在这一格上的 http(s) 地址。宽字符的后半格算到前一格。 */
+function oscHttpAt(term: Terminal, line: IBufferLine, x: number): string | null {
+  const cell = line.getCell(x) as OscCell | undefined
+  if (!cell) return null
+  if (cell.getWidth() === 0 && x > 0) return oscHttpAt(term, line, x - 1)
+  const id = cell.hasExtendedAttrs?.() ? cell.extended?.urlId : 0
+  if (!id) return null
+  const uri = (term as unknown as {
+    _core?: { _oscLinkService?: { getLinkData(linkId: number): { uri?: string } | undefined } }
+  })._core?._oscLinkService?.getLinkData(id)?.uri
+  return uri && /^https?:\/\//i.test(uri) ? uri : null
+}
+
+/** 这一行里任意一格上的 OSC 8 地址。点在字旁边的空白也算这一行。 */
+function oscOnLine(term: Terminal, line: IBufferLine): string | null {
+  for (let i = 0; i < line.length; i++) {
+    const uri = oscHttpAt(term, line, i)
+    if (uri) return uri
+  }
+  return null
+}
+
+/**
+ * 这一格所在行上的 http(s) 链接。普通网址会把自动换行的后续行拼回去，
+ * 点在这几行的空白上也算；OSC 8 用隐藏的地址。
+ * 全屏程序占着鼠标时，点在链接上的选字和打开都靠它，不把点击发给程序。
+ */
+export function httpLinkAt(term: Terminal, bufferX: number, bufferY: number): string | null {
+  const buffer = term.buffer.active
+  const direct = buffer.getLine(bufferY)
+  if (!direct || bufferX < 0 || bufferX >= direct.length) return null
+  const osc = oscOnLine(term, direct)
+  if (osc) return osc
+
+  let start = bufferY
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start -= 1
+  let text = ''
+  const col: number[] = []
+  const row: number[] = []
+  for (let y = start; ; y++) {
+    const cells = lineCells(buffer.getLine(y) ?? undefined)
+    for (let i = 0; i < cells.text.length; i++) {
+      text += cells.text[i]
+      col.push(cells.col[i])
+      row.push(y)
+    }
+    if (y - start > 80 || !buffer.getLine(y + 1)?.isWrapped) break
+  }
+  let onRow: string | null = null
+  for (const match of text.matchAll(URL_PATTERN)) {
+    const cleaned = match[0].replace(TRAILING_PUNCTUATION, '')
+    if (!cleaned || match.index === undefined) continue
+    const end = match.index + cleaned.length
+    const x = direct.getCell(bufferX)?.getWidth() === 0 && bufferX > 0 ? bufferX - 1 : bufferX
+    for (let i = match.index; i < end; i++) {
+      if (row[i] !== bufferY) continue
+      if (col[i] === x) return cleaned
+      onRow = cleaned
+    }
+  }
+  return onRow
+}
+
 /** 一段文字在屏幕上的位置：横向中点和所在行的上下沿（视口坐标）。终端没挂在画面上时返回 null */
 function linkBox(
   term: Terminal,
