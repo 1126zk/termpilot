@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +12,10 @@ interface TodoItem {
   done: boolean
 }
 
+function oneLine(text: string) {
+  return text.replace(/\s*\n+\s*/g, ' ').trim()
+}
+
 function readItems(): TodoItem[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -20,12 +24,61 @@ function readItems(): TodoItem[] {
     if (!Array.isArray(parsed)) return []
     return parsed.filter((item) => item && typeof item.id === 'string' && typeof item.text === 'string').map((item) => ({
       id: item.id,
-      text: item.text,
+      text: oneLine(item.text),
       done: Boolean(item.done)
     }))
   } catch {
     return []
   }
+}
+
+function TodoText(props: { text: string; done: boolean; onCommit: (value: string) => void }) {
+  const cancelEdit = useRef(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(props.text)
+
+  return (
+    <Input
+      value={editing ? draft : props.text}
+      aria-label="编辑待办"
+      className={cn('h-8 min-w-0 flex-1 cursor-text px-2', props.done && !editing && 'text-muted-foreground line-through')}
+      style={{
+        backgroundColor: editing ? 'var(--background)' : 'transparent',
+        borderColor: editing ? 'var(--foreground)' : 'transparent',
+        boxShadow: 'none'
+      }}
+      onFocus={() => {
+        if (!editing) {
+          setEditing(true)
+          setDraft(props.text)
+        }
+      }}
+      onChange={(event) => {
+        setEditing(true)
+        setDraft(oneLine(event.target.value))
+      }}
+      onBlur={(event) => {
+        if (cancelEdit.current) {
+          cancelEdit.current = false
+          setEditing(false)
+          return
+        }
+        setEditing(false)
+        const next = oneLine(event.currentTarget.value)
+        if (!next || next === props.text) return
+        props.onCommit(next)
+      }}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.key === 'Process') return
+        if (event.key === 'Enter') event.currentTarget.blur()
+        if (event.key === 'Escape') {
+          cancelEdit.current = true
+          setEditing(false)
+          event.currentTarget.blur()
+        }
+      }}
+    />
+  )
 }
 
 /** 待办：本地记下的事项，勾完可清掉。 */
@@ -38,7 +91,7 @@ export function TodoTool() {
   }, [items])
 
   const add = () => {
-    const text = draft.trim()
+    const text = oneLine(draft)
     if (!text) return
     setItems((current) => [...current, { id: crypto.randomUUID(), text, done: false }])
     setDraft('')
@@ -55,8 +108,8 @@ export function TodoTool() {
           add()
         }}
       >
-        <Input value={draft} placeholder="添加待办" className="h-8" onChange={(event) => setDraft(event.target.value)} />
-        <Button type="submit" size="sm" className="h-8 gap-1.5" disabled={!draft.trim()}>
+        <Input value={draft} placeholder="添加待办" className="h-8" onChange={(event) => setDraft(oneLine(event.target.value))} />
+        <Button type="submit" size="sm" className="h-8 gap-1.5" disabled={!oneLine(draft)}>
           <Plus className="size-3.5" />
           添加
         </Button>
@@ -78,9 +131,9 @@ export function TodoTool() {
               >
                 {item.done && <Check className="size-3" strokeWidth={2.5} />}
               </button>
-              <span className={cn('min-w-0 flex-1 text-sm break-all', item.done && 'text-muted-foreground line-through')}>
-                {item.text}
-              </span>
+              <TodoText text={item.text} done={item.done} onCommit={(value) => {
+                setItems((current) => current.map((row) => (row.id === item.id ? { ...row, text: value } : row)))
+              }} />
               <Button
                 type="button"
                 variant="ghost"

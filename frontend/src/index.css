@@ -205,10 +205,12 @@
 }
 
 /* 标签条自己用左右箭头滚动，不露出上面那条全局滚动条。写在层外，才能压过 * 的 scrollbar-width。 */
-.strip-scroll {
+.strip-scroll,
+.tools-scroll {
   scrollbar-width: none;
 }
-.strip-scroll::-webkit-scrollbar {
+.strip-scroll::-webkit-scrollbar,
+.tools-scroll::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;

@@ -168,7 +168,7 @@ export function ToolsPage(props: { visible?: boolean }) {
     <div
       className={cn(
         'flex min-h-0 flex-1 flex-col',
-        fullDiagram || active.wide ? 'overflow-hidden' : 'overflow-y-auto'
+        fullDiagram || active.wide ? 'overflow-hidden' : 'tools-scroll overflow-y-auto'
       )}
     >
       <div
