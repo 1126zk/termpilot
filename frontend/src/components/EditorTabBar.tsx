@@ -76,7 +76,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   /** 标签左边缘允许落到的区间。竖线很窄，限位要让边缘能越过它的中点，否则会来回弹。 */
   const dragSpan = (strip: HTMLElement, key: string, splitting: boolean) => {
     const attr = splitting ? 'data-view-id' : 'data-file-key'
-    const el = strip.querySelector<HTMLElement>(`[${attr}="${CSS.escape(key)}"]`)
+    const el = [...strip.querySelectorAll<HTMLElement>(`[${attr}]`)].find((item) => item.getAttribute(attr) === key)
     if (!el) return null
     const items = [...strip.querySelectorAll<HTMLElement>(`[${attr}]`)]
     const chips = items.filter((item) => item.getAttribute(attr) !== SPLIT_MARK)
@@ -89,8 +89,9 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
     const mark = strip.querySelector<HTMLElement>(`[data-view-id="${SPLIT_MARK}"]`)
     if (mark) {
       const mid = mark.offsetLeft + mark.offsetWidth / 2
-      min = Math.min(min, mid - 20)
-      max = Math.max(max, mid - el.offsetWidth + 20)
+      // 换边要多过中点 16px。限位只给 20px 时往右贴着线过不去，标签就停在别人上面
+      min = Math.min(min, mid - 48)
+      max = Math.max(max, mid - el.offsetWidth + 48)
     }
     return { el, min, max }
   }
@@ -113,7 +114,7 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
   ])
   useLayoutEffect(() => {
     if (dragKey) followPointer(dragKey)
-  }, [keys.join(), dragKey])
+  }, [keys.join(), pane?.order?.join(), pane?.secondary.join(), dragKey])
 
   const startDrag = (event: PointerEvent, key: string) => {
     const splitting = !!useAppStore.getState().sessionSplit[props.termId]
@@ -125,7 +126,9 @@ export function EditorTabBar(props: { termId: string; tabs: EditorTab[]; activeK
       onActivate: () => {
         const strip = stripRef.current
         const attr = splitting ? 'data-view-id' : 'data-file-key'
-        const el = strip?.querySelector<HTMLElement>(`[${attr}="${CSS.escape(key)}"]`)
+        const el = strip
+          ? [...strip.querySelectorAll<HTMLElement>(`[${attr}]`)].find((item) => item.getAttribute(attr) === key)
+          : undefined
         const pointer = strip ? event.clientX - strip.getBoundingClientRect().left + strip.scrollLeft : 0
         dragStart.current = {
           pos: event.clientX,
