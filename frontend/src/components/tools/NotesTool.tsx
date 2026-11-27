@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import DOMPurify from 'dompurify'
 import { X } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/useAppStore'
@@ -36,7 +38,10 @@ function sanitize(html: string) {
 function toEditorHtml(note: Note) {
   if (!note.body) return ''
   if (!note.rich) return note.body.split('\n').map((line) => `<div>${escapeHtml(line) || '<br>'}</div>`).join('')
-  return blocksFromHtml(note.body)
+  const root = document.createElement('div')
+  root.innerHTML = blocksFromHtml(note.body)
+  for (const img of [...root.querySelectorAll('img')]) isolateImage(root, img)
+  return root.innerHTML
 }
 
 /** 把 <br> 拆成一行一个块，行号才能贴住每一行。已经是块的不动。 */
@@ -245,6 +250,55 @@ async function compressImage(file: Blob) {
   }
 }
 
+function noteImageId(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null
+  const img = target.closest('img[data-note-img]')
+  return img?.getAttribute('data-note-img') || null
+}
+
+/** 笔记里存的是 webp。剪贴板要 PNG，别的软件才贴得进去。 */
+async function pngBlob(blob: Blob) {
+  if (blob.type === 'image/png') return blob
+  const bitmap = await createImageBitmap(blob)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('复制不了这张图')
+    ctx.drawImage(bitmap, 0, 0)
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!png) throw new Error('复制不了这张图')
+    return png
+  } finally {
+    bitmap.close()
+  }
+}
+
+function copyNoteImage(id: string) {
+  const setNotice = useAppStore.getState().setNotice
+  const done = () => setNotice('图片已复制')
+  const fail = (error: unknown) => {
+    const message = error instanceof Error ? error.message : ''
+    setNotice(/[\u4e00-\u9fff]/.test(message) ? message : '复制失败')
+  }
+  // Promise 放进 ClipboardItem，点下去这一下的手势还在，转成 PNG 之后也能写进剪贴板
+  try {
+    void navigator.clipboard
+      .write([
+        new ClipboardItem({
+          'image/png': getImage(id).then(async (blob) => {
+            if (!blob) throw new Error('这张图不在了')
+            return pngBlob(blob)
+          })
+        })
+      ])
+      .then(done, fail)
+  } catch (error) {
+    fail(error)
+  }
+}
+
 function imageFromEvent(event: React.ClipboardEvent) {
   for (const item of event.clipboardData.items) {
     if (!item.type.startsWith('image/')) continue
@@ -265,26 +319,164 @@ function caretRange(el: HTMLElement) {
   return range.cloneRange()
 }
 
+function hasContent(node: Node) {
+  if ((node.textContent ?? '').length) return true
+  return node instanceof Element || node instanceof DocumentFragment ? !!node.querySelector('br, img') : false
+}
+
+/**
+ * 把图片拆成独占一行的 <div><img></div>，返回图片所在的块和后面拆出来的块。
+ * 图片和下一行挤在同一个块里时，紧挨图片后面的光标 Chrome 有时画在图片上、有时画在下一行，选区读不出是哪种。
+ */
+function isolateImage(el: HTMLElement, img: HTMLImageElement) {
+  let block: Node = img
+  while (block.parentNode && block.parentNode !== el) block = block.parentNode
+  if (block.parentNode !== el) return null
+  if (block === img) {
+    const div = document.createElement('div')
+    el.insertBefore(div, img)
+    div.append(img)
+    block = div
+  }
+  const host = block as HTMLElement
+  const before = document.createRange()
+  before.setStart(host, 0)
+  before.setEndBefore(img)
+  const head = before.extractContents()
+  const after = document.createRange()
+  after.setStartAfter(img)
+  after.setEnd(host, host.childNodes.length)
+  const tail = after.extractContents()
+  // 图片后面紧跟的 <br> 原本是给图片换行用的，拆成块之后就多余了
+  if (tail.firstChild instanceof HTMLBRElement) tail.firstChild.remove()
+  if (hasContent(head)) {
+    const div = document.createElement('div')
+    div.append(head)
+    el.insertBefore(div, host)
+  }
+  let next: HTMLElement | null = null
+  if (hasContent(tail)) {
+    next = document.createElement('div')
+    next.append(tail)
+    el.insertBefore(next, host.nextSibling)
+  }
+  return { block: host, next }
+}
+
 function insertImage(el: HTMLElement, range: Range | null, id: string, url: string) {
   const img = document.createElement('img')
   img.dataset.noteImg = id
   img.src = url
   img.alt = ''
   img.draggable = false
-  const br = document.createElement('br')
   if (range) {
     range.deleteContents()
-    range.insertNode(br)
     range.insertNode(img)
-    const after = document.createRange()
-    after.setStartAfter(br)
-    after.collapse(true)
-    const sel = window.getSelection()
-    sel?.removeAllRanges()
-    sel?.addRange(after)
-    return
+  } else {
+    el.append(img)
   }
-  el.append(img, br)
+  const parts = isolateImage(el, img)
+  if (!parts) return
+  let next = parts.next
+  if (!next) {
+    next = document.createElement('div')
+    next.append(document.createElement('br'))
+    el.insertBefore(next, parts.block.nextSibling)
+  }
+  const caret = document.createRange()
+  caret.setStart(next, 0)
+  caret.collapse(true)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(caret)
+}
+
+function topBlock(el: HTMLElement, node: Node): Node | null {
+  let block: Node | null = node
+  while (block && block.parentNode !== el) block = block.parentNode
+  return block
+}
+
+function isImageBlock(node: Node | null): node is Element {
+  if (node instanceof HTMLImageElement) return true
+  return node instanceof HTMLElement && !!node.querySelector('img') && !(node.textContent ?? '').trim()
+}
+
+/** 跳过块之间的空白文本节点 */
+function siblingBlock(node: Node, dir: 'prev' | 'next') {
+  let next = dir === 'prev' ? node.previousSibling : node.nextSibling
+  while (next && next.nodeType === Node.TEXT_NODE && !(next.textContent ?? '').trim()) {
+    next = dir === 'prev' ? next.previousSibling : next.nextSibling
+  }
+  return next
+}
+
+function nodeLength(node: Node) {
+  return node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length
+}
+
+function putCaret(block: Node, atEnd: boolean) {
+  const range = document.createRange()
+  if (atEnd && block.lastChild instanceof HTMLBRElement) range.setStartBefore(block.lastChild)
+  else range.setStart(block, atEnd ? nodeLength(block) : 0)
+  range.collapse(true)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
+/**
+ * 图片前后按 Backspace / Delete 时自己删图片。
+ * 图片是块级元素，Chrome 自带的合并段落在这里什么都不做，或者把下一行文字并进图片块里。
+ */
+function deleteNearImage(el: HTMLElement, backward: boolean) {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false
+  const caret = sel.getRangeAt(0)
+  if (!el.contains(caret.startContainer)) return false
+  if (caret.startContainer === el) {
+    const near = el.childNodes[caret.startOffset - (backward ? 1 : 0)]
+    if (!near || !isImageBlock(near)) return false
+    near.remove()
+    return true
+  }
+  const block = topBlock(el, caret.startContainer)
+  if (!block) return false
+  if (isImageBlock(block)) {
+    const prev = siblingBlock(block, 'prev')
+    const next = siblingBlock(block, 'next')
+    block.remove()
+    if (backward && prev) putCaret(prev, true)
+    else if (next) putCaret(next, false)
+    else if (prev) putCaret(prev, true)
+    return true
+  }
+  const side = document.createRange()
+  if (backward) {
+    side.setStart(block, 0)
+    side.setEnd(caret.startContainer, caret.startOffset)
+  } else {
+    side.setStart(caret.startContainer, caret.startOffset)
+    side.setEnd(block, nodeLength(block))
+  }
+  const between = side.cloneContents()
+  if (!hasContent(between)) {
+    const near = siblingBlock(block, backward ? 'prev' : 'next')
+    if (!near || !isImageBlock(near)) return false
+    near.remove()
+    return true
+  }
+  // 之前被并进同一块的图片：光标紧挨着它
+  if (!backward || (between.textContent ?? '').length || !(block instanceof Element)) return false
+  const imgs = block.querySelectorAll('img')
+  const img = imgs[imgs.length - 1]
+  if (!img) return false
+  const after = document.createRange()
+  after.setStartAfter(img)
+  after.setEnd(caret.startContainer, caret.startOffset)
+  if (hasContent(after.cloneContents())) return false
+  img.remove()
+  return true
 }
 
 function logicalLineCount(el: HTMLElement) {
@@ -353,6 +545,11 @@ function readLineMarks(el: HTMLElement): { marks: LineMark[]; synthetic: boolean
       for (const kid of node.childNodes) visit(kid)
       return
     }
+    // 合并行时 Chrome 会把文字包进 <span>，不往里走就量不到这一行
+    if (node instanceof HTMLElement) {
+      for (const kid of node.childNodes) visit(kid)
+      return
+    }
     if (node.nodeType === Node.TEXT_NODE) textTop(node as Text)
   }
   for (const node of el.childNodes) visit(node)
@@ -376,7 +573,7 @@ function sameTops(a: number[], b: number[]) {
   return a.length === b.length && a.every((item, index) => item === b[index])
 }
 
-/** 光标落在第几行。图片的光标矩形会从图片顶拉到光标，不能拿矩形顶去对行。 */
+/** 光标落在第几行。图片各自独占一个块，图片前后的光标位置只属于图片这一行。 */
 function markIndex(el: HTMLElement, marks: LineMark[]): number | null {
   const sel = window.getSelection()
   if (!sel?.focusNode || !el.contains(sel.focusNode)) return null
@@ -457,6 +654,7 @@ function NoteEditor(props: { note: Note; autoFocus: boolean; onChange: (html: st
   onChange.current = props.onChange
   const [tops, setTops] = useState<number[]>([0])
   const [current, setCurrent] = useState<{ top: number; height: number } | null>(null)
+  const [imageMenu, setImageMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const marksRef = useRef<{ marks: LineMark[]; synthetic: boolean }>({ marks: [], synthetic: false })
   const measure = () => {
     const el = ref.current
@@ -631,9 +829,44 @@ function NoteEditor(props: { note: Note; autoFocus: boolean; onChange: (html: st
             className="min-h-full w-full cursor-text bg-transparent pt-0 pr-2.5 pb-2 pl-2 text-sm leading-[22px] break-words whitespace-pre-wrap text-foreground outline-none [&_img]:my-2 [&_img]:block [&_img]:max-w-full [&_img]:rounded-md [&>:first-child>img]:mt-0 [&_img:first-child]:mt-0"
             onInput={sync}
             onPaste={onPaste}
+            onKeyDown={(event) => {
+              if (event.key !== 'Backspace' && event.key !== 'Delete') return
+              if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+              if (!deleteNearImage(event.currentTarget, event.key === 'Backspace')) return
+              event.preventDefault()
+              sync()
+            }}
+            onContextMenu={(event) => {
+              const id = noteImageId(event.target)
+              if (!id) return
+              event.preventDefault()
+              setImageMenu({ x: event.clientX, y: event.clientY, id })
+            }}
             onFocus={track}
             onBlur={() => setCurrent(null)}
           />
+          {imageMenu &&
+            createPortal(
+              <DropdownMenu open onOpenChange={(open) => !open && setImageMenu(null)}>
+                <DropdownMenuTrigger asChild>
+                  <span
+                    aria-hidden
+                    className="pointer-events-none fixed size-px"
+                    style={{ left: imageMenu.x, top: imageMenu.y }}
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  key={`${imageMenu.x}-${imageMenu.y}`}
+                  align="start"
+                  sideOffset={2}
+                  className="min-w-36"
+                  onCloseAutoFocus={(event) => event.preventDefault()}
+                >
+                  <DropdownMenuItem onSelect={() => copyNoteImage(imageMenu.id)}>复制</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>,
+              document.body
+            )}
         </div>
       </div>
     </div>

@@ -52,3 +52,12 @@ wails build
 ## 不要再做云浏览器
 
 云浏览器做过，效果不佳，已经删掉。不要再加。
+
+## 笔记编辑器里的图片
+
+`NotesTool.tsx` 的编辑器是 contentEditable，图片是块级 `<img>`。踩过的坑：
+
+- **每张图片必须独占一个 `<div><img></div>`**，粘贴走 `insertImage`，加载走 `toEditorHtml`，都会调 `isolateImage` 拆好。图片和下一行挤在同一个块里（比如 `<img><br>`）时，紧挨图片后面的光标 Chrome 有时画在图片上、有时画在下一行，Selection API 读不出是哪种，当前行高亮就会来回跳
+- **当前行只按 DOM 顺序判断（`markIndex`）**，不要去量光标画在哪：量不出 affinity；插零宽字符去量会改 DOM，重设选区还会把光标挪走，越修越跳
+- **图片前后的 Backspace / Delete 自己处理（`deleteNearImage`）**。Chrome 自带的删除碰到块级图片要么没反应，要么把下一行文字并进图片块
+- **算行号要进 `<span>` 等行内元素**。Chrome 合并行时会把文字包进 `<span>`，跳过它这一行就没有行号
