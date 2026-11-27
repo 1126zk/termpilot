@@ -104,24 +104,6 @@ export function TerminalView(props: { termId: string; active: boolean }) {
     })()
   }
 
-  // 整屏截图：当前画面 / 整个滚动缓冲（顶栏的两个按钮撤了，挪进右键菜单）
-  const capture = (mode: 'viewport' | 'scrollback') => {
-    setShotError(null)
-    setNotice('正在截图…')
-    void (async () => {
-      await new Promise((resolve) => requestAnimationFrame(resolve))
-      try {
-        const done = await captureTerminalView({ termId: props.termId, mode })
-        setNotice(null)
-        setShot(done)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        setNotice(message)
-        setShotError(message)
-      }
-    })()
-  }
-
   const paste = async () => {
     try {
       terminalPool.paste(props.termId, await navigator.clipboard.readText())
@@ -183,8 +165,6 @@ export function TerminalView(props: { termId: string; active: boolean }) {
           <ContextMenuItem disabled={!selection} onClick={shoot}>
             截取选区
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => capture('viewport')}>截取当前画面</ContextMenuItem>
-          <ContextMenuItem onClick={() => capture('scrollback')}>截取滚动缓冲</ContextMenuItem>
           <ContextMenuItem onClick={() => reconnectTab(props.termId, true)}>重新打开终端</ContextMenuItem>
           <ContextMenuItem onClick={() => void paste()}>
             粘贴
