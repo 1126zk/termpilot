@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as Reac
 import { createPortal } from 'react-dom'
 import DOMPurify from 'dompurify'
 import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -655,6 +657,9 @@ function NoteEditor(props: { note: Note; autoFocus: boolean; onChange: (html: st
   const [tops, setTops] = useState<number[]>([0])
   const [current, setCurrent] = useState<{ top: number; height: number } | null>(null)
   const [imageMenu, setImageMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
+  const previewSrc = useRef<string | null>(null)
+  if (preview) previewSrc.current = preview
   const marksRef = useRef<{ marks: LineMark[]; synthetic: boolean }>({ marks: [], synthetic: false })
   const measure = () => {
     const el = ref.current
@@ -826,7 +831,7 @@ function NoteEditor(props: { note: Note; autoFocus: boolean; onChange: (html: st
             role="textbox"
             aria-multiline="true"
             suppressContentEditableWarning
-            className="min-h-full w-full cursor-text bg-transparent pt-0 pr-2.5 pb-2 pl-2 text-sm leading-[22px] break-words whitespace-pre-wrap text-foreground outline-none [&_img]:my-2 [&_img]:block [&_img]:max-w-full [&_img]:rounded-md [&>:first-child>img]:mt-0 [&_img:first-child]:mt-0"
+            className="min-h-full w-full cursor-text bg-transparent pt-0 pr-2.5 pb-2 pl-2 text-sm leading-[22px] break-words whitespace-pre-wrap text-foreground outline-none [&_img]:my-2 [&_img]:block [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-md [&>:first-child>img]:mt-0 [&_img:first-child]:mt-0"
             onInput={sync}
             onPaste={onPaste}
             onKeyDown={(event) => {
@@ -835,6 +840,12 @@ function NoteEditor(props: { note: Note; autoFocus: boolean; onChange: (html: st
               if (!deleteNearImage(event.currentTarget, event.key === 'Backspace')) return
               event.preventDefault()
               sync()
+            }}
+            onDoubleClick={(event) => {
+              const img = event.target
+              if (!(img instanceof HTMLImageElement) || !noteImageId(img) || !img.complete || img.naturalWidth <= 1) return
+              event.preventDefault()
+              setPreview(img.src)
             }}
             onContextMenu={(event) => {
               const id = noteImageId(event.target)
@@ -867,13 +878,37 @@ function NoteEditor(props: { note: Note; autoFocus: boolean; onChange: (html: st
               </DropdownMenu>,
               document.body
             )}
+          <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
+            <DialogContent
+              aria-describedby={undefined}
+              showCloseButton={false}
+              overlayClassName="bg-black/70"
+              className="w-fit max-w-[calc(100%-2rem)] bg-transparent p-0 shadow-none ring-0 sm:max-w-[calc(100%-2rem)]"
+              onCloseAutoFocus={(event) => {
+                event.preventDefault()
+                ref.current?.focus()
+              }}
+            >
+              {previewSrc.current && (
+                <div className="relative">
+                  <DialogTitle className="sr-only">图片</DialogTitle>
+                  <img src={previewSrc.current} alt="" className="max-h-[calc(100vh-4rem)] max-w-[calc(100vw-4rem)] rounded-md object-contain" />
+                  <DialogClose asChild>
+                    <Button variant="ghost" size="icon-sm" className="absolute top-2 right-2 bg-background/80">
+                      <X />
+                    </Button>
+                  </DialogClose>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>
   )
 }
 
-/** 笔记：单击切换，双击改名，正文可换行，截图 Ctrl+V 贴进来。只存在本机。 */
+/** 笔记：单击切换，双击改名，正文可换行，截图 Ctrl+V 贴进来，图片双击预览。只存在本机。 */
 export function NotesTool() {
   const [notes, setNotes] = useState<Note[]>(() => {
     const saved = fillAutoTitles(readNotes())
