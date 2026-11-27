@@ -208,6 +208,8 @@ interface AppState {
   addSessionTerm: (parentId: string) => void
   /** 文件条拖动排序。ids 里带 SPLIT_MARK。只改标签顺序，不换正在看的终端 */
   reorderSessionStrip: (parentId: string, ids: string[]) => void
+  /** 还没分栏时拖动标签：左右都有标签才分栏，一边空了只改顺序，内容仍占满。窗口已经分栏时不做 */
+  engageSessionStrip: (parentId: string, ids: string[]) => void
   setStripDrag: (termId: string | null) => void
   /** 拖完：某一侧没有标签时收起内容分栏，竖线留在标签条上 */
   settleSessionStrip: (parentId: string) => void
@@ -1256,6 +1258,65 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
+  engageSessionStrip: (parentId, ids) => {
+    if (get().split || get().sessionSplit[parentId]) return
+    const mark = ids.indexOf(SPLIT_MARK)
+    if (mark < 0) return
+    const left = ids.slice(0, mark).filter((id) => id !== SPLIT_MARK)
+    const right = ids.slice(mark + 1).filter((id) => id !== SPLIT_MARK)
+    const chips = [...left, ...right]
+    if (chips.length < 2) return
+    const primaryTerm = termViewId(parentId)
+    const shown = get().editorKeyByTerm[parentId] ?? primaryTerm
+    const fileKeys = chips.filter((id) => !termIdFromView(id))
+    const editorTabs = orderTermFiles(get().editorTabs, parentId, fileKeys)
+    // 一边没有标签：只把被拖的那张换到左边或右边，下面的内容仍占满，不劈成两半
+    if (!left.length || !right.length) {
+      const view = chips.includes(shown) ? shown : primaryTerm
+      const onRight = right.includes(view)
+      set({
+        editorTabs,
+        sessionSplit: {
+          ...get().sessionSplit,
+          [parentId]: {
+            dir: 'right',
+            ratio: 0.5,
+            order: chips,
+            secondary: right,
+            primaryView: onRight ? '' : view,
+            secondaryView: onRight ? view : '',
+            focus: onRight ? 'secondary' : 'primary'
+          }
+        },
+        editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, view)
+      })
+      return
+    }
+    const primaryView = left.includes(shown) ? shown : (left.at(-1) ?? primaryTerm)
+    const secondaryView = right.includes(shown) ? shown : (right.at(-1) ?? '')
+    if (!secondaryView || primaryView === secondaryView) return
+    const focus = left.includes(shown) ? 'primary' : 'secondary'
+    const viewing = focus === 'secondary' ? secondaryView : primaryView
+    set({
+      editorTabs,
+      sessionSplit: {
+        ...get().sessionSplit,
+        [parentId]: {
+          dir: 'right',
+          ratio: 0.5,
+          order: chips,
+          secondary: right,
+          primaryView,
+          secondaryView,
+          focus
+        }
+      },
+      editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, parentId, viewing),
+      stripDragTermId: parentId,
+      ...(termIdFromView(viewing) ? {} : { opsPanelTermIds: get().opsPanelTermIds.filter((id) => id !== parentId) })
+    })
+  },
+
   reorderSessionStrip: (parentId, ids) => {
     const pane = get().sessionSplit[parentId]
     const mark = ids.indexOf(SPLIT_MARK)
@@ -1569,33 +1630,31 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 窗口分栏和标签内分栏互斥，文件只能盖住这一栏
       if (get().split) return { editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key }, opsPanelTermIds }
       const secondary = pane ? pane.secondary.filter(keep) : []
-      // 还没分栏，或内容已经并回一栏：文件进辅栏，终端留在主栏
+      // 没有分栏时文件盖住整栏。已经并回一栏的也不再拆开；另开的终端还在时，文件留在这一栏里切换
       if (!pane || secondary.length === 0) {
-        const primaryTerm = termViewId(termId)
-        const files = editorTabs.filter((tab) => tab.termId === termId).map((tab) => tab.key)
-        const sides = get().sideTerms.filter((term) => term.parentId === termId).map((term) => termViewId(term.id))
-        const fromPane = pane ? stripOrder(pane).filter((id) => id !== key && keep(id)) : []
-        const seed = fromPane.length
-          ? fromPane
-          : [primaryTerm, ...files.filter((id) => id !== key), ...sides.filter((id) => id !== primaryTerm)]
-        const left = seed.includes(primaryTerm) ? seed : [primaryTerm, ...seed]
-        const carried = pane?.primaryView
-        const primaryView = carried && left.includes(carried) ? carried : primaryTerm
-        const opened: SessionSplit = {
-          dir: pane?.dir ?? 'right',
-          ratio: pane?.ratio ?? 0.5,
-          order: [...left, key],
-          secondary: [key],
-          primaryView,
-          secondaryView: key,
-          focus: 'secondary'
+        // 没拖过标签：文件盖住整栏。拖过之后竖线还在，顺序留着，内容仍然占满
+        if (!pane) {
+          const sessionSplit = { ...get().sessionSplit }
+          delete sessionSplit[termId]
+          return {
+            sessionSplit,
+            editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key },
+            opsPanelTermIds
+          }
+        }
+        const order = stripOrder(pane).filter((id) => id !== key && keep(id))
+        if (!order.includes(key)) order.push(key)
+        const next: SessionSplit = {
+          ...pane,
+          order,
+          secondary: [],
+          primaryView: key,
+          secondaryView: '',
+          focus: 'primary'
         }
         return {
-          sessionSplit: {
-            ...get().sessionSplit,
-            [termId]: opened
-          },
-          editorKeyByTerm: editorKeyFor(get().editorKeyByTerm, termId, key),
+          sessionSplit: { ...get().sessionSplit, [termId]: next },
+          editorKeyByTerm: { ...get().editorKeyByTerm, [termId]: key },
           opsPanelTermIds
         }
       }

@@ -37,6 +37,7 @@ export default function App() {
   const editorKeyByTerm = useAppStore((s) => s.editorKeyByTerm)
   const editorTabs = useAppStore((s) => s.editorTabs)
   const sessionSplit = useAppStore((s) => s.sessionSplit)
+  const stripDragTermId = useAppStore((s) => s.stripDragTermId)
   const focusPane = useAppStore((s) => s.focusPane)
 
   useEffect(() => window.api.capture.onRun((job) => void runCapture(job)), [])
@@ -188,7 +189,9 @@ export default function App() {
   ).flatMap(([area, termId]) => {
     if (!onTerminalPage || !termId) return []
     const files = editorTabs.filter((t) => t.termId === termId)
-    const inner = sessionSplit[termId] ?? null
+    const stored = sessionSplit[termId] ?? null
+    // 只排了标签、右边还是空的：内容仍占满，不挂分栏
+    const inner = stored && (stored.secondary.length > 0 || stripDragTermId === termId) ? stored : null
     const file = inner ? null : (files.find((t) => t.key === editorKeyByTerm[termId]) ?? null)
     return [{ area, termId, files, file, inner }]
   })
@@ -231,7 +234,7 @@ export default function App() {
             <OpsPanels areas={opsAreas} />
             <TerminalViews
               areas={termAreas}
-              parked={Object.keys(sessionSplit)}
+              parked={panes.flatMap((pane) => (pane.inner ? [pane.termId] : []))}
             />
             {split && onTerminalPage && <SplitDivider dir={split.dir} gridRef={gridRef} offset={splitOpsWidth} />}
             {holdTools && (
